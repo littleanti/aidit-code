@@ -19,18 +19,19 @@ function Header() {
 
   return (
     <header className="sticky top-0 z-20 border-b border-term-line bg-term-nav/95 backdrop-blur">
-      <div className="mx-auto flex h-14 max-w-2xl items-center justify-between px-4">
-        <Link to="/" aria-label={t('common.appName')}>
+      <div className="mx-auto flex h-14 max-w-2xl items-center justify-between gap-2 px-4">
+        <Link to="/" aria-label={t('common.appName')} className="min-w-0">
           <Logo size="sm" />
         </Link>
 
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
           <LlmStatusBadge />
           <LangToggle variant="header" />
           {token ? (
             <Link
               to="/me"
-              className="inline-flex min-h-[44px] items-center px-1 font-mono text-sm text-term-dim hover:text-term-fg-bright"
+              title={username ?? ''}
+              className="inline-flex min-h-[44px] max-w-[6.5rem] items-center truncate px-1 font-mono text-sm text-term-dim hover:text-term-fg-bright"
             >
               {`[ ${username ?? ''} ]`}
             </Link>

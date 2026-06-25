@@ -16,12 +16,19 @@ export default function LangToggle({ variant = 'header' }: LangToggleProps) {
   const lang = useLangStore((s) => s.lang);
   const setLang = useLangStore((s) => s.setLang);
 
+  const header = variant === 'header';
   return (
     <div
-      className="inline-flex items-center font-mono text-sm"
+      className="inline-flex items-center whitespace-nowrap font-mono text-sm"
       role="group"
       aria-label="Language"
     >
+      {/* [ KO | EN ] — Aidit-style brackets (decorative). */}
+      {header && (
+        <span aria-hidden="true" className="text-term-dim-3">
+          [
+        </span>
+      )}
       {LANGS.map((l, i) => {
         const active = lang === l.code;
         return (
@@ -32,7 +39,8 @@ export default function LangToggle({ variant = 'header' }: LangToggleProps) {
               aria-pressed={active}
               onClick={() => setLang(l.code)}
               className={[
-                'inline-flex min-h-[44px] items-center px-2',
+                'inline-flex min-h-[44px] items-center',
+                header ? 'px-1.5' : 'px-2',
                 variant === 'setting' ? 'min-w-[44px] justify-center' : '',
                 active
                   ? 'text-term-amber'
@@ -44,6 +52,11 @@ export default function LangToggle({ variant = 'header' }: LangToggleProps) {
           </span>
         );
       })}
+      {header && (
+        <span aria-hidden="true" className="text-term-dim-3">
+          ]
+        </span>
+      )}
     </div>
   );
 }

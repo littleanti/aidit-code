@@ -90,7 +90,7 @@ export default function LlmStatusBadge() {
       </span>
       <span
         aria-hidden
-        className="text-[10px] uppercase tracking-wider text-term-faint"
+        className="hidden text-[10px] uppercase tracking-wider text-term-faint sm:inline"
       >
         LLM
       </span>

@@ -11,6 +11,13 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · 헤더 깨짐 수정 — `[ KO | EN ]` 대괄호 + 모바일 줄바꿈/오버플로 방지
+- **증상(사용자, 스크린샷)**: 모바일 헤더에서 ① 워드마크 `AIDIT-CODE` 가 두 줄로 줄바꿈, ② `[ username ]` 대괄호가 위/아래로 분리, ③ 언어 토글이 `[ KO | EN ]` 가 아니라 대괄호 없는 `KO | EN`. 우상단 요소들이 헤더 폭을 초과해 줄바꿈됨.
+- **원인**: LangToggle 에 대괄호 없음. 워드마크/유저명에 `whitespace-nowrap` 미적용 → 공백·하이픈에서 줄바꿈. 워드마크(text-lg tracking-[3px]) + LLM 배지 + 토글 + 유저명이 모바일 폭 합산 초과인데 축소/truncate 가드 없음.
+- **수정**: (1) `LangToggle` 을 `[ … ]` 대괄호로 감싸고 `whitespace-nowrap`, 버튼 패딩 축소. (2) `Logo` 헤더 워드마크 `whitespace-nowrap` + 크기/자간 축소(text-base tracking-[1px]) + `truncate` 가능하게. (3) `AppShell` 헤더: 좌측 Link `min-w-0`(워드마크가 최후수단으로 truncate), 우측 클러스터 `shrink-0 whitespace-nowrap`, 간격 축소, 유저명 `max-w` + `truncate`. (4) LLM 라벨은 좁은 화면에서 점만 남기고 텍스트는 `sm:` 이상에서 표시. → 어떤 폭에서도 줄바꿈/레이아웃 깨짐 없이 한 줄 유지.
+- **검증(③)**: frontend `tsc --noEmit` 클린, `vite build` PASS(90 모듈). 브라우저(localhost:5173) 시각 확인 — 헤더가 한 줄로 유지되고 `[ KO | EN ]`·`[ username ]` 대괄호 표시 확정. (도구가 <640px CSS 뷰포트를 강제하지 못해 모바일 리플로우는 nowrap/shrink-0/truncate/반응형 LLM 라벨로 구조적 보장.)
+- 변경 파일: `frontend/src/components/LangToggle.tsx`, `frontend/src/components/Logo.tsx`, `frontend/src/components/LlmStatusBadge.tsx`, `frontend/src/layout/AppShell.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [feat] · 완료 · Composer 레이아웃을 Aidit 구조로 재구성(기능 전부 보존) — 프런트엔드
 - **요청(사용자)**: `frontend/src/components/Composer.tsx` 의 **레이아웃/구조만** 부모 Aidit 와 동일하게 재구성. 기존 Audit-Code 기능은 전부 보존: 이미지 업로드+미리보기+이미지 단독 전송, `reasoning_effort`(low/medium/high · 낮음/중간/높음, 기본 medium), aiMode 토글, 스트리밍 중 interrupt/steer, 낙관적 삽입, i18n.
 - **변경 내용(레이아웃)**:
