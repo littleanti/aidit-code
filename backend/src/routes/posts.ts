@@ -14,6 +14,8 @@ import { encodeCursor, decodeCursor, BadCursorError } from '../domain/cursor.js'
 import { createSandboxForPost, sandboxLimiter, deleteSandboxDir } from '../sandbox/service.js';
 import { provisionSandbox } from '../sandbox/provision.js';
 import { getAgentRuntime } from '../agent/runtime.js';
+import { runAgentTurn } from '../agent/turn.js';
+import { ensureActiveSession } from './messages.js';
 
 const ACTIVE_SESSION_STATUSES = ['STARTING', 'IDLE', 'RUNNING'] as const;
 
@@ -65,7 +67,7 @@ export async function postRoutes(app: FastifyInstance): Promise<void> {
 
     // 응답을 막지 않고(fire-and-forget) CREATING → READY 프로비저닝을 비동기로 시작한다.
     // provisionSandbox 가 슬롯 release 를 책임진다(releaseSlot 기본 true, acquireSlot=false).
-    void provisionSandbox(sandbox);
+    void provisionSandbox(sandbox).then(() => maybeAutoReply(post.id));
 
     // 응답은 즉시 status=CREATING 으로 반환되고, 이후 sandbox.status 이벤트로 READY 전이가 따른다.
     return reply.code(201).send({ post, sandbox });
@@ -289,4 +291,42 @@ export async function postRoutes(app: FastifyInstance): Promise<void> {
     const { score, hotScore: hs } = await recomputeScore(id);
     return reply.code(200).send({ id, score, hotScore: hs, voted: false });
   });
+}
+
+/** Hangul 감지로 응답 언어 힌트. */
+function detectLang(text: string): 'ko' | 'en' {
+  return /[가-힣]/.test(text) ? 'ko' : 'en';
+}
+
+/**
+ * 글 생성 후(샌드박스 READY) 게시글 내용으로 에이전트 자동 응답을 1회 띄운다.
+ * fire-and-forget — 예외는 삼켜 글 생성 흐름에 영향 주지 않는다.
+ */
+async function maybeAutoReply(postId: string): Promise<void> {
+  // 결정적 테스트 보호: 테스트 환경(vitest)에서는 글 생성의 부수효과(자동 응답 턴)를 띄우지 않는다.
+  //   기존 스위트(e2e/redaction)는 글 생성 후 특정 agent 프레임 시퀀스를 단정하므로, 비요청 턴이
+  //   끼어들면 오염된다. 운영/개발 구동에는 영향 없음. (필요 시 POST_AUTO_REPLY=1 로 강제 가능.)
+  if ((process.env.VITEST || process.env.NODE_ENV === 'test') && process.env.POST_AUTO_REPLY !== '1') {
+    return;
+  }
+  try {
+    const post = await prisma.post.findUnique({ where: { id: postId }, include: { sandbox: true } });
+    if (!post || !post.sandbox) return;
+    if (post.sandbox.status !== 'READY' && post.sandbox.status !== 'SUSPENDED') return;
+    // 이미 메시지가 있으면(중복 트리거) 스킵.
+    const existing = await prisma.message.count({ where: { postId } });
+    if (existing > 0) return;
+    const promptText = [post.title, post.body].filter((s) => s && s.trim()).join('\n\n').trim();
+    if (!promptText) return;
+    const session = await ensureActiveSession(postId, post.sandbox.id, post.sandbox.path, post.sandbox.status);
+    if (!session) return;
+    await runAgentTurn({
+      post: { id: postId },
+      session: { id: session.id, sandboxId: post.sandbox.id },
+      prompt: promptText,
+      lang: detectLang(promptText),
+    });
+  } catch {
+    /* 자동 응답 실패는 무해 — 글은 이미 생성됨. */
+  }
 }

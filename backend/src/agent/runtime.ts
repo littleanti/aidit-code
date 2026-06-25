@@ -10,7 +10,7 @@
 
 import type { Sandbox, AgentSession } from '@prisma/client';
 import type { RealtimeEvent } from '../realtime/events.js';
-import type { ToolIntent } from './pi.js';
+import type { ToolIntent, ToolAckResult } from './pi.js';
 
 /** 런타임이 서버로 흘려보내는 실시간 이벤트 emitter(토큰/툴/상태). M4 turn 스트리밍에서 사용. */
 export type EmitFn = (event: RealtimeEvent) => void;
@@ -54,8 +54,11 @@ export interface AgentRuntime {
     onTool?: (intent: ToolIntent) => void,
   ): Promise<void>;
 
-  /** 직전 도구 의도 실행 완료를 런타임에 알려 다음 의도로 진행시킨다(M5). 선택 구현. */
-  ackTool?(session: Pick<AgentSession, 'sandboxId'>): void;
+  /**
+   * 직전 도구 의도 실행 완료를 런타임에 알려 다음 의도로 진행시킨다(M5). 선택 구현.
+   * result 는 LLM function-calling 루프 되먹임용(ok/output) — 미지정도 허용(하위호환).
+   */
+  ackTool?(session: Pick<AgentSession, 'sandboxId'>, result?: ToolAckResult): void;
 
   /** 현재 턴 인터럽트(옵션 steer 텍스트로 방향 전환). M4 에서 완성. */
   interrupt(

@@ -50,6 +50,18 @@ export interface ToolIntent {
   command?: string;
   relPath?: string;
   content?: string;
+  /** OpenAI function-calling 의 tool_call id(있으면 worker 가 결과를 이 id 로 LLM 에 되먹임). */
+  callId?: string;
+}
+
+/** 도구 실행 결과를 worker 로 되먹이는 ack 페이로드(LLM function-calling 루프용). */
+export interface ToolAckResult {
+  /** ToolCall 성공 여부. */
+  ok: boolean;
+  /** LLM tool 메시지로 넣을 출력(파일 내용/쉘 출력/상태). 키 없음. */
+  output: string;
+  /** 대응하는 tool_call id(worker 가 어떤 호출의 결과인지 매칭). */
+  callId?: string;
 }
 
 /** in-memory 세션 레지스트리: sandboxId -> 활성 프로세스 핸들. */
@@ -85,6 +97,7 @@ function pumpTurnLines(handle: RuntimeHandle, chunk: string): void {
       command?: string;
       relPath?: string;
       content?: string;
+      callId?: string;
     };
     try {
       msg = JSON.parse(line);
@@ -102,6 +115,7 @@ function pumpTurnLines(handle: RuntimeHandle, chunk: string): void {
         command: typeof msg.command === 'string' ? msg.command : undefined,
         relPath: typeof msg.relPath === 'string' ? msg.relPath : undefined,
         content: typeof msg.content === 'string' ? msg.content : undefined,
+        callId: typeof msg.callId === 'string' ? msg.callId : undefined,
       });
     } else if (msg.type === 'done') {
       handle.activeTurn = null;
@@ -312,11 +326,12 @@ class PiRuntime implements AgentRuntime {
    * worker 는 이 ack 를 받아 다음 도구 의도/토큰으로 진행한다(턴 직렬화).
    * 멱등: 활성 핸들이 없으면 no-op.
    */
-  ackTool(session: Pick<AgentSession, 'sandboxId'>): void {
+  ackTool(session: Pick<AgentSession, 'sandboxId'>, result?: ToolAckResult): void {
     const h = handles.get(session.sandboxId);
     if (!h) return;
     try {
-      h.child.stdin?.write(JSON.stringify({ type: 'tool-done' }) + '\n');
+      // result(ok/output/callId)는 LLM function-calling 루프 되먹임용. 키 없음(toolBridge 보장).
+      h.child.stdin?.write(JSON.stringify({ type: 'tool-done', result }) + '\n');
     } catch {
       /* noop — 이미 종료된 프로세스 */
     }

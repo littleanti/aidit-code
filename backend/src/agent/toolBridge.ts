@@ -38,15 +38,27 @@ function buildArgs(intent: ToolIntent): string {
   return JSON.stringify(args);
 }
 
+/** LLM 으로 되먹임할 도구 출력의 최대 길이(과도한 컨텍스트 방지). */
+const TOOL_OUTPUT_CAP = 8000;
+
+/** runToolIntent 결과: toolCallId(진단/테스트) + LLM 되먹임용 성공여부/출력. */
+export interface ToolIntentOutcome {
+  toolCallId: string;
+  /** ToolCall 이 SUCCEEDED 인지. */
+  ok: boolean;
+  /** LLM 의 tool 메시지로 되먹일 출력(파일 내용/쉘 출력/상태 문구, 길이 캡). 키 없음. */
+  output: string;
+}
+
 /**
  * 하나의 도구 의도를 끝까지 처리한다(create → exec(streaming) → finalize).
  * 도구 실행 자체가 실패해도 throw 하지 않고 ToolCall 을 FAILED 로 마감한다(턴은 계속 진행).
- * @returns 생성된 toolCallId(진단/테스트용).
+ * @returns toolCallId + LLM 되먹임용 ok/output(AR-TOOL function-calling 루프에서 사용).
  */
 export async function runToolIntent(
   ctx: ToolBridgeContext,
   intent: ToolIntent,
-): Promise<string> {
+): Promise<ToolIntentOutcome> {
   const kind = intent.kind as ToolKindValue;
   const args = buildArgs(intent);
 
@@ -71,7 +83,12 @@ export async function runToolIntent(
   // appendToolOutput 은 비동기(DB+publish)이므로, onChunk 콜백이 동기 호출되어도
   // 순서를 보존하기 위해 직렬 큐로 잇는다.
   let appendChain: Promise<void> = Promise.resolve();
+  // LLM 되먹임용 출력 누적(SHELL 처럼 result 가 비는 경우 청크에서 모은다). 길이 캡.
+  let outputBuf = '';
   const onChunk = (chunk: string): void => {
+    if (outputBuf.length < TOOL_OUTPUT_CAP) {
+      outputBuf = (outputBuf + chunk).slice(0, TOOL_OUTPUT_CAP);
+    }
     appendChain = appendChain.then(() => appendToolOutput(toolCallId, chunk));
   };
 
@@ -105,5 +122,14 @@ export async function runToolIntent(
     result: result.result,
   });
 
-  return toolCallId;
+  // LLM 되먹임용 출력: 명시 result 우선, 없으면 누적 청크, 그것도 없으면 상태 문구.
+  const output =
+    (result.result && result.result.length > 0
+      ? result.result
+      : outputBuf) || (result.status === 'SUCCEEDED' ? 'ok' : 'failed');
+  return {
+    toolCallId,
+    ok: result.status === 'SUCCEEDED',
+    output: output.slice(0, TOOL_OUTPUT_CAP),
+  };
 }

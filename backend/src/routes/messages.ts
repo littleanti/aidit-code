@@ -237,7 +237,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
  *   - 그 외(CREATING/ERROR 등)면 null(호출부가 SYSTEM 버블로 안내).
  * 보안: model 만 저장(키 미저장). session.status 이벤트로 상태 표면화.
  */
-async function ensureActiveSession(
+export async function ensureActiveSession(
   postId: string,
   sandboxId: string,
   sandboxPath: string,

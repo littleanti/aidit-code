@@ -31,7 +31,9 @@ import {
 export interface RunAgentTurnArgs {
   post: Pick<Post, 'id'>;
   session: Pick<AgentSession, 'id' | 'sandboxId'>;
-  humanMessage: Pick<Message, 'id' | 'body'>;
+  humanMessage?: Pick<Message, 'id' | 'body'>;
+  /** humanMessage 가 없는 자동 인트로 턴에서 런타임에 먹일 입력 텍스트. */
+  prompt?: string;
   lang: string;
 }
 
@@ -40,7 +42,10 @@ export interface RunAgentTurnArgs {
  * 예외는 내부에서 흡수해 AGENT_REPLY=FAILED + SYSTEM 버블로 표면화한다(throw 하지 않음).
  */
 export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
-  const { post, session, humanMessage, lang } = args;
+  const { post, session, lang } = args;
+  // 사람 메시지가 있으면 그 본문을, 없으면 prompt 를 입력으로 쓴다(자동 인트로 턴).
+  const input = args.humanMessage?.body ?? args.prompt ?? '';
+  const replyToId = args.humanMessage?.id ?? null;
   const runtime = getAgentRuntime();
 
   // ── 1) AGENT_REPLY(PENDING) 생성 + message.created ──
@@ -54,7 +59,7 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
         type: 'AGENT_REPLY',
         status: 'PENDING',
         body: '',
-        replyToId: humanMessage.id,
+        replyToId,
         seq,
       },
     });
@@ -145,18 +150,25 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
   let toolChain: Promise<void> = Promise.resolve();
   const onTool = (intent: Parameters<NonNullable<Parameters<typeof runtime.send>[4]>>[0]): void => {
     toolChain = toolChain.then(async () => {
+      // LLM function-calling 되먹임용 ack(ok/output/callId). 기본은 실패 문구.
+      let ack: { ok: boolean; output: string; callId?: string } = {
+        ok: false,
+        output: sandboxRoot ? 'tool execution error' : 'no sandbox',
+        callId: intent.callId,
+      };
       try {
         if (sandboxRoot) {
-          await runToolIntent(
+          const outcome = await runToolIntent(
             { postId: post.id, sessionId: session.id, sandboxRoot },
             intent,
           );
+          ack = { ok: outcome.ok, output: outcome.output, callId: intent.callId };
         }
       } catch {
-        /* toolBridge 내부에서 FAILED 로 흡수 — 여기서는 무해. */
+        /* toolBridge 내부에서 FAILED 로 흡수 — 여기서는 기본 실패 ack 유지. */
       } finally {
-        // worker 를 다음 의도/토큰으로 진행시킨다(턴 직렬화).
-        runtime.ackTool?.({ sandboxId: session.sandboxId });
+        // worker 를 다음 의도/토큰으로 진행시킨다(턴 직렬화). 결과를 되먹여 LLM 루프 진행.
+        runtime.ackTool?.({ sandboxId: session.sandboxId }, ack);
       }
     });
   };
@@ -169,7 +181,7 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
       where: { id: reply.id },
       data: { status: 'STREAMING' },
     });
-    await runtime.send(session, humanMessage.body, lang, onToken, onTool);
+    await runtime.send(session, input, lang, onToken, onTool);
     // worker 의 done 이후에도 마지막 도구 체인이 남아있을 수 있으니 마저 기다린다.
     await toolChain;
   } catch {

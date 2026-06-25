@@ -68,28 +68,131 @@ function chatCompletionsURL() {
   return `${LLM_BASE_URL.replace(/\/+$/, '')}/chat/completions`;
 }
 
-/** LLM 응답 언어 system 지시(LANG_HINT/lang 기준). */
+/** LLM 응답 언어/역할 system 지시(LANG_HINT/lang 기준). 도구 사용을 명시 안내. */
 function systemForLang(lang) {
   const isKo = String(lang || process.env.LANG_HINT || '').toLowerCase().startsWith('ko');
   return isKo
-    ? '너는 샌드박스에서 동작하는 코딩 에이전트다. 한국어로 간결히 답하라.'
-    : 'You are a coding agent operating in a sandbox. Answer concisely in English.';
+    ? [
+        '너는 격리된 샌드박스 워크스페이스에서 동작하는 코딩 에이전트다.',
+        '제공된 도구로 파일을 직접 생성·수정·삭제하고 셸 명령을 실행할 수 있다.',
+        '코드를 "저장/작성"해 달라는 요청에는 반드시 write_file 도구를 호출해 실제 파일로 기록하라. 코드만 텍스트로 보여주고 끝내지 마라.',
+        '경로는 워크스페이스 루트 기준 상대경로다. 한국어로 간결히 답하라.',
+      ].join(' ')
+    : [
+        'You are a coding agent operating in an isolated sandbox workspace.',
+        'You can create, edit, and delete files and run shell commands using the provided tools.',
+        'When asked to save or write code, you MUST call write_file to persist it as a real file — do not just print the code.',
+        'Paths are relative to the workspace root. Answer concisely in English.',
+      ].join(' ');
+}
+
+/** LLM 에 노출하는 샌드박스 도구 스펙(OpenAI function-calling). 기존 M5 파이프라인에 매핑된다. */
+const TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'write_file',
+      description: 'Create or overwrite a file in the sandbox workspace. Use this to save/write code.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'workspace-relative path, e.g. src/app.js' },
+          content: { type: 'string', description: 'full file content to write' },
+        },
+        required: ['path', 'content'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_file',
+      description: 'Read a file from the sandbox workspace.',
+      parameters: {
+        type: 'object',
+        properties: { path: { type: 'string', description: 'workspace-relative path' } },
+        required: ['path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_file',
+      description: 'Delete a file or directory from the sandbox workspace.',
+      parameters: {
+        type: 'object',
+        properties: { path: { type: 'string', description: 'workspace-relative path' } },
+        required: ['path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'bash',
+      description: 'Run a shell command in the sandbox workspace (cwd = workspace root).',
+      parameters: {
+        type: 'object',
+        properties: { command: { type: 'string', description: 'shell command to run' } },
+        required: ['command'],
+      },
+    },
+  },
+];
+
+/** LLM tool_call(name+args) → 부모(toolBridge)가 실행할 {type:'tool'} 인텐트로 매핑. */
+function toolCallToIntent(name, a, callId) {
+  switch (name) {
+    case 'write_file':
+      return { type: 'tool', kind: 'FILE_WRITE', name: 'write_file', relPath: String(a.path ?? ''), content: String(a.content ?? ''), callId };
+    case 'read_file':
+      return { type: 'tool', kind: 'FILE_READ', name: 'read_file', relPath: String(a.path ?? ''), callId };
+    case 'delete_file':
+      return { type: 'tool', kind: 'FILE_DELETE', name: 'delete_file', relPath: String(a.path ?? ''), callId };
+    case 'bash':
+      return { type: 'tool', kind: 'SHELL', name: 'bash', command: String(a.command ?? ''), callId };
+    default:
+      return null;
+  }
+}
+
+/** function-calling 루프의 최대 단계(런어웨이 방지). 각 단계 = 1 completion(+도구 실행). */
+const MAX_AGENT_STEPS = Number(process.env.AGENT_MAX_STEPS) || 8;
+
+/** 세션 수명 동안 유지되는 대화 history(멀티턴 기억). system + user/assistant/tool. */
+let convo = null;
+
+/** convo 초기화(system 메시지 1회). 이후 turn 마다 user/assistant/tool 이 누적된다. */
+function ensureConvo(lang) {
+  if (!convo) convo = [{ role: 'system', content: systemForLang(lang) }];
+  return convo;
+}
+
+/** history 길이 캡(system 보존 + 최근 N). 컨텍스트 폭주 방지. */
+function capConvo() {
+  const N = 40;
+  if (convo && convo.length > N + 1) {
+    convo = [convo[0], ...convo.slice(convo.length - N)];
+  }
 }
 
 /**
- * 실 OpenAI-compatible 스트리밍 호출. delta.content 를 토큰으로 emit 한다.
+ * 한 번의 streaming completion(도구 포함). 텍스트 delta 는 토큰으로 emit 하고,
+ * tool_calls delta(id/name/arguments)는 index 별로 누적해 반환한다.
+ * @returns { text, toolCalls: [{id,name,arguments}], finishReason }
  * 보안: 키/응답 원문/상태코드/URL 을 에러 메시지·stdout 에 절대 싣지 않는다(일반 문구만 throw).
- * 인터럽트: turn.controller.abort() 로 즉시 중단(상위 input/interrupt 핸들러가 호출).
  */
-async function streamLlmReply(prompt, lang, turn) {
+async function streamOneCompletion(turn) {
   const controller = new AbortController();
   turn.controller = controller;
-
-  // 벽시계 타임아웃: 도달 불가/지연으로 무한 대기하지 않도록 abort. 인터럽트와 구분하기 위해
-  //   turn.interrupted 는 건드리지 않는다 → catch 에서 일반 에러로 throw → 턴이 FAILED 로 마감.
   const timer = setTimeout(() => {
     try { controller.abort(); } catch { /* noop */ }
   }, LLM_TIMEOUT_MS);
+
+  let text = '';
+  const tcByIndex = new Map(); // index -> { id, name, arguments }
+  let finishReason = null;
 
   try {
     let res;
@@ -103,64 +206,127 @@ async function streamLlmReply(prompt, lang, turn) {
         body: JSON.stringify({
           model: LLM_MODEL,
           stream: true,
-          messages: [
-            { role: 'system', content: systemForLang(lang) },
-            { role: 'user', content: prompt },
-          ],
+          tools: TOOLS,
+          tool_choice: 'auto',
+          messages: convo,
         }),
         signal: controller.signal,
       });
-    } catch (err) {
-      if (turn.interrupted) return; // 인터럽트로 인한 abort 는 정상 종료.
+    } catch {
+      if (turn.interrupted) return { text, toolCalls: [], finishReason };
       throw new Error('llm request failed'); // 원문/키 미노출(타임아웃 abort 포함).
     }
 
     if (!res.ok || !res.body) {
-      // 상태코드/본문을 메시지에 넣지 않는다(키/원문 누출 표면 차단).
-      throw new Error('llm request failed');
+      throw new Error('llm request failed'); // 상태코드/본문 미노출.
     }
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
-    for (;;) {
+    let done = false;
+    while (!done) {
       if (turn.interrupted) {
         try { await reader.cancel(); } catch { /* noop */ }
-        return;
+        break;
       }
       let chunk;
       try {
         chunk = await reader.read();
       } catch {
-        if (turn.interrupted) return;
-        throw new Error('llm stream failed'); // 스트림 중 abort/끊김(타임아웃 포함).
+        if (turn.interrupted) break;
+        throw new Error('llm stream failed'); // abort/끊김(타임아웃 포함).
       }
       if (chunk.done) break;
       buf += decoder.decode(chunk.value, { stream: true });
-      // SSE 라인 단위 파싱: 'data: {json}' / 'data: [DONE]'.
       let nl;
       while ((nl = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, nl).trim();
         buf = buf.slice(nl + 1);
         if (!line.startsWith('data:')) continue;
         const payload = line.slice(5).trim();
-        if (payload === '[DONE]') return;
+        if (payload === '[DONE]') { done = true; break; }
         let j;
-        try {
-          j = JSON.parse(payload);
-        } catch {
-          continue; // 부분/비-JSON 라인은 무시.
+        try { j = JSON.parse(payload); } catch { continue; }
+        const choice = j?.choices?.[0];
+        const delta = choice?.delta;
+        if (typeof delta?.content === 'string' && delta.content.length > 0) {
+          if (!turn.interrupted) emit({ type: 'token', delta: delta.content });
+          text += delta.content;
         }
-        const delta = j?.choices?.[0]?.delta?.content;
-        if (typeof delta === 'string' && delta.length > 0) {
-          if (turn.interrupted) return;
-          emit({ type: 'token', delta });
+        if (Array.isArray(delta?.tool_calls)) {
+          for (const d of delta.tool_calls) {
+            const idx = typeof d.index === 'number' ? d.index : 0;
+            let acc = tcByIndex.get(idx);
+            if (!acc) { acc = { id: '', name: '', arguments: '' }; tcByIndex.set(idx, acc); }
+            if (d.id) acc.id = d.id;
+            if (d.function?.name) acc.name = d.function.name;
+            if (typeof d.function?.arguments === 'string') acc.arguments += d.function.arguments;
+          }
         }
+        if (choice?.finish_reason) finishReason = choice.finish_reason;
       }
     }
   } finally {
     clearTimeout(timer);
   }
+
+  const toolCalls = [...tcByIndex.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, v]) => v)
+    .filter((v) => v.name); // name 없는 잔여는 버림
+  return { text, toolCalls, finishReason };
+}
+
+/**
+ * 실 모드 에이전트 루프: completion → (도구 호출 있으면) 실행/되먹임 → 반복.
+ * 텍스트만 나오면 종료. interrupted 시 즉시 중단. 단계 상한(MAX_AGENT_STEPS)으로 런어웨이 방지.
+ */
+async function runLlmAgent(prompt, lang, turn) {
+  ensureConvo(lang);
+  convo.push({ role: 'user', content: prompt });
+  capConvo();
+
+  for (let step = 0; step < MAX_AGENT_STEPS; step++) {
+    if (turn.interrupted) return;
+    const { text, toolCalls } = await streamOneCompletion(turn);
+    if (turn.interrupted) return;
+
+    const assistant = { role: 'assistant', content: text || '' };
+    if (toolCalls.length) {
+      assistant.tool_calls = toolCalls.map((tc) => ({
+        id: tc.id,
+        type: 'function',
+        function: { name: tc.name, arguments: tc.arguments || '{}' },
+      }));
+    }
+    convo.push(assistant);
+
+    if (!toolCalls.length) { capConvo(); return; } // 텍스트 응답 — 턴 종료.
+
+    // 도구 호출들을 순차 실행하고 결과를 tool 메시지로 history 에 넣는다(부모 ack 되먹임).
+    for (const tc of toolCalls) {
+      if (turn.interrupted) return;
+      let argsObj = {};
+      try { argsObj = JSON.parse(tc.arguments || '{}'); } catch { argsObj = {}; }
+      const intent = toolCallToIntent(tc.name, argsObj, tc.id);
+      let content;
+      if (!intent) {
+        content = `error: unknown tool ${tc.name}`;
+      } else {
+        const ack = await emitToolAndWait(intent);
+        if (turn.interrupted) return;
+        content =
+          ack && typeof ack.output === 'string' && ack.output.length
+            ? ack.output
+            : ack && ack.ok ? 'ok' : 'failed';
+      }
+      convo.push({ role: 'tool', tool_call_id: tc.id, content: String(content) });
+    }
+    capConvo();
+  }
+  // 단계 상한 도달: 사용자가 빈 응답으로 남지 않도록 짧은 안내.
+  emit({ type: 'token', delta: '\n[reached tool step limit]' });
 }
 
 // IDLE 유지를 위한 keepalive 타이머(모든 종료 신호에서 정리됨).
@@ -282,7 +448,8 @@ async function runTurn(text, lang, turn) {
     if (STUB_MODE) {
       await streamEchoReply(plain, lang, turn);
     } else {
-      await streamLlmReply(plain, lang, turn);
+      // 실 모드: function-calling 에이전트 루프(도구로 파일 저장/실행 가능).
+      await runLlmAgent(plain, lang, turn);
     }
   }
 }
@@ -316,11 +483,11 @@ rl.on('line', (line) => {
   }
 
   if (msg.type === 'tool-done') {
-    // 부모가 직전 도구 실행을 마침 — 다음 의도로 진행.
+    // 부모가 직전 도구 실행을 마침 — 결과(ok/output)를 resolver 로 넘겨 LLM 루프가 되먹이게 한다.
     if (toolAck) {
       const r = toolAck;
       toolAck = null;
-      r();
+      r(msg.result); // {ok, output, callId} | undefined(수동 !경로/하위호환)
     }
     return;
   }

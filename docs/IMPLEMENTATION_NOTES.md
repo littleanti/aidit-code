@@ -11,6 +11,56 @@
 
 ## Changelog
 
+### 2026-06-25 · [fix] · 완료 · 도구 결과 버블이 완료 후에도 "실행 중…" 으로 남는 문제 → "실행 완료."
+- **증상(사용자)**: 도구(write_file/shell) 실행이 끝나도 TOOL_RESULT 버블 배지가 계속 "실행 중…". 끝나면 "실행 완료." 로 바뀌어야 함.
+- **원인**: `ToolResultBubble.tsx` 가 상태를 `tc?.status ?? (message.status==='FAILED'?'FAILED':'RUNNING')` 로 도출 — ① TOOL_RESULT 버블은 `toolCallId` 가 없어(연결은 TOOL_CALL 버블) 라이브 tool.* 패치가 닿지 않아 `tc` 가 null, ② 폴백이 `COMPLETE` 를 `RUNNING` 으로 매핑. 결과적으로 항상 RUNNING. 실제로 TOOL_RESULT 의 생명주기는 자신의 `message.status`(서버 finalize 가 `message.updated` 로 COMPLETE/FAILED 확정)가 권위인데 이를 무시.
+- **수정**: `ToolResultBubble.tsx` 배지/커서를 `message.status` 기준으로 도출(STREAMING/PENDING→실행 중, COMPLETE→완료, FAILED→실패; `tc` 있으면 보조). i18n `thread.ts` 에 `toolDone`("실행 완료."/"Done.")·`toolFailed`("실행 실패"/"Failed") 추가. 성공 시 `✓ 실행 완료.`, 실패 시 `✗ 실행 실패 [exit N]`.
+- **검증(③)**: workflow(구현→검증) + 독립 재확인 — frontend `tsc --noEmit` 클린, `vite build` PASS(88 모듈), `thread.ts` 에 `toolDone`/`toolFailed`(ko/en) 존재, 배지 상태가 `message.status` 기반(하드코딩 RUNNING 폴백 제거). 성공→`✓ 실행 완료.`, 실패→`✗ 실행 실패 [exit N]`.
+- 변경 파일: `frontend/src/components/ToolResultBubble.tsx`, `frontend/src/i18n/dicts/thread.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
+### 2026-06-25 · [feat] · 완료 · 글 생성 시 에이전트 자동 응답 + 브랜딩 "pi agent" → "Aidit Agent"
+- **요청(사용자)**: ① 게시글을 처음 만들면 게시글 내용으로 에이전트가 자동 답변. ② UI 의 "pi agent"/"AI" 표기를 "Aidit Agent" 로. (workflow 로 작업)
+- **설계 — 자동 응답(backend)**:
+  - `turn.ts`: `runAgentTurn` 의 `humanMessage` 를 선택적으로, `prompt`(직접 입력 텍스트) 추가 — humanMessage 없으면 prompt 를 입력으로 쓰고 AGENT_REPLY.replyToId=null.
+  - `messages.ts`: `ensureActiveSession` 를 export(중복 없이 재사용). (turn.ts↔messages.ts 순환을 피하려 오케스트레이션은 posts.ts 에 둔다.)
+  - `posts.ts`: `provisionSandbox(sandbox)` resolve 후 `maybeAutoReply(postId)` — 샌드박스 READY·메시지 0건일 때만 ensureActiveSession → runAgentTurn(prompt = 제목+본문, lang=한글 감지). fire-and-forget, 예외 삼킴(글 생성 무영향).
+- **설계 — 브랜딩(frontend)**: `i18n/dicts/thread.ts` 의 `agentLabel: 'pi agent [AGENT]'`(KO/EN) → `'Aidit Agent [AGENT]'`. 그 외 사용자 노출 "AI"/"pi agent" 도 에이전트 명칭이면 "Aidit Agent" 로. **백엔드 'pi' 런타임 키/파일명은 기능용이라 불변.**
+- **구현(workflow)**: 2-에이전트 병렬(backend 자동응답 / frontend 브랜딩) → verify 게이트로 오케스트레이션.
+  - verify 가 회귀 포착: 자동응답이 모든 글 생성에 비요청 턴을 주입 → 기존 `e2e`/`redaction` 테스트(글 생성 후 특정 agent 프레임 단정)를 오염(2 fail).
+  - **수정**: `maybeAutoReply` 가 테스트 환경(`VITEST`/`NODE_ENV=test`)에서는 스킵(부수효과 비활성). 운영/개발 구동 영향 없음. `POST_AUTO_REPLY=1` 로 테스트에서 강제 가능.
+- **검증(③)**:
+  - backend `tsc` 클린 + `vitest` **55/55 GREEN**(게이트 후 회귀 해소); frontend `tsc` 클린 + `vite build` PASS(88 모듈).
+  - **라이브**(gpt-4o-mini): 메시지 0건으로 글 "Write a short fizzbuzz function in Python" 생성 → **자동** AGENT_REPLY 등장("…saved to fizzbuzz.py") + TOOL_CALL FILE_WRITE/SUCCEEDED + `.sandboxes/<postId>/fizzbuzz.py`(283 bytes) 실제 생성. 자동응답이 도구까지 사용.
+  - 브랜딩: frontend grep 결과 사용자 노출 "pi agent" 0건; `agentLabel='Aidit Agent [AGENT]'`(KO/EN). 'AI' 모드 토글 라벨은 에이전트 명칭이 아니라 모드 표시이므로 유지(검토 후 의도적 보존).
+- 변경 파일: `backend/src/agent/turn.ts`, `backend/src/routes/{posts,messages}.ts`, `frontend/src/i18n/dicts/thread.ts`, `frontend/src/components/ChatBubble.tsx`(주석), `docs/IMPLEMENTATION_NOTES.md`.
+
+### 2026-06-25 · [feat] · 완료 · 에이전트 도구 호출(function calling) — LLM 이 샌드박스에 코드 저장/읽기/실행
+- **증상(사용자 보고)**: "코드를 저장해줘" → 에이전트가 "코드 저장 기능은 지원하지 않습니다. 코드를 제공해 드릴 수 있습니다"라고 거부. 샌드박스가 있는데도 파일 저장이 안 됨.
+- **원인(고민)**: 실 LLM 연결이 **텍스트만 스트리밍**하고 LLM 에 도구를 알리지 않음(`tools` 미전달) + 응답의 `tool_calls` 미파싱. gpt-4o-mini 는 도구가 없으니 거부. 반면 도구 실행 파이프라인(M5: toolBridge→toolExec, pathGuard·tool.*·file.changed)은 이미 완성돼 있어 **연결 고리만 부재**.
+- **수정(설계)**: 워커 실 모드에 OpenAI function-calling 에이전트 루프 구현, 기존 M5 파이프라인에 브리지.
+  - `piWorker.mjs`: `write_file`/`read_file`/`delete_file`/`bash` 도구 스펙을 LLM 에 전달. 스트림에서 텍스트 delta(토큰)와 `tool_calls` delta(id/name/arguments 누적)를 함께 파싱. 도구 호출 시 기존 `{type:'tool', kind, relPath/content/command}` 인텐트로 방출 → 부모가 실제 실행 → ack 의 결과를 `tool` 역할 메시지로 history 에 넣고 루프(최대 N회). 세션 수명 동안 대화 history 유지(멀티턴). interrupt/timeout abort 유지.
+  - `pi.ts`/`runtime.ts`: `ackTool(session, result?)` — `{type:'tool-done', result:{ok,output}}` 를 워커 stdin 으로 전달(하위호환: result 선택).
+  - `turn.ts`: `onTool` 가 `runToolIntent` 결과를 받아 ackTool 로 전달.
+  - `toolBridge.ts`: `runToolIntent` 가 `{toolCallId, ok, output}` 반환(SHELL 은 출력 청크 누적, 길이 캡).
+  - 보안(TRD §8): 도구 args/result·`tool` 메시지에 키 없음(toolExec 보장). LLM 요청 키는 Authorization 헤더로만, 에코/로그 0.
+  - 하위호환: 스텁 모드 + `!write/!shell/!demo` 수동 경로 불변 → 기존 M5/turn 테스트 무영향.
+- **검증(③)**:
+  - `tsc --noEmit` 클린; `vitest run` **55/55 GREEN**(스텁/수동 `!`-도구 경로·M5 toolCall 테스트 무영향).
+  - mock-LLM tool_call 루프 단위 검증: 스트리밍 tool_calls(arguments delta 누적) → FILE_WRITE 인텐트(relPath/content/callId 정확) 방출 → ack 되먹임 → 후속 completion 텍스트("Saved hello.txt.") 까지 PASS.
+  - **실 서버 라이브 e2e**(gpt-4o-mini): "hello.py 저장" 요청 → AGENT_REPLY "file has been created" + TOOL_CALL FILE_WRITE/SUCCEEDED + TOOL_RESULT "wrote hello.py (24 bytes)" + `tool.call`·`file.changed` 이벤트 + **`.sandboxes/<postId>/hello.py` 실제 파일 생성**(내용 verbatim) 확인.
+- 변경 파일: `backend/src/agent/{piWorker.mjs,pi.ts,runtime.ts,turn.ts,toolBridge.ts}`, `docs/IMPLEMENTATION_NOTES.md`.
+
+### 2026-06-25 · [fix] · 완료 · 스레드 채팅 자동 스크롤 — 전송/스트리밍 시 최신 버블 추종
+- **증상(사용자 보고)**: 채팅이 길어져 스크롤이 생기면, 내가 메시지를 보내도 스크롤이 따라 내려가지 않아 마지막 채팅이 안 보임.
+- **원인**: `Thread.tsx`의 자동 스크롤 `useEffect`가 ① `behavior:'smooth'`로 토큰마다 재호출돼 빠른 스트리밍에서 추종이 끊기고, ② 윈도우 스크롤 기준인데 `sticky bottom-0` Composer + AppShell의 sticky TabBar가 뷰포트 하단을 가려 마지막 버블이 footer 뒤에 숨음.
+- **수정**: `Thread.tsx`
+  - "하단 고정(pinned)" 추적: 윈도우 스크롤 리스너로 사용자가 바닥 근처면 추종, 위로 스크롤해 과거를 읽는 중이면 추종 보류(끌어내리지 않음).
+  - **내가 보낸 메시지(HUMAN·authorId=본인)** 가 새로 추가되면 항상 강제로 하단 고정+스크롤 → 요청 동작 충족.
+  - 토큰 누적 갱신은 즉시(`auto`), 새 버블 등장은 부드럽게(`smooth`).
+  - 하단 센티넬에 `scroll-margin-bottom` 부여 → sticky Composer/TabBar 위로 마지막 버블이 보이도록.
+- **검증(③)**: 프론트 `tsc --noEmit` 클린. 로직: pinned 추적(윈도우 스크롤), 본인 HUMAN 신규 버블 시 강제 추종, 토큰 갱신 즉시/신규 버블 부드럽게, 센티넬 scroll-margin-bottom 7rem.
+- 변경 파일: `frontend/src/pages/Thread.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-25 · [fix] · 완료 · 에이전트가 에코만 응답하는 문제 — 실 LLM 스트리밍 연결 + 호출 타임아웃 (AR-PI SEAM)
 - **증상(사용자 보고)**: ① "세션 시작"이 계속 끊긴다 ② "다이아몬드 모양 *" 요청에 에코만 오고 실제 에이전트 작업이 안 됨.
 - **라이브 재현/진단**: `tsx src/app.ts`로 서버 기동 후 게스트→글→세션→SSE→메시지(aiMode) 전 구간 curl 재현.
