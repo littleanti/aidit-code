@@ -11,6 +11,14 @@
 
 ## Changelog
 
+### 2026-06-25 · [fix] · 완료 · 서버 재시작 후 세션 시작 실패(stale RUNNING 샌드박스 → 409) → SUSPENDED 정규화로 resume
+- **증상(사용자)**: 이미 에이전트 활동이 있던 글에서 서버 재시작 후 "세션 시작" 시 프런트가 "Failed to start the agent session. Please retry." 표시. 작성자/게스트 무관(소유권 문제 아님).
+- **원인(stale-state)**: 활동 이력이 있는 글은 DB 에 `sandbox.status='RUNNING'` + 활성(IDLE) AgentSession 행이 남는다. 서버 재시작 시 in-memory 핸들이 사라져 `runtime.attach` 가 `no active runtime process to attach to` throw(`backend/src/agent/pi.ts`). attach-fail catch 가 stale 행을 STOPPED 로 닫고 `startFreshSession` 으로 떨어지지만, 샌드박스가 여전히 `RUNNING`(READY/SUSPENDED 아님) → 409 `sandbox is RUNNING; cannot start a session`.
+- **수정(한 지점, 최소)**: `POST /posts/:id/session` 의 attach-fail catch 에서 stale 세션을 STOPPED 로 닫은 **직후, startFreshSession 호출 전**에 stale 한 `RUNNING` 샌드박스를 정규화한다. 프로세스는 죽었지만 디렉토리는 보존됨 → 의미상 resume 이므로 `setSandboxStatus(sandbox.id, 'SUSPENDED')`(이미 import) 로 전이하고, 반환된 행의 status 로 로컬 `sandbox.status` 를 갱신해 `startFreshSession` 이 SUSPENDED 를 보게 한다. `sandbox.status` 이벤트도 함께 publish 되어 바람직. CREATING/ERROR 는 정상적으로 409 유지(RUNNING 만 stale-active 케이스).
+- **회귀 테스트**: `backend/test/sessionAttachFail.test.ts` 추가(2 케이스) — ① `normalizes RUNNING→SUSPENDED and starts a fresh session (201), not 409`: 활성 IDLE AgentSession 행 + `runtime.attach` throw(프로세스 소멸) + 샌드박스 RUNNING 일 때 409 가 아니라 stale 세션을 STOPPED 로 닫고 새 세션(201, IDLE)을 반환함을 단언. ② `does NOT force-resume a CREATING sandbox (still 409)`: CREATING 은 정규화 대상이 아니라 409 유지 확인. `vi.spyOn(piRuntime,'attach').mockRejectedValue(...)` 로 throw 유도, 실제 stub piWorker spawn 으로 fresh-start 검증.
+- **검증(③)**: backend `npx tsc --noEmit` 클린(에러 0). `npx vitest run` **57/57 GREEN**(18 파일, 기존 55 + 신규 2). 신규 파일 단독 실행도 2/2 GREEN.
+- 변경 파일: `backend/src/routes/session.ts`, `backend/test/sessionAttachFail.test.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-25 · [fix] · 완료 · 글 진입 시 맨 아래로 점프 → 맨 위(원문/첫 메시지) 표시, 라이브 팔로우는 보존
 - **요청(사용자)**: 게시글(Thread) 진입 시 자동으로 맨 아래(최신/composer)로 스크롤되어 원문(📌)과 대화 시작점을 못 봄. 진입 시에는 **맨 위**를 보여주고, 스트리밍 중 라이브 팔로우와 "내가 보낸 메시지 따라가기"는 그대로 유지.
 - **설계(가드형 top-on-entry)**:

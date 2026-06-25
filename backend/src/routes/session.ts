@@ -63,6 +63,16 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
           where: { id: existing.id },
           data: { status: 'STOPPED', endedAt: new Date() },
         });
+        // stale RUNNING 정규화: 프로세스는 죽었지만(attach 실패) 샌드박스 디렉토리는 보존돼 있다 →
+        // 의미상 이는 정확히 resume 케이스다. 그러나 sandbox.status 는 여전히 RUNNING 이라
+        // startFreshSession 의 READY/SUSPENDED 가드에 걸려 409 가 난다(서버 재시작 후 전형적 증상).
+        // 따라서 RUNNING 만 SUSPENDED 로 전이해 fresh-start 의 resume 경로가 이를 받아들이게 한다.
+        // (CREATING/ERROR 는 진짜로 시작 불가 상태이므로 그대로 두어 정상적으로 409 가 나야 한다.)
+        if (sandbox.status === 'RUNNING') {
+          const updated = await setSandboxStatus(sandbox.id, 'SUSPENDED'); // sandbox.status 이벤트도 publish.
+          // 로컬 sandbox 객체를 갱신해야 startFreshSession 이 stale RUNNING 이 아닌 SUSPENDED 를 본다.
+          sandbox.status = updated.status;
+        }
         return await startFreshSession(reply);
       }
       return reply.code(200).send({ session: serializeSession(existing) });
