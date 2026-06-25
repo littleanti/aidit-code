@@ -273,7 +273,7 @@ export default function Thread() {
   const statusErrorKey = sandboxErrKey ?? sessionErrKey;
 
   return (
-    <div className="flex flex-col" style={{ minHeight: 'calc(100vh - 7rem)' }}>
+    <div className="-mb-4 flex flex-col" style={{ minHeight: 'calc(100vh - 7rem)' }}>
       {/* Header: back + sandbox badge + reconnect indicator */}
       <div className="mb-3 flex items-center gap-2">
         <Link

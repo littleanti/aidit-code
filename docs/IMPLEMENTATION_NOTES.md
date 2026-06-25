@@ -11,6 +11,13 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · 게시글 최하단 공백 제거 — 컴포저를 TabBar 에 밀착
+- **요청(사용자, 스크린샷)**: 게시글 페이지 최하단(컴포저와 하단 TabBar 사이)에 공백이 남아 있음 → 제거.
+- **원인**: 컴포저는 Thread 루트의 마지막 요소인데, Thread 루트는 `<main class="… py-4">` 안에 있어 루트 아래로 main 의 `pb-4`(16px) 가 깔린다. 컴포저(sticky bottom-[var(--tabbar-h)])가 그 16px 만큼 TabBar 와 벌어져 보임. (직전 좌우 공백은 `px-4`/`-mx-4` 로 해결했고, 이번은 하단 `pb-4`.)
+- **수정**: Thread 루트 div 에 `-mb-4` 추가 → 자식 음수 마진이 부모(main)의 `pb-4` 를 잠식해 루트 하단이 main 콘텐츠박스 하단(=TabBar 상단)과 flush. 컴포저가 TabBar 에 밀착(공백 제거). `<main>` 자체는 불변이라 피드/프로필 등 다른 페이지의 하단 여백은 보존.
+- **검증(③)**: frontend `tsc --noEmit` 클린, `vite build` PASS. 자식 음수 마진(`-mb-4`)이 부모(main)의 `pb-4`(1rem)를 상쇄하는 결정적 CSS 라 빌드 검증으로 충분.
+- 변경 파일: `frontend/src/pages/Thread.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [fix] · 완료 · 컴포저 좌우 공백 제거 — Aidit 처럼 풀블리드 footer
 - **요청(사용자, 스크린샷)**: 게시글 메시지 컴포저 좌/우에 공백이 있음 → Aidit 참고해 제거.
 - **원인**: 컴포저 루트는 `border-t bg` 풀폭이지만 `AppShell` 의 `<main class="… px-4">`(전 페이지 16px 인셋) 안에 들어 있어 좌우 16px 공백 발생. Aidit 은 컴포저가 컬럼 풀블리드 footer 이고 내부만 `px-3`.
