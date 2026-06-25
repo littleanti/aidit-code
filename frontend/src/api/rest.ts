@@ -107,7 +107,7 @@ export function guest(nickname: string): Promise<AuthResult> {
   return request<AuthResult>('/auth/guest', {
     method: 'POST',
     auth: false,
-    body: { username: nickname },
+    body: { nickname },
   });
 }
 

@@ -50,6 +50,8 @@ export interface IsolationConfig {
 
 export interface AppConfig {
   port: number;
+  /** 바인드 호스트. 기본 `0.0.0.0`(모든 인터페이스). 내부 전용 실행 시 `127.0.0.1`. */
+  host: string;
   jwtSecret: string;
   jwtExpires: string;
   databaseUrl: string;
@@ -67,6 +69,7 @@ export interface AppConfig {
 
 export const config: AppConfig = {
   port: Number(process.env.PORT) || 3001,
+  host: process.env.HOST || '0.0.0.0',
   jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-me',
   jwtExpires: process.env.JWT_EXPIRES || '7d',
   databaseUrl: process.env.DATABASE_URL || 'file:./prisma/dev.db',

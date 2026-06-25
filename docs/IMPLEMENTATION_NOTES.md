@@ -83,4 +83,17 @@
 - 비고: cgroup-lite/실 메모리·CPU 제한은 크로스플랫폼 한계로 PoC 보수적 best-effort(도구 wall-clock 타임아웃+프로세스 캡); 네트워크 정책은 플래그 수준. `docs/checklists/key-blind.md`는 신규 산출 문서(허용), 변경 이력/PRD/TRD/PLAN 편집은 오케스트레이터 전담.
 - 예상 변경 파일: `backend/src/plugins/rateLimit.ts`, `backend/src/sandbox/limits.ts`, `backend/src/routes/{bookmarks,users,metrics}.ts`, `backend/src/routes/index.ts`, `backend/src/agent/toolExec.ts`(타임아웃), `backend/test/{security/redaction,bookmark,metrics,e2e}.test.ts`, `docs/checklists/key-blind.md`, `LICENSE`; `frontend/src/pages/{Profile,Settings}.tsx`, `frontend/src/components/states/*`, `frontend/src/hooks/usePagedList.ts`, `frontend/src/api/{rest,types}.ts`, `frontend/src/i18n/**`.
 
+### 2026-06-25 · [chore] · 완료 · 검증용 실행 구성 (프론트 외부/백엔드 내부 바인딩)
+- 목적: 수동 검증을 위해 프론트엔드는 외부 접속(0.0.0.0), 백엔드는 내부 접속(127.0.0.1)으로 분리 실행.
+- 변경: `backend/src/config.ts`에 `host`(HOST env, 기본 `0.0.0.0`) 추가 + `app.ts` listen에 `config.host` 사용; `frontend/vite.config.ts` 프록시 타깃을 env(`VITE_PROXY_TARGET`/`BACKEND_URL`, 기본 `http://localhost:3001`)로 구성; vite config의 `process` 사용 위해 `@types/node` devDep 추가.
+- 실행: 백엔드 `HOST=127.0.0.1 PORT=3011`(3001은 무관 앱 점유), 프론트 `vite --host 0.0.0.0 --port 5173` + `VITE_PROXY_TARGET=http://127.0.0.1:3011`. 외부 클라는 프론트 프록시 경유로만 백엔드 도달.
+- 검증: 백엔드 `tsc` 클린; 프론트 `build` PASS; 백엔드 `127.0.0.1:3011/health`=ok·외부 IP에서 미도달(내부 전용 확인); 프론트 외부 IP `:5173` HTTP 200; 프록시 경유 게스트→글 작성→피드(20)→`/runtime`(키 없음) E2E PASS.
+- 변경 파일: `backend/src/config.ts`, `backend/src/app.ts`, `frontend/vite.config.ts`, `frontend/package.json`(+package-lock), `frontend/tsconfig.node.json`(변경 없음).
+
+### 2026-06-25 · [fix] · 완료 · 게스트 로그인 계약 불일치(nickname) 수정
+- 증상: 외부 검증 중 게스트 진입 실패 — 프론트 `rest.guest`가 `{username}`을 보내지만 백엔드 `/auth/guest`는 `{nickname}`을 요구(`"nickname is required"`). 백엔드 단위 테스트는 자기 계약(nickname)으로 통과해 누락됨.
+- 수정: 프론트 `rest.guest`가 TRD §4(닉네임) + 백엔드 계약에 맞춰 `{ nickname }` 전송.
+- 검증: 프론트 build + 프록시 경유 게스트→글 작성 E2E 재확인.
+- 변경 파일: `frontend/src/api/rest.ts`.
+
 <!-- 새 항목은 이 줄 위에 추가 -->
