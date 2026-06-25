@@ -7,11 +7,11 @@
 //     - 행 상태 + lastActiveAt 갱신 후 'sandbox.status' 이벤트를 post 채널로 publish(M2: RT-PS+RT-SBXEV 배선).
 //   ※ READY 전이/디렉토리·meta 준비는 provision.ts(BE-PROV)가 담당. 에이전트 스폰은 M3.
 
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import type { Sandbox } from '@prisma/client';
 import { config } from '../config.js';
 import { prisma } from '../db.js';
-import { resolveInsideRoot } from './pathGuard.js';
+import { resolveInsideRoot, isInsideRoot } from './pathGuard.js';
 import { ConcurrencyLimiter } from './limiter.js';
 import { publishToPost } from '../realtime/publish.js';
 import { makeSandboxStatusEvent, type SandboxStatusValue } from '../realtime/events.js';
@@ -70,4 +70,20 @@ export async function setSandboxStatus(
   );
 
   return updated;
+}
+
+/**
+ * 샌드박스 격리 디렉토리를 영구 삭제한다(글 삭제 cleanup, sandboxLifecycle §6.1 step7).
+ * 안전장치: 경로가 sandboxRoot 내부임을 isInsideRoot 로 확인한 뒤에만 삭제한다.
+ * 루트 밖(또는 루트 자체) 경로는 거부하여 호스트 파일시스템 손상을 차단한다.
+ * 디렉토리가 이미 없으면 무해(force).
+ */
+export async function deleteSandboxDir(sandboxPath: string): Promise<void> {
+  // 루트 자체나 루트 밖 경로는 절대 지우지 않는다.
+  if (sandboxPath === config.sandboxRoot || !isInsideRoot(config.sandboxRoot, sandboxPath)) {
+    throw Object.assign(new Error('refusing to delete path outside sandbox root'), {
+      statusCode: 400,
+    });
+  }
+  await rm(sandboxPath, { recursive: true, force: true });
 }

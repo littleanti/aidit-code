@@ -4,9 +4,9 @@
 // stream, and renders the bubble list + Composer + sandbox/session status.
 // Mobile-first; touch targets >=44px. Uses ONLY term-* tokens; labels via t().
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useT } from '../i18n/useT';
-import { getPost, getMessages, startSession, ApiError } from '../api/rest';
+import { getPost, getMessages, startSession, deletePost, ApiError } from '../api/rest';
 import { relativeTime } from '../lib/time';
 import StatusBadge from '../components/StatusBadge';
 import ChatBubble from '../components/ChatBubble';
@@ -27,7 +27,9 @@ type WorkspaceTab = 'chat' | 'files';
 export default function Thread() {
   const t = useT();
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const token = useAuthStore((s) => s.token);
+  const userId = useAuthStore((s) => s.userId);
   const openLogin = useUiStore((s) => s.openLogin);
 
   const [post, setPost] = useState<Post | null>(null);
@@ -35,6 +37,8 @@ export default function Thread() {
   const [loading, setLoading] = useState(true);
   const [startingSession, setStartingSession] = useState(false);
   const [tab, setTab] = useState<WorkspaceTab>('chat');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const hydrate = useThreadStore((s) => s.hydrate);
   const reset = useThreadStore((s) => s.reset);
@@ -110,6 +114,22 @@ export default function Thread() {
     }
   }, [id, token, openLogin, setActiveSession, t]);
 
+  const isAuthor = !!post && !!userId && post.authorId === userId;
+
+  const handleDelete = useCallback(async () => {
+    if (!id) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await deletePost(id);
+      navigate('/'); // post + sandbox dir gone → back to the feed
+    } catch (e) {
+      setError(e instanceof ApiError ? t('errors.generic') : t('errors.networkError'));
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  }, [id, navigate, t]);
+
   const sessionActive =
     !!activeSession &&
     activeSession.status !== 'STOPPED' &&
@@ -174,8 +194,45 @@ export default function Thread() {
         <>
           {/* Original post */}
           <article className="mb-3 rounded-[3px] border border-term-line bg-term-panel p-4">
-            <div className="mb-1 font-mono text-[10px] uppercase tracking-wider text-term-faint">
-              📌 {t('post.originalPost')}
+            <div className="mb-1 flex items-center gap-2">
+              <span className="font-mono text-[10px] uppercase tracking-wider text-term-faint">
+                📌 {t('post.originalPost')}
+              </span>
+              {isAuthor && (
+                <span className="ml-auto flex items-center gap-1">
+                  {!confirmDelete ? (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(true)}
+                      className="min-h-[32px] rounded-[3px] border border-term-red-line px-2 font-mono text-[11px] text-term-red hover:bg-term-red-bg"
+                    >
+                      {t('thread.deletePost')}
+                    </button>
+                  ) : (
+                    <>
+                      <span className="font-mono text-[11px] text-term-red">
+                        {t('thread.deleteConfirm')}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleDelete}
+                        disabled={deleting}
+                        className="min-h-[32px] rounded-[3px] border border-term-red-line bg-term-red-bg px-2 font-mono text-[11px] text-term-red disabled:opacity-50"
+                      >
+                        {deleting ? t('thread.deleting') : t('thread.deleteYes')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDelete(false)}
+                        disabled={deleting}
+                        className="min-h-[32px] rounded-[3px] border border-term-border-dim px-2 font-mono text-[11px] text-term-dim"
+                      >
+                        {t('thread.deleteNo')}
+                      </button>
+                    </>
+                  )}
+                </span>
+              )}
             </div>
             <h1 className="mb-2 font-mono text-lg text-term-fg-bright">{post.title}</h1>
             <div className="mb-3 font-mono text-xs text-term-dim">

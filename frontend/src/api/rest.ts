@@ -164,6 +164,11 @@ export function patchPost(id: string, body: { title?: string; body?: string }): 
   return request<Post>(`/posts/${encodeURIComponent(id)}`, { method: 'PATCH', body });
 }
 
+/** DELETE /posts/:id — delete post + sandbox dir (author only). */
+export function deletePost(id: string): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/posts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
 // ── Profile: user posts / bookmarks (TRD §4.2) ─────────────────
 // HARD RULE: NO key fields are ever sent or read here. Cursor pagination only.
 

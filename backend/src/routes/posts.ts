@@ -11,8 +11,11 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { prisma } from '../db.js';
 import { hotScore } from '../domain/hotScore.js';
 import { encodeCursor, decodeCursor, BadCursorError } from '../domain/cursor.js';
-import { createSandboxForPost, sandboxLimiter } from '../sandbox/service.js';
+import { createSandboxForPost, sandboxLimiter, deleteSandboxDir } from '../sandbox/service.js';
 import { provisionSandbox } from '../sandbox/provision.js';
+import { getAgentRuntime } from '../agent/runtime.js';
+
+const ACTIVE_SESSION_STATUSES = ['STARTING', 'IDLE', 'RUNNING'] as const;
 
 const PAGE_SIZE = 20;
 
@@ -183,6 +186,71 @@ export async function postRoutes(app: FastifyInstance): Promise<void> {
 
     const updated = await prisma.post.update({ where: { id }, data });
     return reply.code(200).send({ post: updated });
+  });
+
+  // ── 글 삭제(작성자만) + 샌드박스 디렉토리 정리 ────────────
+  // sandboxLifecycle §6.1 step7: 활성 프로세스 종료 → FK 안전 순서 행 삭제 → 디렉토리 rm -rf.
+  app.delete('/posts/:id', { preHandler: app.requireAuth }, async (req, reply) => {
+    const authUser = req.authUser!;
+    const { id } = req.params as { id: string };
+
+    const post = await prisma.post.findUnique({
+      where: { id },
+      include: { sandbox: true },
+    });
+    if (!post) {
+      return reply.code(404).send({ error: 'post not found' });
+    }
+    if (post.authorId !== authUser.userId) {
+      return reply.code(403).send({ error: 'only the author can delete this post' });
+    }
+
+    const sandbox = post.sandbox;
+
+    // 1) 활성 에이전트 세션이 있으면 프로세스 종료(디렉토리는 다음 단계에서 삭제).
+    if (sandbox) {
+      const active = await prisma.agentSession.findMany({
+        where: { sandboxId: sandbox.id, status: { in: [...ACTIVE_SESSION_STATUSES] } },
+        select: { id: true, sandboxId: true },
+      });
+      const runtime = getAgentRuntime();
+      for (const s of active) {
+        try {
+          await runtime.suspend(s);
+        } catch {
+          // 프로세스가 이미 죽었거나 미등록이어도 삭제는 계속 진행.
+        }
+      }
+    }
+
+    // 2) FK 안전 순서로 행 삭제(스키마에 onDelete cascade 미설정).
+    await prisma.$transaction(async (tx) => {
+      // 자기참조(replyToId) 먼저 끊고 메시지 삭제.
+      await tx.message.updateMany({ where: { postId: id }, data: { replyToId: null } });
+      await tx.message.deleteMany({ where: { postId: id } });
+      if (sandbox) {
+        await tx.toolCall.deleteMany({ where: { session: { sandboxId: sandbox.id } } });
+        await tx.agentSession.deleteMany({ where: { sandboxId: sandbox.id } });
+      }
+      await tx.vote.deleteMany({ where: { postId: id } });
+      await tx.bookmark.deleteMany({ where: { postId: id } });
+      if (sandbox) {
+        await tx.sandbox.delete({ where: { id: sandbox.id } });
+      }
+      await tx.post.delete({ where: { id } });
+    });
+
+    // 3) 샌드박스 격리 디렉토리 삭제(루트 내부 확인 후에만).
+    if (sandbox) {
+      try {
+        await deleteSandboxDir(sandbox.path);
+      } catch (err) {
+        // 디렉토리 삭제 실패는 치명적이지 않음(행은 이미 삭제됨). 로깅만.
+        app.log.warn({ err, sandboxPath: sandbox.path }, 'sandbox dir cleanup failed');
+      }
+    }
+
+    return reply.code(200).send({ deleted: true });
   });
 
   // ── 추천(멱등 upsert) ────────────────────────────────

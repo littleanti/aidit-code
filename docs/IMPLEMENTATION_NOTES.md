@@ -108,4 +108,11 @@
 - 검증: Chrome MCP 전체 동작 — 세션 시작→메시지 전송→도구(!write) 실행(실 파일 생성)→TOOL_CALL/TOOL_RESULT 버블→파일 패널에 hello.py 표시.
 - 변경 파일: `frontend/src/api/rest.ts`.
 
+### 2026-06-25 · [feat] · 완료 · 글 삭제 시 샌드박스 폴더까지 정리 (DELETE /posts/:id)
+- **검증(③)**: 백엔드 `tsc` 클린 + `vitest` 55/55(deletePost 3 신규: 비작성자 403·작성자 200 전 행+디렉토리 삭제·루트 밖 경로 거부); 프론트 build PASS. Chrome MCP 실제 동작 — 작성자 전용 삭제 버튼→인라인 확인→삭제 후 홈 이동; `.sandboxes/<postId>` 디렉토리 디스크에서 제거 확인, `GET /posts/:id`=404, 피드에서 사라짐.
+- 요청: 글을 삭제하면 해당 게시글의 샌드박스 디렉토리도 함께 삭제. (sandboxLifecycle §6.1 step7 cleanup 구현)
+- 구현: `DELETE /posts/:id`(requireAuth, 작성자만 403) — ① 활성 AgentSession 있으면 runtime.suspend로 프로세스 종료, ② 트랜잭션으로 FK 안전 순서 삭제(message.replyToId null 처리→message→toolCall→agentSession→vote/bookmark→sandbox→post), ③ 샌드박스 디렉토리 `rm -rf`(pathGuard isInsideRoot로 sandboxRoot 내부 확인 후에만 삭제 — 루트 밖 경로 거부), ④ sandbox.status SSE 불필요(글 자체 삭제). 프론트: Thread에 작성자 전용 삭제 버튼(term-red, 확인) → 삭제 후 홈 이동.
+- 종료 기준: 작성자가 글 삭제 시 200 + DB 행 전부 제거 + `.sandboxes/<postId>` 디렉토리 삭제; 비작성자 403; 활성 프로세스 종료; 루트 밖 경로는 절대 삭제하지 않음.
+- 예상 변경 파일: `backend/src/routes/posts.ts`(DELETE 라우트), `backend/src/sandbox/service.ts`(deleteSandboxDir 헬퍼), `backend/test/deletePost.test.ts`; `frontend/src/api/rest.ts`(deletePost), `frontend/src/pages/Thread.tsx`(삭제 버튼), `frontend/src/i18n/dicts/thread.ts`.
+
 <!-- 새 항목은 이 줄 위에 추가 -->
