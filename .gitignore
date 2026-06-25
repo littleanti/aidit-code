@@ -1,0 +1,45 @@
+# Secrets — 절대 커밋 금지 (TRD §2·§8: LLM 키는 서버 .env 에만)
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# Databases (PoC SQLite)
+*.sqlite
+*.sqlite3
+*.db
+
+# Sandbox 런타임 작업 디렉토리 (게시글별 격리 루트)
+sandboxes/
+
+# OMC (oh-my-claudecode) 로컬 오케스트레이션 상태
+.omc/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

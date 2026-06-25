@@ -1,0 +1,408 @@
+# Aidit-Code — 구현 계획서 (PLAN.md)
+
+> 관련 문서: [PRD.md](./PRD.md), [TRD.md](./TRD.md), [WIREFRAME.md](./WIREFRAME.md), [IMPLEMENTATION_NOTES.md](./IMPLEMENTATION_NOTES.md)
+> 상태: PoC · 버전: 0.1 · 날짜: 2026-06-25
+> 본 계획서는 5개 영역 계획(Backend / Realtime / Frontend / AgentRuntime / Cross-cutting)을 종합한 것으로, Foundation(단일 출처)의 데이터 모델·API·이벤트·화면·라이프사이클에 엄격히 근거한다. Foundation과 본 계획서의 결정은 **구속력(binding)** 을 가진다.
+
+---
+
+> ## Δ from Aidit (부모 대비 무엇이 바뀌었는가)
+>
+> Aidit-Code는 부모 **Aidit**의 형제 프로젝트다. **그린 인광 CRT 레트로 터미널 디자인 시스템은 100% 계승**하고, 본 계획서도 부모 PLAN.md의 구조·섹션·톤을 거울처럼 따른다. **동작 모델만** 아래처럼 교체했다.
+>
+> | 영역 | 부모 Aidit (폐기/교체) | Aidit-Code (신규) |
+> |------|------------------------|--------------------|
+> | LLM/키 | **BYOK** — 브라우저가 사용자 키로 Google Gemini 직접 호출, 서버 key-blind | **서버 운영자 키** — OpenAI-compatible `apikey`/`baseURL`을 **백엔드 `.env`** 에 저장, 클라 미노출·로그 미포함 |
+> | 컨텍스트 | 클라이언트 **128K 지연 요약 엔진**(`contextEngine.ts`) + `ContextSegment` SoT | **pi agent 런타임이 컨텍스트·요약·툴 결과 자체 관리**. 서버는 메시지/이벤트 SoT(seq)와 SSE 릴레이만 |
+> | 단위 | 커뮤니티 + 페르소나(생성자 소유) + 글 | **커뮤니티/페르소나 전면 제거**. **게시글(Post)만** 존재. 홈=게시글 피드 |
+> | 실행 | LLM 호출만(코드 실행 없음) | **게시글당 백엔드 샌드박스 1:1 자동 생성** → 샌드박스에서 도는 **pi agent**가 파일 CRUD·venv·패키지 설치·쉘 실행 |
+> | 채팅방 | 공유 AI 컨텍스트를 함께 쌓는 댓글 스레드 | **샌드박스의 에이전트 세션** — 다중 참여자가 같은 세션에 attach(fan-out), AI on/off 토글 |
+> | 데이터 모델 | Community / ContextSegment / Comment | Community·ContextSegment 제거. **Sandbox / AgentSession / Message(=버블, Comment 대체) / ToolCall** 신규 |
+> | 실시간 | `comment.created/updated`, `segment.opened` | `message.created/updated`, `agent.token`, `tool.call/output/result`, `file.changed`, `session.status`, `sandbox.status` |
+> | UI | GEMINI 연결 배지, 키 입력 폼, API Key 설정 | 배지·키 폼·키 설정 **삭제**. 대신 에이전트/샌드박스 상태 인디케이터 + (선택) `/runtime` read-only |
+>
+> 계승: User(게스트#hex4)·Vote·Bookmark·JWT 인증(슬라이딩 7일)·i18n(KO/EN)·SSE fan-out 패턴·term-* 디자인 토큰·모바일 우선.
+
+---
+
+## 1. 개요 (Introduction)
+
+Aidit-Code는 **게시글마다 백엔드 샌드박스에서 도는 코드 에이전트(pi agent)에 여러 사람이 함께 붙어, AI on/off로 채팅하며 협업 코딩하는 플랫폼**이다. 사용자가 글을 만들면 백엔드가 **샌드박스 디렉토리 하나를 생성해 그 게시글에 1:1로 할당**하고, 스레드에 진입하면 그 방은 **샌드박스에서 spawn된 pi agent 세션**이 된다. 모든 참여자는 같은 세션에 attach하며, 에이전트의 토큰·도구 호출·파일 변경은 **한 번 생성되어 전원에게 동일하게 SSE로 fan-out**된다.
+
+부모 Aidit과 가장 큰 차이는 **LLM/키 모델**이다. **BYOK를 전면 폐기**하고, LLM은 **OpenAI-compatible** 로 동작하며 `apikey`/`baseURL`은 **백엔드 서버의 `.env`** 에만 저장된다(클라이언트 미노출, 응답·로그에 키 미포함). 비용은 **서버(운영자 키)** 부담이며, 남용 방지는 글/메시지 레이트리밋 + 샌드박스 동시 실행 수 제한으로 한다. 컨텍스트 관리(히스토리·요약)는 부모의 클라이언트 128K 요약 엔진이 아니라 **pi agent 런타임의 책임**이다.
+
+본 문서는 작업을 **5개 영역**, **7개 마일스톤(M1→M7)** 으로 분해한다. 아키텍처는 **확정(locked)** 되어 있다: Node 20 + Fastify + Prisma 백엔드(메시지/이벤트 SoT + post별 SSE 릴레이 + **AgentRuntime 어댑터**); React 18 + TypeScript + Vite 모바일 우선 프론트엔드; pi agent 런타임 채택; 샌드박스는 **호스트 디렉토리 격리 + 경로 탈출 차단 + 리소스/네트워크 정책**; 컨테이너(Firecracker/gVisor/Docker) 강화는 Out of Scope(후속).
+
+---
+
+## 2. 핵심 원칙 & 확정 결정 (Guiding Principles & Locked Decisions)
+
+| # | 결정 | 출처 | 계획상 결과 |
+|---|------|------|-------------|
+| L1 | **LLM 키는 서버 `.env`에만**(OpenAI-compatible `apikey`/`baseURL`). 어떤 모델에도 키 필드 없음; 클라 응답/헤더/로그에 절대 없음. | Foundation keyDecisions; PRD | AgentRuntime이 spawn 시 키를 주입; XC-1 redaction 체크리스트로 강제. BYOK·connect-src·GEMINI 배지 전부 폐기. |
+| L2 | **샌드박스 내부는 모든 permission 허용**(파일 CRUD·venv·패키지·쉘). 격리 경계는 (a) 디렉토리 경로 탈출 차단, (b) 리소스 제한(cgroup-lite, PoC), (c) 네트워크 정책. | Foundation sandboxLifecycle §3 | 파일 API·도구 실행 모두 루트 상대 경로 강제(`..`/symlink 차단, BE-FILES/XC-ISO). 컨테이너 강화 Out of Scope. |
+| L3 | **컨텍스트/요약은 pi agent 런타임의 책임.** 서버는 보관·요약하지 않는다. 부모 `contextEngine.ts`·`ContextSegment` 폐기. | Foundation keyDecisions | 서버는 메시지/이벤트의 SoT(seq)와 SSE 릴레이만. AR(AgentRuntime) 영역이 히스토리를 런타임에 위임. |
+| L4 | **`seq`가 메시지 순서·SSE 재생·멱등성의 단일 출처(SoT)**. post 내 단조 증가, 서버 부여, `@@unique([postId, seq])`. | Foundation prismaSchema(Message) | BE가 `seq` 부여; RT가 `afterSeq`/`Last-Event-ID`로 재생. |
+| L5 | **게시글당 Sandbox 1:1(@unique).** 글 생성 시 자동 프로비저닝(CREATING→READY 비동기). | Foundation prismaSchema(Sandbox); sandboxLifecycle §1 | BE-PROV가 디렉토리 생성·할당; sandbox.status SSE 통지. |
+| L6 | **채팅방 = 샌드박스에서 도는 pi agent 세션.** 다중 클라가 동일 세션 attach(fan-out); 에이전트 출력 1회 생성·전원 동일 중계. 샌드박스당 동시 활성 세션 1개 권장(PoC). | Foundation keyDecisions; sandboxLifecycle §2 | AR-ATTACH가 spawn/attach; RT가 토큰/툴/파일 이벤트 중계. |
+| L7 | **LLM은 OpenAI-compatible, 모델명은 단일 config/세션 필드.** 키는 `AgentSession.model`에 저장하지 않고 모델명만. | Foundation prismaSchema(AgentSession.model) | AR-CFG config 모듈; `GET /runtime`이 model·baseURL 호스트만 read-only 노출(키 미포함). |
+| L8 | **커뮤니티/페르소나 없음.** Community/Persona 모델·화면 전면 제거. 홈=게시글 피드. | Foundation keyDecisions; screens | 부모의 BE-4(커뮤니티)/FE-5·6(검색/생성)/PersonaEditor 작업 **삭제**. |
+| L9 | **모바일 우선, 터치 ≥44px, 그린 인광 CRT(term-*) 100% 계승.** | 공유 결정 브리프; DESIGN-SYSTEM v2 | FE-SHELL 레이아웃; 신규 컴포넌트도 기존 term-* 팔레트만 사용(새 색 없음). |
+| L10 | **SQLite(PoC) → Postgres(확장)**, 무상태 서버(메시지/이벤트 외 상태는 런타임), 인메모리 pub/sub → Redis. | Foundation prismaSchema; TRD | BE-SCAF datasource 추상화; RT-PS pub/sub 인터페이스 seam. |
+| L11 | **JWT Bearer 인증(슬라이딩 갱신, 기본 7일).** 게스트(닉네임#hex4, passwordHash=null)·회원(username+password, bcrypt) 듀얼모드. 읽기=선택 인증, 쓰기=JWT 필수. | Foundation apiEndpoints(auth/*) | BE-AUTH register/session/guest/refresh + requireAuth/optionalAuth. **API 키 입력/저장 개념 없음.** |
+| L12 | **Message가 Comment를 대체/개명.** type = HUMAN \| AGENT_REPLY \| TOOL_CALL \| TOOL_RESULT \| SYSTEM. ToolCall은 TOOL_CALL/TOOL_RESULT 버블과 `toolCallId`로 1:1 연결. | Foundation prismaSchema(Message/ToolCall) | BE-MSG/BE-TOOL; FE-BUBBLE 5변형 렌더. |
+| L13 | **i18n(KO/EN) langStore/dicts/useT/tn 계승.** 에이전트 응답 언어는 가능 범위에서 UI 언어를 따른다(런타임에 언어 힌트 전달). | 공유 결정 브리프 | I18N 영역; 부모 BYOK 오류 사전은 **서버측 세션/에이전트 오류 메시지**로 의미 교체. |
+
+---
+
+## 3. 아키텍처 한눈에 보기 (Architecture at a Glance)
+
+- **시스템 다이어그램 & 데이터 흐름**: TRD §1 (클라 ↔ 서버 REST/SSE; 서버 ↔ 샌드박스 pi agent; 서버 ↔ LLM(OpenAI-compatible, `.env` 키). **클라→LLM 직접 호출 없음**).
+- **스택**: TRD §2 (React/TS/Vite/Zustand/Tailwind term-*; Node/Fastify; Prisma/SQLite→Postgres; SSE; 인메모리→Redis pub/sub; **AgentRuntime(pi) 어댑터**).
+- **데이터 모델**: Foundation prismaSchema (User/Post/Sandbox/AgentSession/Message/ToolCall/Vote/Bookmark). Community/ContextSegment 없음.
+- **에이전트 런타임**: TRD §AR (pi agent spawn/attach/stream/interrupt; OpenAI-compatible 백엔드 주입; 컨텍스트는 런타임 책임).
+- **샌드박스 격리**: Foundation sandboxLifecycle §3 (디렉토리 경로 탈출 차단 + 리소스 + 네트워크).
+- **실시간**: TRD §SSE (post별 SSE, 스냅샷 재생 후 라이브, `Last-Event-ID` 복구, 다중 attach fan-out).
+- **프론트엔드 구조**: TRD §FE.
+
+---
+
+## 4. 마일스톤 로드맵 (M1 → M7)
+
+각 마일스톤은 순서 있는 작업 패키지, 목표, 종료 기준을 나열한다. 디렉터리 정규화(구속력): 백엔드는 `backend/` 아래, 프론트엔드/스토어/스트림은 `frontend/src/` 아래. AgentRuntime 어댑터는 `backend/src/agent/*`, 샌드박스 프로비저닝은 `backend/src/sandbox/*`, 실시간은 `backend/src/realtime/*`.
+
+### M1 — 골격 (인증, 게시글, 홈 피드)
+PRD §M1 매핑. **부모 대비 제거**: 커뮤니티 생성/검색·페르소나 편집(L8), API 키 입력 폼·키 localStorage 저장(L1).
+
+| 순서 | WP | 제목 | 종료 관련 |
+|------|----|------|-----------|
+| 1 | BE-SCAF | 프로젝트 스캐폴드, Fastify+Prisma, datasource 설정 | 서버 부팅 |
+| 2 | BE-DB | Prisma 스키마(Foundation) + 마이그레이션 | DB 준비 |
+| 3 | BE-AUTH | `/auth/register` `/auth/session` `/auth/guest` `/auth/refresh` (JWT, bcrypt, 게스트#hex4) | 인증 계약 |
+| 4 | BE-MW | JWT 미들웨어 + requireAuth/optionalAuth | 쓰기 경로 보호 |
+| 5 | BE-HOT | hotScore 순수 재계산 함수 | 정렬 유틸 |
+| 6 | BE-POST | 게시글: `POST /posts`(+Sandbox 1:1 자동생성 훅), `GET /posts/:id`, `GET /posts?sort=hot|new&cursor=` | FR-POST |
+| 7 | BE-VOTE | `POST/DELETE /posts/:id/upvote` (멱등 토글, hot 갱신) | 인기 피드 |
+| 8 | FE-SHELL | 앱 셸, 라우터, 모바일 레이아웃, 헤더(GEMINI 배지 없음), 탭바 | 내비게이션 |
+| 9 | FE-API | API 클라이언트(`rest.ts`) + `api/types.ts`(키 필드 없음, Bearer 헤더 인터셉터) | 계약 |
+| 10 | FE-AUTH | authStore(`{userId, username, token}` 영속화, **키 없음**) + Login 모달(2탭+게스트, API 키 필드 삭제) | L1, L11 |
+| 11 | FE-HOME | 홈 피드 (PostCard, hot/new 탭, cursor, 카드에 sandbox.status 요약) | FR-FEED |
+| 12 | FE-CREATE | CreatePost(제목/본문=작업 지시) → 게시 후 Thread 이동 | FR-POST |
+
+**M1 종료 기준**: 회원가입/로그인/게스트가 `{userId,username,token}`을 영속화; 글 작성이 Post 등록 + Sandbox 행 생성 후 스레드 라우트 반환; 홈 hot/new 피드가 cursor로 렌더; 카드에 샌드박스 상태 요약 표시; 서버 어디에도 LLM 키 필드 없음(XC-1 스폿 체크); Login·Settings에 API 키 입력/섹션 없음.
+
+### M2 — 샌드박스 프로비저닝 (글 생성 → 폴더 생성·할당)
+PRD §M2 매핑. Foundation sandboxLifecycle §1.
+
+| 순서 | WP | 제목 | 종료 관련 |
+|------|----|------|-----------|
+| 1 | BE-SBX | Sandbox 서비스: 디렉토리 생성·할당(postId @unique), `path`/`status`/`runtime`/`meta` 영속화 | L5 |
+| 2 | BE-PROV | 글 생성 훅: Post 등록 직후 비동기 프로비저닝(CREATING→READY, 실패 ERROR), sandbox.status publish | 라이프사이클 §1 |
+| 3 | BE-ISO | 경로 해석/탈출 차단 유틸(루트 상대 강제, `..`/symlink 차단) — 파일 API·도구 실행 공용 | L2 |
+| 4 | BE-LIMIT | 동시 생성 수 제한(운영자 키 비용/리소스 보호) — 초과 시 큐잉 또는 429 | 남용 방지 |
+| 5 | RT-PS | pub/sub 인터페이스(`PubSub` seam) + 인메모리 구현 + `publish(postId, event)` | RT 기반 |
+| 6 | RT-SBXEV | `sandbox.status` 이벤트 스키마 + 발행 연결 | 상태 표면 |
+| 7 | FE-SBXBADGE | 샌드박스 상태 배지(READY/RUNNING=term-amber, ERROR=term-red, 유휴=term-dim) | 인디케이터 |
+
+**M2 종료 기준**: 글 생성 시 샌드박스 디렉토리 1개가 생성되어 그 글에 1:1(@unique) 할당; status가 CREATING→READY로 전이되며 `sandbox.status` SSE가 시청자에게 도달; 프로비저닝 실패 시 ERROR로 표면화; 동시 생성 초과 시 429/큐잉; 경로 탈출 차단 유틸이 `..`/symlink를 거부.
+
+### M3 — pi agent 런타임 어댑터 (spawn / attach / OpenAI-compatible 주입)
+PRD §M3 매핑. Foundation sandboxLifecycle §2. **부모 대비 제거**: 클라이언트 GeminiClient·BYOK 호출·128K 요약 엔진(L1/L3).
+
+| 순서 | WP | 제목 | 종료 관련 |
+|------|----|------|-----------|
+| 1 | AR-CFG | LLM config 모듈: `.env`의 `API_KEY`/`BASE_URL`/`MODEL` 로드(단일 출처, PoC 기본 GitHub Models `openai/gpt-4o-mini`, 키는 메모리·미로깅) | L1, L7 |
+| 2 | AR-RT | AgentRuntime 어댑터 인터페이스: `spawn` / `attach` / `sendInput` / `interrupt` / `suspend` / `streamEvents` | L6 |
+| 3 | AR-PI | pi agent 구현 바인딩: 프로세스 spawn(키/baseURL/model·언어힌트 주입), PID 추적, 종료 처리 | 런타임 채택 |
+| 4 | BE-SESS | `POST /posts/:id/session` attach/시작: READY/SUSPENDED→spawn(STARTING→IDLE), 활성 시 기존 세션 attach. Sandbox.status=RUNNING | 라이프사이클 §2 |
+| 5 | BE-SUSPEND | `POST /posts/:id/session/suspend`: 프로세스 내림, Sandbox=SUSPENDED(디렉토리 보존), resume 시 재spawn | 라이프사이클 §5–6 |
+| 6 | RT-SESSEV | `session.status` 이벤트 스키마 + 발행 연결 | 상태 표면 |
+| 7 | GET-RUNTIME | `GET /runtime`: model·baseURL 호스트 read-only(키 절대 미포함) | Settings 표시 |
+
+**M3 종료 기준**: 스레드 진입 시 READY/SUSPENDED 샌드박스에서 pi agent 프로세스가 spawn되어 AgentSession(STARTING→IDLE) 생성; `.env`의 OpenAI-compatible 키/baseURL/model이 주입되되 응답·로그에 키 미포함; 이미 활성 세션이면 새 프로세스 없이 attach; suspend가 프로세스를 내리고 디렉토리 보존, 다음 attach가 resume; `session.status`/`sandbox.status` SSE가 인디케이터를 갱신; `GET /runtime`이 키 없이 model/host만 반환.
+
+### M4 — 협업 채팅 + SSE fan-out (다중 attach)
+PRD §M4 매핑. Foundation sandboxLifecycle §3, realtimeEvents. **부모 SSE fan-out 패턴 계승**.
+
+| 순서 | WP | 제목 | 종료 관련 |
+|------|----|------|-----------|
+| 1 | BE-MSG | `POST /posts/:id/messages`(HUMAN): seq 부여, clientId 멱등, RT publish, aiMode=true면 활성 세션에 입력 주입 | FR-MSG, 멱등성 |
+| 2 | BE-MSGPAGE | `GET /posts/:id/messages?afterSeq=` keyset 페이지네이션(연결 toolCall 요약 포함) | NFR-PAGE |
+| 3 | RT-STREAM | `GET /posts/:id/stream`: afterSeq 스냅샷 재생 후 라이브 구독 | FR-RT |
+| 4 | RT-EV | 이벤트 스키마: `message.created`/`message.updated`/`agent.token` | 메시지 스트림 |
+| 5 | RT-REPLAY | `Last-Event-ID`(=seq) 재접속 갭 재생 | 복구 |
+| 6 | AR-TURN | 에이전트 턴: 입력 주입 → AGENT_REPLY PENDING 게시 → `agent.token` 누적 → COMPLETE/FAILED PATCH | 라이프사이클 §3 |
+| 7 | BE-INT | `POST /posts/:id/interrupt`: 진행 턴 중단(steer 선택), STREAMING→COMPLETE(부분)/FAILED 확정, session=INTERRUPTED | 라이프사이클 §4 |
+| 8 | FE-THREAD | threadStore(버블 리스트, 활성 세션, seq dedupe, 낙관적 삽입) | 상태 |
+| 9 | FE-BUBBLE | ChatBubble: HUMAN(좌 타인/우 본인 `authorId===userId`), AGENT_REPLY(좌, 앰버 틴트) + 스트리밍/타이핑 인디케이터 | L12 |
+| 10 | FE-STREAM | `useThreadStream` EventSource 훅(구독+재생+seq dedupe, fan-out 수신) | FR-RT |
+| 11 | FE-COMPOSER | Composer: 메시지 전송, AI on/off 토글, clientId 전송, 인터럽트/스티어링 버튼 | FR-MSG |
+
+**M4 종료 기준**: 한 스레드를 보는 두 브라우저가 동일 에이전트 출력을 P95 < 1.5초에 확인(NFR); 본인 메시지 우측, 타인/에이전트 좌측; aiMode=true 전송이 활성 세션 턴을 시작해 `agent.token` 스트리밍; 재접속 시 놓친 버블 재생(`Last-Event-ID`); clientId 재요청은 동일 버블 반환; 인터럽트가 진행 턴을 중단하고 부분 답변 보존.
+
+### M5 — 도구 실행 표면 (파일 CRUD·쉘·venv) + 터미널/툴 버블
+PRD §M5 매핑. Foundation prismaSchema(ToolCall), realtimeEvents(tool.*). **부모에 없던 신규 영역**.
+
+| 순서 | WP | 제목 | 종료 관련 |
+|------|----|------|-----------|
+| 1 | BE-TOOL | ToolCall 영속화: kind(SHELL/FILE_*/PACKAGE/OTHER)·name·args·result·exitCode·status, Message(TOOL_CALL/TOOL_RESULT) `toolCallId` 1:1 연결 | L12 |
+| 2 | AR-TOOL | 런타임 도구 이벤트 캡처: 에이전트가 샌드박스에서 실행한 쉘/파일/패키지 호출을 ToolCall + 버블로 매핑 | 도구 표면 |
+| 3 | RT-TOOLEV | 이벤트 스키마: `tool.call`/`tool.output`/`tool.result` 발행 연결(stdout/stderr 스트리밍) | 실시간 도구 |
+| 4 | FE-TOOLCALL | TOOL_CALL 버블(`$ <cmd>` 프롬프트 풍, term-dim/faint) | 디자인 규칙 ① |
+| 5 | FE-TOOLRESULT | TOOL_RESULT 버블(고정폭 스크롤 컨테이너, 성공=기본/실패=term-red, exitCode 표시) | 디자인 규칙 ② |
+| 6 | FE-TOOLSTREAM | tool.output 청크 누적(실행 중 라이브 출력), tool.result로 색·상태 확정 | 라이프사이클 §3 |
+
+**M5 종료 기준**: 에이전트가 샌드박스 내부에서 파일 생성/삭제·venv 세팅·패키지 설치·쉘 실행을 수행(모든 permission 허용); 각 호출이 TOOL_CALL 버블(`$ cmd`)로 시작해 `tool.output` 스트리밍 후 TOOL_RESULT로 확정(성공/실패 색·exitCode); 도구 실행이 경로 탈출 차단(BE-ISO)을 강제; 모든 도구 이벤트가 동일 세션 attach 전원에게 fan-out.
+
+### M6 — 워크스페이스 / 파일 트리 패널
+PRD §M6 매핑. Foundation apiEndpoints(`/files`, `/files/content`), realtimeEvents(file.changed).
+
+| 순서 | WP | 제목 | 종료 관련 |
+|------|----|------|-----------|
+| 1 | BE-FILES | `GET /posts/:id/files?path=`(디렉토리 트리, 루트 상대·BE-ISO 강제, 위반 400) | 워크스페이스 |
+| 2 | BE-FILECONTENT | `GET /posts/:id/files/content?path=`(단일 파일, 바이너리 거부/메타, 대용량 잘라 반환) | 파일 열람 |
+| 3 | RT-FILEEV | `file.changed`(CREATED/MODIFIED/DELETED, size?) 발행 — 도구 실행에서 트리거 | 트리 갱신 |
+| 4 | FE-FILETREE | 파일 트리/워크스페이스 패널(term-panel, 라인 아이콘 SVG, 접기/펼치기) | 디자인 규칙 ③ |
+| 5 | FE-FILEVIEW | 파일 내용 뷰어(고정폭, term-* 신택스 없는 단순 표시) + file.changed 라이브 갱신 | 워크스페이스 |
+
+**M6 종료 기준**: 워크스페이스 패널이 샌드박스 파일 트리를 렌더(루트 상대 경로만, `..`/symlink 거부 400); 파일 클릭 시 내용 조회(바이너리 거부, 대용량 truncate); 에이전트의 파일 변경이 `file.changed`로 패널을 라이브 갱신; 패널은 term-* 팔레트·라인 SVG만 사용(새 색 없음).
+
+### M7 — 다듬기 (레이트리밋·격리 강화·i18n·상태·지표)
+PRD §M7 매핑. NFR + 지표 + i18n + 라이선스.
+
+| 순서 | WP | 제목 | 종료 관련 |
+|------|----|------|-----------|
+| 1 | XC-ISO | 격리 강화: 리소스 제한(프로세스/메모리/CPU, cgroup-lite) + 네트워크 정책 적용 | L2 |
+| 2 | XC-RATE | 레이트리밋(글/메시지) + 샌드박스 동시 실행 수 제한 | 남용 방지 |
+| 3 | XC-REDACT | 키 redaction 테스트(서버 로그/응답에 키 형태 0건) + key-blind 체크리스트 | L1 |
+| 4 | BE-BOOKMARK | `POST/DELETE /posts/:id/bookmark` + `GET /users/:id/bookmarks`(커서) | 계승 |
+| 5 | BE-USERPOSTS | `GET /users/:id/posts`(커서) | 프로필 |
+| 6 | BE-METRICS | `GET /metrics`: 글당 평균 에이전트 턴·스레드 고유 참여자·세션 성공률 | 지표 |
+| 7 | FE-PROFILE | Profile(/me): 탭 [posts \| bookmarks](communities 탭 제거), usePagedList 무한 스크롤 | 화면 |
+| 8 | FE-SETTINGS | Settings(/me/settings): Language(LangToggle) + 로그아웃 + (선택) `GET /runtime` read-only. **API Key 섹션 삭제** | 화면 |
+| 9 | I18N | langStore/dicts/useT/tn 계승, 신규 버블·패널·상태 문자열 키화, 에이전트 언어 힌트, 서버 세션/에이전트 오류 사전 | L13 |
+| 10 | FE-STATES | 빈/에러/오프라인 + SSE 재접속 배너 + 세션/샌드박스 ERROR 안내(SYSTEM 버블) | 신뢰성 |
+| 11 | XC-LICENSE | MIT LICENSE + 헤더 | 라이선스 |
+| 12 | XC-T | 통합 테스트 스위트(unit/contract/integration/E2E) | TRD §테스트 |
+
+**M7 종료 기준**: 모든 PRD 수용 항목이 E2E로 통과; 격리(경로 탈출+리소스+네트워크) 강제; 레이트리밋·동시 실행 제한 동작; 키 redaction green; Profile 2탭 무한 스크롤; Settings에 API Key 섹션 없음·Language/로그아웃 동작; i18n KO↔EN 전환 + 에이전트 응답 언어 추종; 지표 엔드포인트 존재; LICENSE 존재; 통합 테스트 green.
+
+---
+
+## 5. 상세 작업 패키지 (Detailed Work Packages)
+
+> 5개 영역. 누락 없음. **부모 대비 제거된 WP(WP 없음)**: 커뮤니티 CRUD(BE-4)·커뮤니티 검색/상세·CreateCommunity·PersonaEditor·PersonaBadge(L8); 클라이언트 GeminiClient·buildContents·128K 요약 오케스트레이션·ContextSegment 생명주기·세그먼트 전환(L1/L3); CSP connect-src Google 화이트리스트·GEMINI 배지·키 입력 폼·키 redaction은 서버측으로 의미 교체(XC-REDACT).
+
+### Backend (`backend/`)
+
+| id | 제목 | 설명 | deps | files | est |
+|----|------|------|------|-------|-----|
+| BE-SCAF | 스캐폴드 | Fastify+TS, Prisma 초기화, datasource 추상화(SQLite→Postgres), config, health | — | `backend/src/app.ts`, `backend/src/config.ts`, `backend/prisma/schema.prisma`(init) | S |
+| BE-DB | 스키마+마이그레이션 | Foundation prismaSchema 구현: User/Post/Sandbox/AgentSession/Message/ToolCall/Vote/Bookmark + enum. **어떤 모델에도 LLM 키 필드 없음.** `Message.@@unique([postId, seq])`, `[postId, clientId]` 인덱스. 마이그레이션 생성. | BE-SCAF | `backend/prisma/schema.prisma`, `backend/prisma/migrations/*` | M |
+| BE-AUTH | Auth | `/auth/register`(bcrypt, 중복 409), `/auth/session`(검증 401), `/auth/guest`(닉네임≤16·'#'금지, 서버 #hex4 부여·충돌 재생성, passwordHash=null), `/auth/refresh`(슬라이딩 7일). 모두 `{id,token,username}`. 키 미수령. | BE-DB | `backend/src/routes/auth.ts` | M |
+| BE-MW | JWT 미들웨어 | `Authorization: Bearer` 파싱·검증 → `request.user`. `requireAuth`(401)/`optionalAuth`(null). | BE-AUTH | `backend/src/plugins/auth.ts` | S |
+| BE-HOT | hotScore 함수 | 순수 재계산 `hotScore(score, commentCount, createdAt)`. | BE-DB | `backend/src/domain/hotScore.ts` | S |
+| BE-POST | 게시글 | `POST /posts`(등록 후 BE-PROV 훅 트리거), `GET /posts/:id`(sandbox/session 요약·voted·bookmarked), `GET /posts?sort=hot\|new&cursor=`(카드에 sandbox.status). `PATCH /posts/:id`(작성자만, 403). | BE-DB, BE-MW, BE-HOT, BE-SBX | `backend/src/routes/posts.ts` | M |
+| BE-VOTE | Upvote | `POST/DELETE /posts/:id/upvote` 멱등, score=Vote count 재계산 + hotScore 갱신, `{voted}`. | BE-MW, BE-HOT, BE-POST | `backend/src/routes/posts.ts` | S |
+| BE-SBX | Sandbox 서비스 | 디렉토리 생성·할당(postId @unique), path/status/runtime/meta 영속화, 상태 전이 헬퍼. | BE-DB, BE-ISO | `backend/src/sandbox/service.ts` | M |
+| BE-PROV | 프로비저닝 훅 | Post 등록 직후 비동기: 폴더/런타임 메타 준비(CREATING→READY, 실패 ERROR), sandbox.status publish. | BE-SBX, RT-PS | `backend/src/sandbox/provision.ts` | M |
+| BE-ISO | 경로 격리 유틸 | 루트 상대 경로 강제, `..`/symlink/절대경로 탈출 차단(파일 API·도구 실행 공용). | BE-SCAF | `backend/src/sandbox/pathGuard.ts` | S |
+| BE-LIMIT | 동시 생성 제한 | 샌드박스 동시 프로비저닝/실행 수 제한 — 초과 시 큐잉 또는 429. | BE-SBX | `backend/src/sandbox/limiter.ts` | S |
+| BE-SESS | 세션 attach | `POST /posts/:id/session`: READY/SUSPENDED→spawn(AR-RT), 활성 시 attach, Sandbox=RUNNING. `{session}`. | BE-DB, BE-MW, AR-RT, BE-SBX | `backend/src/routes/session.ts` | M |
+| BE-SUSPEND | 세션 suspend | `POST /posts/:id/session/suspend`: 프로세스 내림, Sandbox=SUSPENDED(디렉토리 보존). 유휴 타이머 호출 경로 포함. | BE-SESS, AR-RT | `backend/src/routes/session.ts` | S |
+| BE-INT | 인터럽트/스티어링 | `POST /posts/:id/interrupt`: 진행 턴 중단(steer 선택), STREAMING→COMPLETE(부분)/FAILED 확정, session=INTERRUPTED, SSE 통지. | BE-SESS, AR-RT, BE-MSG | `backend/src/routes/session.ts` | M |
+| BE-MSG | 메시지 게시(HUMAN) | `POST /posts/:id/messages`: seq 부여, sessionId 해석, clientId 멱등(재요청 시 기존 반환), RT publish, aiMode=true면 세션에 입력 주입(AR-TURN). | BE-DB, BE-MW, RT-PS, AR-RT | `backend/src/routes/messages.ts` | M |
+| BE-MSGPAGE | 메시지 페이지네이션 | `GET /posts/:id/messages?afterSeq=` seq keyset(페이지 50), 연결 toolCall 요약 포함. | BE-DB, BE-MSG | `backend/src/routes/messages.ts` | S |
+| BE-TOOL | ToolCall 영속화 | kind/name/args/result/exitCode/status 저장, Message(TOOL_CALL/TOOL_RESULT) `toolCallId` 1:1 연결, 상태 전이. | BE-DB, BE-MSG | `backend/src/domain/toolCall.ts` | M |
+| BE-FILES | 파일 트리 | `GET /posts/:id/files?path=` 디렉토리 엔트리(BE-ISO 강제, 위반 400). | BE-DB, BE-ISO, BE-SBX | `backend/src/routes/files.ts` | M |
+| BE-FILECONTENT | 파일 내용 | `GET /posts/:id/files/content?path=`(바이너리 거부/메타, 대용량 truncate, BE-ISO). | BE-FILES | `backend/src/routes/files.ts` | S |
+| BE-BOOKMARK | 북마크 | `POST/DELETE /posts/:id/bookmark`(멱등), `GET /users/:id/bookmarks?cursor=`(bookmark 행 기준 정렬). | BE-DB, BE-MW | `backend/src/routes/bookmarks.ts` | M |
+| BE-USERPOSTS | 사용자 글 | `GET /users/:id/posts?cursor=`(post.createdAt desc, id desc). | BE-DB | `backend/src/routes/users.ts` | S |
+| BE-METRICS | 지표 | `GET /metrics`: 글당 평균 에이전트 턴, 스레드 고유 참여자, 세션 성공률. | BE-DB | `backend/src/routes/metrics.ts` | M |
+| GET-RUNTIME | 런타임 정보 | `GET /runtime`: model·baseURL 호스트 read-only(**키 절대 미포함**). | AR-CFG | `backend/src/routes/runtime.ts` | XS |
+
+### Realtime (`backend/src/realtime/*`)
+
+| id | 제목 | 설명 | deps | files | est |
+|----|------|------|------|-------|-----|
+| RT-PS | Pub/sub seam | `PubSub` 인터페이스 + 인메모리 구현 + `publish(postId, event)`(Redis 교체 가능). | BE-SCAF | `backend/src/realtime/pubsub.ts`, `publish.ts` | M |
+| RT-STREAM | Stream 엔드포인트 | `GET /posts/:id/stream`: afterSeq 스냅샷 재생 후 라이브 구독, heartbeat. **BE-MSG/AR-TURN 이벤트 소비**. | RT-PS, BE-MSG | `backend/src/realtime/stream.ts` | M |
+| RT-EV | 메시지 이벤트 스키마 | 타입 지정 `message.created`/`message.updated`/`agent.token`. | RT-PS | `backend/src/realtime/events.ts` | S |
+| RT-REPLAY | 재접속 재생 | `Last-Event-ID`(=seq) 갭 재생. | RT-STREAM, RT-EV, BE-MSGPAGE | `backend/src/realtime/stream.ts` | S |
+| RT-TOOLEV | 도구 이벤트 | `tool.call`/`tool.output`/`tool.result` 스키마 + 발행 연결(stdout/stderr 청크). | RT-PS, BE-TOOL | `backend/src/realtime/events.ts` | M |
+| RT-FILEEV | 파일 이벤트 | `file.changed`(CREATED/MODIFIED/DELETED, size?) 발행. | RT-PS | `backend/src/realtime/events.ts` | S |
+| RT-SESSEV | 세션 이벤트 | `session.status`(STARTING/IDLE/RUNNING/INTERRUPTED/STOPPED/ERROR) 발행. | RT-PS | `backend/src/realtime/events.ts` | S |
+| RT-SBXEV | 샌드박스 이벤트 | `sandbox.status`(CREATING/READY/RUNNING/SUSPENDED/ERROR, lastActiveAt) 발행. | RT-PS | `backend/src/realtime/events.ts` | S |
+
+### AgentRuntime (`backend/src/agent/*`)
+
+| id | 제목 | 설명 | deps | files | est |
+|----|------|------|------|-------|-----|
+| AR-CFG | LLM config | `.env`의 OpenAI-compatible `API_KEY`/`BASE_URL`/`MODEL` 로드(단일 출처, PoC 기본 GitHub Models `openai/gpt-4o-mini`, 메모리만, 미로깅). | BE-SCAF | `backend/src/agent/config.ts` | S |
+| AR-RT | 어댑터 인터페이스 | `AgentRuntime`: `spawn`/`attach`/`sendInput`/`interrupt`/`suspend`/`streamEvents`(런타임 교체 가능 seam). | AR-CFG | `backend/src/agent/runtime.ts` | M |
+| AR-PI | pi agent 바인딩 | pi agent 프로세스 spawn(키/baseURL/model·언어힌트 주입), PID 추적, attach/resume, 종료. 컨텍스트·요약은 런타임 책임(L3). | AR-RT | `backend/src/agent/pi.ts` | L |
+| AR-TURN | 에이전트 턴 | 입력 주입 → AGENT_REPLY PENDING 게시 → `agent.token` 누적(seq) → COMPLETE/FAILED. session=RUNNING. | AR-PI, BE-MSG, RT-EV | `backend/src/agent/turn.ts` | L |
+| AR-TOOL | 도구 이벤트 캡처 | 런타임이 보고한 쉘/파일/패키지 호출을 ToolCall(BE-TOOL) + TOOL_CALL/TOOL_RESULT 버블로 매핑, tool.* 발행. | AR-PI, BE-TOOL, RT-TOOLEV | `backend/src/agent/toolBridge.ts` | M |
+
+### Frontend (`frontend/src/`)
+
+| id | 제목 | 설명 | deps | files | est |
+|----|------|------|------|-------|-----|
+| FE-SHELL | 앱 셸 | 라우터, 모바일 우선 레이아웃, 하단 탭바, 헤더(**GEMINI 배지 없음**, ShellPrompt 매핑 갱신), term-* 토큰. | — | `frontend/src/App.tsx`, `frontend/src/layout/*` | M |
+| FE-API | API 클라이언트 + 타입 | `rest.ts`, `api/types.ts` — 세션/Post/Message/Sandbox/Session/ToolCall DTO(**키 필드 없음**), Bearer 헤더 인터셉터, 메시지 게시 `clientId`. | BE 계약 | `frontend/src/api/rest.ts`, `frontend/src/api/types.ts` | M |
+| FE-AUTH | authStore + Login | `{userId,username,token}` 영속화(**키 없음**); Login 모달 2탭(register/session)+게스트; **API 키 입력 필드 삭제**; 로그아웃 시 토큰 삭제. | FE-API, BE-AUTH | `frontend/src/stores/authStore.ts`, `frontend/src/components/LoginModal.tsx` | M |
+| FE-HOME | 홈 피드 | PostCard(sandbox.status 요약 + 업보트), hot/new 탭, cursor 무한 스크롤. | FE-SHELL, FE-API | `frontend/src/pages/Home.tsx`, `frontend/src/components/PostCard.tsx` | M |
+| FE-CREATE | CreatePost | 제목/본문(작업 지시), 게시 후 Thread 이동(+편집 모드 재사용). | FE-API | `frontend/src/pages/CreatePost.tsx` | S |
+| FE-THREAD | threadStore | 버블 리스트, 활성 세션, 낙관적 삽입, seq dedupe. | FE-API | `frontend/src/stores/threadStore.ts` | M |
+| FE-BUBBLE | ChatBubble | HUMAN(좌 타인/우 본인 `authorId===userId`), AGENT_REPLY(좌, 앰버 틴트) + 스트리밍/타이핑 인디케이터(디자인 규칙 ⑤). | FE-AUTH, FE-THREAD | `frontend/src/components/ChatBubble.tsx` | M |
+| FE-TOOLCALL | TOOL_CALL 버블 | `$ <cmd>` 프롬프트 풍, term-dim/faint(디자인 규칙 ①). | FE-BUBBLE | `frontend/src/components/ToolCallBubble.tsx` | S |
+| FE-TOOLRESULT | TOOL_RESULT 버블 | 고정폭 스크롤 컨테이너, 성공=기본/실패=term-red, exitCode(디자인 규칙 ②). | FE-BUBBLE | `frontend/src/components/ToolResultBubble.tsx` | M |
+| FE-COMPOSER | Composer | 메시지 입력, **AI on/off 토글**, clientId 전송, 인터럽트/스티어링 버튼. | FE-THREAD, FE-BUBBLE | `frontend/src/components/Composer.tsx` | M |
+| FE-STREAM | useThreadStream | EventSource 구독+재생+seq dedupe, fan-out 수신(메시지/토큰/도구/파일/상태). | RT-STREAM, RT-EV, FE-THREAD | `frontend/src/stream/useThreadStream.ts` | M |
+| FE-SBXBADGE | 상태 배지 | 샌드박스/세션 상태 배지(활성=term-amber, 실패=term-red, 유휴=term-dim)(디자인 규칙 ④). | FE-API | `frontend/src/components/StatusBadge.tsx` | S |
+| FE-FILETREE | 파일 트리 패널 | term-panel, 라인 SVG, 접기/펼치기, file.changed 라이브 갱신(디자인 규칙 ③). | BE-FILES, FE-STREAM | `frontend/src/components/FileTree.tsx` | M |
+| FE-FILEVIEW | 파일 뷰어 | 고정폭 단순 표시, 대용량 truncate 안내, file.changed 갱신. | BE-FILECONTENT, FE-FILETREE | `frontend/src/components/FileView.tsx` | S |
+| FE-PROFILE | Profile(/me) | 탭 [posts \| bookmarks], usePagedList 무한 스크롤, ⚙→/me/settings. | FE-API | `frontend/src/pages/Profile.tsx`, `frontend/src/hooks/usePagedList.ts` | M |
+| FE-SETTINGS | Settings | Language(LangToggle) + 로그아웃 + (선택) `GET /runtime` read-only. **API Key 섹션 삭제**. | FE-API, GET-RUNTIME | `frontend/src/pages/Settings.tsx` | S |
+| FE-STATES | 상태 | 빈/에러/오프라인, SSE 재접속 배너, 세션/샌드박스 ERROR 안내. | FE-HOME, FE-THREAD | `frontend/src/components/states/*` | S |
+
+### Cross-cutting (`backend/` + `frontend/`)
+
+| id | 제목 | 설명 | deps | files | est |
+|----|------|------|------|-------|-----|
+| XC-ISO | 격리 강화 | 리소스 제한(프로세스/메모리/CPU, cgroup-lite) + 네트워크 정책. 컨테이너 강화 Out of Scope. | BE-SBX, AR-PI | `backend/src/sandbox/limits.ts` | M |
+| XC-RATE | 레이트리밋 | 글/메시지 레이트리밋 + 샌드박스 동시 실행 수 제한. | BE-AUTH, BE-POST, BE-MSG, BE-LIMIT | `backend/src/plugins/rateLimit.ts` | S |
+| XC-REDACT | 키 redaction | 서버 로그/응답에 LLM 키 형태 payload 0건 단언 + key-blind 체크리스트 + CI grep 게이트. | AR-CFG, BE 전체 | `backend/test/security/redaction.test.ts`, `docs/checklists/key-blind.md` | S |
+| I18N | 다국어 | langStore/dicts/useT/tn 계승, 신규 버블·패널·상태 문자열 키화, 에이전트 언어 힌트(systemInstruction), 서버 세션/에이전트 오류 사전(KO/EN). | FE-SHELL, AR-PI | `frontend/src/i18n/*`, `frontend/src/stores/langStore.ts` | M |
+| XC-LICENSE | 라이선스 | MIT LICENSE + 소스 헤더. | — | `LICENSE` | XS |
+| XC-T | 통합 테스트 | 단일 스위트: hotScore/pathGuard/seq 멱등(unit); clientId 멱등 + 파일 경로 탈출 차단 + session attach(contract); 다중 클라 SSE fan-out + 도구 스트리밍 + suspend/resume(integration); E2E(글→샌드박스→세션→AI 턴→도구→파일, pi 모킹+실런타임). | 모든 구현 WP | `backend/test/**`, `frontend/src/**/*.test.ts`, `e2e/**` | L |
+
+---
+
+## 6. 의존성 / 순서 노트 (Dependency / Sequencing Notes)
+
+**임계 경로(Critical path)**: BE-SCAF→BE-DB→BE-AUTH→BE-POST→BE-SBX→BE-PROV→AR-CFG→AR-RT→AR-PI→BE-SESS→BE-MSG→AR-TURN→RT-STREAM→BE-TOOL→AR-TOOL→XC-T.
+
+**순서 노트**:
+- **프로비저닝은 세션과 분리**: BE-PROV(M2, 폴더 생성)는 AgentRuntime에 의존하지 않는다 — Sandbox는 READY까지만 가고, 실제 pi agent spawn은 BE-SESS(M3)에서 일어난다. M2는 디렉토리·상태 표면까지만 닫는다.
+- **publish seam 선행**: RT-PS(M2)가 BE-MSG/AR-TURN보다 먼저 와야 BE 쓰기 경로가 stream 엔드포인트(RT-STREAM)에 결합되지 않는다. RT-STREAM(M4)이 BE-MSG 이벤트를 *소비*한다(역방향 아님).
+- **ToolCall ↔ Message 연결**: BE-TOOL(M5)은 BE-MSG(M4) 이후에 와야 `toolCallId` 1:1 연결이 성립. AR-TOOL은 AR-PI(M3) + BE-TOOL을 모두 소비.
+- **경로 격리 공용화**: BE-ISO(M2)를 파일 API(BE-FILES, M6)와 도구 실행(AR-TOOL, M5) 양쪽이 공유 — 격리 로직 단일 출처.
+
+**영역 간 의존성**:
+- FE↔BE 인터페이스: 구현 전에 `api/types.ts`(세션/Post/Message/Sandbox DTO, **키 필드 없음**, Bearer 헤더, 메시지 `clientId`) early-freeze.
+- AR↔BE: BE-SESS/BE-MSG/AR-TURN 전에 `AgentRuntime` 인터페이스(AR-RT)와 LLM config(AR-CFG) 동결.
+- RT 이벤트 스키마(RT-EV/TOOLEV/FILEEV/SESSEV/SBXEV)는 FE-STREAM 전에 동결.
+
+**병렬 레인**: M1 FE(FE-SHELL..FE-CREATE)는 FE-API 계약 동결 후 BE(BE-SCAF..BE-VOTE)와 병렬. M5 도구 버블 FE는 RT-TOOLEV 도착 후 병렬.
+
+**Early-freeze 항목**: `api/types.ts` 계약; RT 이벤트 스키마; `AgentRuntime` 인터페이스(AR-RT); LLM config(AR-CFG); 경로 격리 계약(BE-ISO).
+
+---
+
+## 7. 요구사항 추적 매트릭스 (Requirement Traceability Matrix)
+
+모든 요구사항이 ≥1개의 커버 WP에 매핑. 미커버 요구사항 없음.
+
+| 요구사항 | 커버 WP |
+|----------|---------|
+| 인증(register/session/guest/refresh, JWT 슬라이딩) | BE-AUTH, BE-MW, FE-AUTH, L11 |
+| 게스트#hex4(passwordHash=null) | BE-AUTH, FE-AUTH |
+| **LLM 키 서버 .env 전용, 클라/로그 미노출** | L1, AR-CFG, XC-REDACT, GET-RUNTIME |
+| 홈 게시글 피드(hot/new, cursor, sandbox.status) | BE-POST, BE-HOT, FE-HOME, RT-SBXEV |
+| 글 작성 | BE-POST, FE-CREATE |
+| 글 작성 → 샌드박스 1:1 자동 생성 | BE-PROV, BE-SBX, L5 |
+| 샌드박스 격리(경로 탈출+리소스+네트워크) | BE-ISO, XC-ISO, L2 |
+| 동시 생성/실행 제한 | BE-LIMIT, XC-RATE |
+| 세션 attach/시작(다중 fan-out) | BE-SESS, AR-RT, AR-PI, L6 |
+| 세션 suspend/resume | BE-SUSPEND, AR-PI, sandboxLifecycle §5–6 |
+| 인터럽트/스티어링 | BE-INT, AR-PI |
+| pi agent 런타임(OpenAI-compatible 주입) | AR-CFG, AR-RT, AR-PI, L7 |
+| 컨텍스트/요약 = 런타임 책임 | AR-PI, L3 |
+| 사람 메시지 전송(HUMAN, clientId 멱등) | BE-MSG, FE-COMPOSER |
+| AI on/off 토글 | FE-COMPOSER, BE-MSG(aiMode) |
+| 에이전트 턴(AGENT_REPLY 스트리밍) | AR-TURN, RT-EV, FE-BUBBLE |
+| 본인=우/타인·에이전트=좌 | FE-BUBBLE(`authorId===userId`), BE-AUTH |
+| 실시간 SSE fan-out | RT-PS, RT-STREAM, RT-EV, FE-STREAM |
+| 재접속 재생(Last-Event-ID) | RT-REPLAY, BE-MSGPAGE |
+| 도구 실행(파일CRUD·쉘·venv·패키지) | BE-TOOL, AR-TOOL, L2 |
+| TOOL_CALL/TOOL_RESULT 버블 | FE-TOOLCALL, FE-TOOLRESULT, RT-TOOLEV |
+| 워크스페이스/파일 트리 패널 | BE-FILES, BE-FILECONTENT, RT-FILEEV, FE-FILETREE, FE-FILEVIEW |
+| 상태 인디케이터(session/sandbox) | RT-SESSEV, RT-SBXEV, FE-SBXBADGE |
+| 추천(업보트) | BE-VOTE, FE-HOME(PostCard) |
+| 북마크 + 프로필 | BE-BOOKMARK, BE-USERPOSTS, FE-PROFILE |
+| Settings(Language+로그아웃, API Key 없음) | FE-SETTINGS, GET-RUNTIME |
+| i18n KO/EN + 에이전트 언어 추종 | I18N, L13 |
+| 지표(턴 수/참여자/세션 성공률) | BE-METRICS |
+| 신뢰성(세션/도구 실패 보존·안내) | AR-TURN, FE-STATES, FE-TOOLRESULT |
+| 라이선스 MIT | XC-LICENSE |
+| 성능 P95 < 1.5s 전파 | RT-STREAM, XC-T |
+
+**부모 대비 제거되어 매트릭스에서 빠진 요구사항**: 커뮤니티 검색/생성·페르소나=systemInstruction·생성자 페르소나 편집(L8); BYOK 키 로컬 저장·키 서버 미전송·CSP connect-src Google·GEMINI 성공률 배지(L1); 128K 요약 버블·요약 후 컨텍스트 재조립·요약 색 구분 경계·작성자 D1 VisitEvent(L3, PoC 범위 외).
+
+---
+
+## 8. 통합 리스크 & 미해결 질문 (Consolidated Risks & Open Questions)
+
+### 리스크 (완화책 포함)
+1. **운영자 키 비용/남용**(서버 부담) → 글/메시지 레이트리밋 + 샌드박스 동시 실행 수 제한(XC-RATE, BE-LIMIT); 유휴 suspend(BE-SUSPEND).
+2. **키 유출**(클라/로그) → 키는 `.env`·메모리만, 응답·로그 redaction 단언(XC-REDACT, L1).
+3. **샌드박스 탈출**(경로/리소스/네트워크) → 루트 상대 강제·`..`/symlink 차단(BE-ISO) + 리소스/네트워크 정책(XC-ISO). 컨테이너 강화는 후속.
+4. **동시성 하의 메시지 일관성** → 서버 `seq` SoT, `@@unique([postId, seq])`(L4, BE-MSG).
+5. **다중 attach 출력 중복** → 에이전트 출력 1회 생성·전원 동일 중계(L6, AR-TURN, RT-STREAM).
+6. **재접속 시 SSE 이벤트 누락** → `Last-Event-ID` 재생(RT-REPLAY).
+7. **clientId 충돌/악용** → `[postId, clientId]` 인덱스 + 서버 신뢰 seq(BE-DB, BE-MSG).
+8. **본인 버블 오귀속** → 영속화된 `userId`로 `authorId===userId` 판정(FE-AUTH, FE-BUBBLE).
+9. **샌드박스 프로비저닝 실패** → status=ERROR 표면화 + SYSTEM 버블 안내(BE-PROV, FE-STATES).
+10. **장시간 도구 실행/행(hang)** → 인터럽트(BE-INT) + 리소스 타임아웃(XC-ISO).
+11. **단일 인스턴스 pub/sub 한계** → Redis 인터페이스 seam(RT-PS, L10).
+12. **suspend 후 컨텍스트 손실** → 파일은 디렉토리 보존, 인메모리 컨텍스트는 런타임 재구성 정책(AR-PI, L3).
+13. **대용량 도구 출력/파일** → tool.output 스트리밍 + 파일 truncate(RT-TOOLEV, BE-FILECONTENT).
+14. **에이전트 응답 언어 불일치** → 런타임 언어 힌트(I18N, L13) — best-effort.
+15. **지표 데이터 희박(PoC)** → DB 산출 best-effort(BE-METRICS).
+
+### 미해결 질문 (비차단; 필요 시 기본값)
+1. pi agent 런타임 바인딩 형태(라이브러리 vs 프로세스 프로토콜) — AR-RT 인터페이스 뒤로 추상화, PoC는 프로세스 spawn 기본.
+2. 샌드박스당 동시 활성 세션 — PoC 1개 권장(L6), 다중은 후속.
+3. 리소스 제한 강도(cgroup-lite 한계) — PoC 보수적 기본값(XC-ISO).
+4. 네트워크 정책 범위(아웃바운드 허용 여부) — PoC 제한적 허용, 정책 연기.
+5. suspend 유휴 타이머 임계 — 보수적 기본값(BE-SUSPEND).
+6. 동시 attach 시 입력 직렬화(누가 턴을 시작?) — seq 순 직렬 처리, 진행 중엔 인터럽트 권장.
+7. ToolCall 결과 보존 크기 상한 — 소프트 캡 + truncate, 연기.
+8. 컨테이너(Firecracker/gVisor/Docker) 전환 시점 — Out of Scope, 다중 테넌트 시 재검토.
+9. SQLite→Postgres 전환 — 추상화만(L10), 단일 인스턴스 데모는 SQLite 유지.
+10. 파일 트리 대형 디렉토리 페이지네이션 — PoC 단순 트리, 대형은 lazy 연기.
+11. 에이전트 모델 교체 UX — `.env` 재시작 기반, 런타임 핫스왑 연기.
+12. CI에서 pi 런타임 모킹 vs 실런타임 — 양쪽 레인(XC-T).
+13. 게스트 권한 범위(글 작성·세션 가능?) — PoC 쓰기 JWT 필수, 게스트도 토큰 보유로 허용(레이트리밋 강화).
+14. 최대 버블 페이지 크기 — 50(BE-MSGPAGE).
+15. 업로드/첨부(이미지 등) — PoC 범위 외, 후속.
+
+---
+
+## 9. 완료 정의 (Definition of Done)
+
+> 범례: `[ ]` 미착수(PoC v0.1 계획 단계) · 구현 후 `[x]`(자동검증/스모크) 또는 `[~]`(코드검증 완료, 명시 항목 미측정)로 갱신. 상세는 [IMPLEMENTATION_NOTES.md](./IMPLEMENTATION_NOTES.md)에 기록.
+
+### PRD 수용기준 (각각 검증 WP/여정에 연결)
+- [ ] **#1** 홈 게시글 피드(hot/new) + 카드 샌드박스 상태 요약 — BE-POST/BE-HOT/FE-HOME + RT-SBXEV.
+- [ ] **#2** 글 작성 → Sandbox 1:1 자동 생성 → Thread 이동 — BE-POST/BE-PROV/FE-CREATE.
+- [ ] **#3** 스레드 진입 → pi agent 세션 spawn/attach(OpenAI-compatible 주입, 키 미노출) — BE-SESS/AR-PI/AR-CFG.
+- [ ] **#4** 다중 참여자 동일 세션 attach, 에이전트 출력 전원 fan-out — AR-TURN/RT-STREAM/FE-STREAM.
+- [ ] **#5** AI on/off 토글 채팅; 본인=우/타인·에이전트=좌 — FE-COMPOSER/FE-BUBBLE(`authorId===userId`).
+- [ ] **#6** 도구 실행(파일CRUD·쉘·venv·패키지) → TOOL_CALL/TOOL_RESULT 버블(성공/실패 색) — BE-TOOL/AR-TOOL/FE-TOOL*.
+- [ ] **#7** 워크스페이스/파일 트리 패널 + file.changed 라이브 갱신(경로 탈출 차단) — BE-FILES/RT-FILEEV/FE-FILETREE.
+- [ ] **#8** 인터럽트/스티어링·suspend/resume — BE-INT/BE-SUSPEND/AR-PI.
+- [ ] **키 모델** 모든 LLM 호출이 서버 `.env` 키로, 클라/로그에 키 0건 — L1/AR-CFG/XC-REDACT.
+
+### 엔지니어링 게이트
+- [ ] **실시간**: 재접속 재생 정확 + message/agent.token/tool.*/file.changed/session.status/sandbox.status seq 순서 — SSE integration green. P95 < 1.5s는 PoC 측정 권장.
+- [ ] **격리**: 경로 탈출 차단(`..`/symlink/절대경로 거부) + 리소스/네트워크 정책 — pathGuard unit + 도구/파일 contract.
+- [ ] **신뢰성**: 세션/도구 실패 시 메시지 보존, FAILED/ERROR 표면화(SYSTEM 버블) — AR-TURN/FE-STATES.
+- [ ] **보안**: LLM 키 redaction(로그/응답/소스 0건) + 레이트리밋 + 동시 실행 제한 — XC-REDACT/XC-RATE.
+- [ ] **디자인**: term-* 팔레트만 사용(새 색 0), 신규 버블/패널/상태 배지 품질 바닥선 충족 — DESIGN-SYSTEM v2 계승.
+- [ ] **i18n**: KO↔EN 전환 + 에이전트 응답 언어 추종(best-effort) + 서버 오류 사전 — I18N.
+- [ ] **지표**: 글당 평균 에이전트 턴·고유 참여자·세션 성공률 — BE-METRICS.
+- [ ] **배포**: 정적 프론트 + Node 서버 + 샌드박스 호스트 구조 확립. SQLite→Postgres는 추상화만(L10).
+- [ ] **라이선스**: MIT LICENSE + 헤더 — XC-LICENSE.
+- [ ] **테스트**: 통합 스위트 unit/contract/integration green; E2E(글→샌드박스→세션→AI 턴→도구→파일)는 pi 모킹 스캐폴드 + 실런타임 레인(XC-T).
