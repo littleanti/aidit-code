@@ -11,6 +11,24 @@
 
 ## Changelog
 
+### 2026-06-25 · [fix] · 완료 · 에이전트가 에코만 응답하는 문제 — 실 LLM 스트리밍 연결 + 호출 타임아웃 (AR-PI SEAM)
+- **증상(사용자 보고)**: ① "세션 시작"이 계속 끊긴다 ② "다이아몬드 모양 *" 요청에 에코만 오고 실제 에이전트 작업이 안 됨.
+- **라이브 재현/진단**: `tsx src/app.ts`로 서버 기동 후 게스트→글→세션→SSE→메시지(aiMode) 전 구간 curl 재현.
+  - 백엔드/세션/SSE는 정상: 세션 `STARTING→IDLE→RUNNING→IDLE`, SSE 토큰 스트리밍·종료까지 **끊김 없음**. (① "끊김"은 백엔드 세션 단절이 아니라 에이전트가 무의미한 에코만 내어 "작동 안 함"으로 인지된 것 + ③ 타임아웃 부재 시 도달불가 LLM 으로 턴이 무한 RUNNING 으로 멈추던 잠재 행 문제.)
+  - 근본 원인(②): `backend/src/agent/piWorker.mjs`의 `simulateTurn()`이 M4 PoC 에코 스텁이라 **실 LLM을 호출하지 않음**. 실 GitHub Models 자격증명이 워커 env(`OPENAI_*`/`PI_*`)로 주입되지만 워커가 이를 무시하고 `[KO]/[EN] 에코:`만 흘림.
+- **수정(②③)**: 워커의 자연어 응답 분기를 **OpenAI-compatible 스트리밍 호출**로 교체(M4가 명시한 SEAM 실현) + 호출 타임아웃 추가.
+  - 실 모드: 주입된 `OPENAI_*`(폴백 `PI_*`) 자격증명으로 `POST {baseURL}/chat/completions`(stream:true) 호출, `choices[].delta.content`를 `{type:'token'}`으로 스트리밍. `lang` 힌트를 system 메시지로 전달. `{type:'interrupt'}` 시 `AbortController`로 즉시 중단.
+  - 스텁 모드(결정성 보존): `AGENT_STUB=1` 또는 테스트(`VITEST`/`NODE_ENV=test`) 또는 자격증명 누락 시 기존 에코 동작 유지 → 기존 vitest 스위트 무영향.
+  - **호출 타임아웃**(신규): `AGENT_LLM_TIMEOUT_MS`(기본 60s) 벽시계 상한. 초기 응답+스트림 수신 전체에 적용, 초과 시 abort → 일반 에러(`{type:'error'}`)로 턴 FAILED 마감. 도달 불가/지연 엔드포인트로 인한 무한 RUNNING("끊김" 체감) 방지.
+  - `!write`/`!read`/`!del`/`!shell`/`!demo` 도구 컨벤션 분기는 두 모드 모두 그대로 유지(toolBridge 실행 경로 불변).
+  - 보안(CLAUDE.md/TRD §8): 키는 stdout/이벤트/에러 메시지에 절대 미노출 — LLM 에러는 일반 문구만 방출, 응답 원문/상태코드/URL/키 미포함.
+- **검증(③)**:
+  - `tsc --noEmit` 클린; `vitest run` **55/55 GREEN**(스텁 모드 유지 — `VITEST` env 가 자식 워커로 전파되어 결정적 에코 보존).
+  - 실 모드 성공 경로: 서버 spawn 경로(`getLlmRuntimeConfig`→`OPENAI_*` 주입→워커 spawn)를 그대로 재현한 진단 스크립트가 실 키(93자)로 **실제 다이아몬드 ASCII 스트리밍 생성** 확인. 별도 mock OpenAI SSE 서버로 토큰 재조립 시 완전한 다이아몬드 일치.
+  - 실 모드 실패 경로(무행/무누출): 잘못된 키(401)·연결 거부·**무응답 서버(타임아웃 2s 설정 시 정확히 ~2.0s에 클린 에러)** 모두 `{type:'error',message:'agent turn failed'}`만 방출(키/원문 0건), 무한 행 없음.
+  - 캐비엇: 백그라운드(`run_in_background`)로 띄운 테스트 서버는 네트워크/실키 부재로 워커 fetch 가 지연 → 이 타임아웃 수정이 바로 그 케이스를 클린 FAILED 로 마감함을 함께 확인.
+- 변경 파일: `backend/src/agent/piWorker.mjs`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-25 · [docs] · 완료 · 프로젝트 그라운드 룰 도입
 - 부모 Aidit의 Docs-before-code 규칙을 계승하고, **검증 → 문서 완료 표시 → 커밋**의 5단계 순서로 정밀화.
 - 변경 파일:

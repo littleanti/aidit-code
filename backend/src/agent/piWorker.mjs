@@ -28,11 +28,140 @@
 // 보안: 주입된 OPENAI_API_KEY/PI_API_KEY 등 키는 절대 출력/로그하지 않는다.
 //   (여기서는 어떤 env 도 stdout 으로 echo 하지 않음으로써 구조적으로 차단.)
 //
-// ── 시뮬레이션 경계(SEAM) ───────────────────────────────────────────────
-//   simulateTurn() 이 결정적(deterministic) PoC 응답을 토큰 청크로 흘린다.
-//   실제 OpenAI-compatible 스트리밍 호출은 이 함수를 통째로 교체하면 된다(아래 TODO 참조).
+// ── 실행 모드(SEAM 실현) ────────────────────────────────────────────────
+//   runTurn() 이 한 턴을 처리한다. 자연어(도구 컨벤션 '!' 없는) 입력은:
+//     - 실 모드: OPENAI_*/PI_* 자격증명으로 OpenAI-compatible chat.completions(stream:true)
+//       호출 → delta.content 를 토큰으로 흘린다.
+//     - 스텁 모드: 결정적 에코 토큰(테스트/자격증명 없음/AGENT_STUB=1). 기존 PoC 동작 보존.
+//   '!'-접두사 도구 컨벤션 라인은 두 모드 공통으로 도구 의도를 방출한다(부모 toolBridge 가 실행).
 
 import { createInterface } from 'node:readline';
+
+// ── LLM 런타임 설정(부모 pi.ts 가 주입한 env). 키는 절대 stdout/이벤트로 흘리지 않는다. ──
+const LLM_API_KEY = process.env.OPENAI_API_KEY || process.env.PI_API_KEY || '';
+const LLM_BASE_URL = process.env.OPENAI_BASE_URL || process.env.PI_BASE_URL || '';
+const LLM_MODEL = process.env.OPENAI_MODEL || process.env.PI_MODEL || '';
+
+/**
+ * 스텁(에코) 모드 여부.
+ *   - AGENT_STUB=1 강제, 또는
+ *   - 테스트 실행(vitest: VITEST/NODE_ENV=test) — 결정적 스위트 보존, 또는
+ *   - 자격증명(키/baseURL/model) 누락 — 실 호출 불가 시 안전 폴백.
+ * 그 외(실 운영/개발 구동, 자격증명 존재)에는 실 LLM 스트리밍을 사용한다.
+ */
+const STUB_MODE =
+  process.env.AGENT_STUB === '1' ||
+  !!process.env.VITEST ||
+  process.env.NODE_ENV === 'test' ||
+  !LLM_API_KEY ||
+  !LLM_BASE_URL ||
+  !LLM_MODEL;
+
+/**
+ * LLM 호출 전체(초기 응답 + 스트림 수신)의 벽시계 상한(ms).
+ * 도달 불가/지연 엔드포인트로 인해 턴이 무한 RUNNING 으로 멈추는 것을 막는다(클린 FAILED 로 마감).
+ */
+const LLM_TIMEOUT_MS = Number(process.env.AGENT_LLM_TIMEOUT_MS) || 60_000;
+
+/** baseURL 끝의 슬래시를 정리하고 chat.completions 경로를 붙인다. */
+function chatCompletionsURL() {
+  return `${LLM_BASE_URL.replace(/\/+$/, '')}/chat/completions`;
+}
+
+/** LLM 응답 언어 system 지시(LANG_HINT/lang 기준). */
+function systemForLang(lang) {
+  const isKo = String(lang || process.env.LANG_HINT || '').toLowerCase().startsWith('ko');
+  return isKo
+    ? '너는 샌드박스에서 동작하는 코딩 에이전트다. 한국어로 간결히 답하라.'
+    : 'You are a coding agent operating in a sandbox. Answer concisely in English.';
+}
+
+/**
+ * 실 OpenAI-compatible 스트리밍 호출. delta.content 를 토큰으로 emit 한다.
+ * 보안: 키/응답 원문/상태코드/URL 을 에러 메시지·stdout 에 절대 싣지 않는다(일반 문구만 throw).
+ * 인터럽트: turn.controller.abort() 로 즉시 중단(상위 input/interrupt 핸들러가 호출).
+ */
+async function streamLlmReply(prompt, lang, turn) {
+  const controller = new AbortController();
+  turn.controller = controller;
+
+  // 벽시계 타임아웃: 도달 불가/지연으로 무한 대기하지 않도록 abort. 인터럽트와 구분하기 위해
+  //   turn.interrupted 는 건드리지 않는다 → catch 에서 일반 에러로 throw → 턴이 FAILED 로 마감.
+  const timer = setTimeout(() => {
+    try { controller.abort(); } catch { /* noop */ }
+  }, LLM_TIMEOUT_MS);
+
+  try {
+    let res;
+    try {
+      res = await fetch(chatCompletionsURL(), {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${LLM_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: LLM_MODEL,
+          stream: true,
+          messages: [
+            { role: 'system', content: systemForLang(lang) },
+            { role: 'user', content: prompt },
+          ],
+        }),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (turn.interrupted) return; // 인터럽트로 인한 abort 는 정상 종료.
+      throw new Error('llm request failed'); // 원문/키 미노출(타임아웃 abort 포함).
+    }
+
+    if (!res.ok || !res.body) {
+      // 상태코드/본문을 메시지에 넣지 않는다(키/원문 누출 표면 차단).
+      throw new Error('llm request failed');
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      if (turn.interrupted) {
+        try { await reader.cancel(); } catch { /* noop */ }
+        return;
+      }
+      let chunk;
+      try {
+        chunk = await reader.read();
+      } catch {
+        if (turn.interrupted) return;
+        throw new Error('llm stream failed'); // 스트림 중 abort/끊김(타임아웃 포함).
+      }
+      if (chunk.done) break;
+      buf += decoder.decode(chunk.value, { stream: true });
+      // SSE 라인 단위 파싱: 'data: {json}' / 'data: [DONE]'.
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (payload === '[DONE]') return;
+        let j;
+        try {
+          j = JSON.parse(payload);
+        } catch {
+          continue; // 부분/비-JSON 라인은 무시.
+        }
+        const delta = j?.choices?.[0]?.delta?.content;
+        if (typeof delta === 'string' && delta.length > 0) {
+          if (turn.interrupted) return;
+          emit({ type: 'token', delta });
+        }
+      }
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // IDLE 유지를 위한 keepalive 타이머(모든 종료 신호에서 정리됨).
 const keepAlive = setInterval(() => {}, 1 << 30);
@@ -105,19 +234,26 @@ function emitToolAndWait(intent) {
   });
 }
 
+/** 스텁(에코) 모드의 결정적 응답: KO/EN 프리픽스 + 입력 에코. NO real network. */
+async function streamEchoReply(plain, lang, turn) {
+  const isKo = String(lang || '').toLowerCase().startsWith('ko');
+  const prefix = isKo ? '[KO] 에코: ' : '[EN] echo: ';
+  const reply = prefix + plain;
+  const chunks = reply.match(/\S+\s*/g) ?? [reply];
+  for (const delta of chunks) {
+    if (turn.interrupted) return;
+    emit({ type: 'token', delta });
+    await new Promise((r) => setTimeout(r, TOKEN_DELAY_MS));
+  }
+}
+
 /**
- * SEAM: 결정적 PoC 턴 시뮬레이션.
- * 입력 텍스트를 줄 단위로 보고, 도구 컨벤션 라인('!...')은 도구 의도로 방출(부모가 실행),
- * 그 외 텍스트는 KO/EN 에코 토큰으로 흘린다. NO real network.
- *
- * TODO(real runtime): 여기를 OpenAI-compatible 스트리밍 호출로 교체한다.
- *   - env 의 OPENAI_BASE_URL/OPENAI_API_KEY/OPENAI_MODEL 로 chat.completions(stream:true) 호출.
- *   - 각 SSE delta.content 를 emit({ type:'token', delta }) 로 흘리고, tool_call delta 는
- *     emit({ type:'tool', ... }) 로 방출(부모 toolBridge 가 실제 실행/이벤트화).
- *   - 완료 시 emit({ type:'done' }), 에러 시 emit({ type:'error', message })(키/원문 미노출).
- *   - turn.interrupted 가 true 가 되면 스트림을 abort 하고 즉시 done 으로 마감한다.
+ * 한 턴 처리.
+ *   1) '!'-접두사 도구 컨벤션 라인 → 도구 의도 방출(부모 ack 대기, 두 모드 공통).
+ *   2) 평범한 텍스트 → 실 모드면 LLM 스트리밍, 스텁 모드면 에코 토큰.
+ * turn.interrupted 가 true 가 되면 즉시 중단한다(LLM 모드는 fetch abort 도 동반).
  */
-async function simulateTurn(text, lang, turn) {
+async function runTurn(text, lang, turn) {
   const raw = String(text ?? '');
   const lines = raw.split('\n');
 
@@ -140,17 +276,13 @@ async function simulateTurn(text, lang, turn) {
     await emitToolAndWait(intent);
   }
 
-  // 2) 평범한 텍스트가 있으면 에코 토큰을 흘린다(도구만 있는 입력은 토큰 없이 종료 가능).
+  // 2) 평범한 텍스트가 있으면 응답을 흘린다(도구만 있는 입력은 토큰 없이 종료 가능).
   const plain = plainLines.join('\n');
   if (plain.length > 0) {
-    const isKo = String(lang || '').toLowerCase().startsWith('ko');
-    const prefix = isKo ? '[KO] 에코: ' : '[EN] echo: ';
-    const reply = prefix + plain;
-    const chunks = reply.match(/\S+\s*/g) ?? [reply];
-    for (const delta of chunks) {
-      if (turn.interrupted) return;
-      emit({ type: 'token', delta });
-      await new Promise((r) => setTimeout(r, TOKEN_DELAY_MS));
+    if (STUB_MODE) {
+      await streamEchoReply(plain, lang, turn);
+    } else {
+      await streamLlmReply(plain, lang, turn);
     }
   }
 }
@@ -169,7 +301,11 @@ rl.on('line', (line) => {
   }
 
   if (msg.type === 'interrupt') {
-    if (currentTurn) currentTurn.interrupted = true;
+    if (currentTurn) {
+      currentTurn.interrupted = true;
+      // 진행 중 LLM 스트림 fetch 를 즉시 중단한다.
+      try { currentTurn.controller?.abort(); } catch { /* noop */ }
+    }
     // 도구 ack 대기 중이었다면 풀어 턴이 깨끗이 마감되도록 한다.
     if (toolAck) {
       const r = toolAck;
@@ -191,10 +327,13 @@ rl.on('line', (line) => {
 
   if (msg.type === 'input') {
     // 이전 턴이 남아있다면 인터럽트 처리(직렬화).
-    if (currentTurn) currentTurn.interrupted = true;
-    const turn = { interrupted: false };
+    if (currentTurn) {
+      currentTurn.interrupted = true;
+      try { currentTurn.controller?.abort(); } catch { /* noop */ }
+    }
+    const turn = { interrupted: false, controller: null };
     currentTurn = turn;
-    simulateTurn(msg.text, msg.lang, turn)
+    runTurn(msg.text, msg.lang, turn)
       .then(() => {
         if (currentTurn === turn) currentTurn = null;
         emit({ type: 'done' });
