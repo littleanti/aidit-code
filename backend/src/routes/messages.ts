@@ -9,18 +9,9 @@ import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { nextSeq } from '../domain/seq.js';
 import { publishToPost } from '../realtime/publish.js';
-import {
-  makeMessageCreatedEvent,
-  makeSessionStatusEvent,
-  type AgentSessionStatusValue,
-} from '../realtime/events.js';
-import { getAgentRuntime } from '../agent/runtime.js';
-import { getLlmRuntimeConfig } from '../agent/config.js';
-import { setSandboxStatus } from '../sandbox/service.js';
+import { makeMessageCreatedEvent } from '../realtime/events.js';
 import { runAgentTurn, postSystemBubble } from '../agent/turn.js';
-
-/** 활성(살아있는) 세션으로 간주하는 상태. */
-const ACTIVE_STATUSES: AgentSessionStatusValue[] = ['STARTING', 'IDLE', 'RUNNING'];
+import { startOrAttach } from '../agent/sessionStart.js';
 
 /** 페이지 크기(TRD §4.1 권장값과 일관, 메시지 전용 50). */
 const PAGE_SIZE = 50;
@@ -231,11 +222,13 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
 }
 
 /**
- * aiMode 턴을 위한 활성 세션을 확보한다.
- *   - 이미 활성(STARTING/IDLE/RUNNING) 세션이 있으면 그 세션을 반환(attach 보장은 세션 라우트 책임).
- *   - 없고 샌드박스가 READY/SUSPENDED 면 새 spawn(STARTING→IDLE) 후 반환.
- *   - 그 외(CREATING/ERROR 등)면 null(호출부가 SYSTEM 버블로 안내).
- * 보안: model 만 저장(키 미저장). session.status 이벤트로 상태 표면화.
+ * aiMode 턴을 위한 활성 세션을 확보한다(공용 헬퍼 startOrAttach 경유).
+ *   - 이미 활성(STARTING/IDLE/RUNNING) live 세션이 있으면 attach 후 그 세션을 반환.
+ *   - attach 실패(서버 재시작 후 stale RUNNING 등)면 헬퍼가 stale 행을 닫고 RUNNING→SUSPENDED
+ *     정규화 후 fresh-start 한다(Race B 복구 — 과거엔 여기서 null 반환해 aiMode 가 조용히 실패했다).
+ *   - 시작 불가(CREATING/ERROR 등)면 null(호출부가 SYSTEM 버블로 안내).
+ * 동시성: per-sandbox mutex 로 같은 sandbox 의 동시 호출이 coalesce 된다(헬퍼 내부).
+ * 보안: model 만 저장(키 미저장). session.status 이벤트는 헬퍼가 publish.
  */
 export async function ensureActiveSession(
   postId: string,
@@ -243,44 +236,12 @@ export async function ensureActiveSession(
   sandboxPath: string,
   sandboxStatus: string,
 ): Promise<{ id: string } | null> {
-  const existing = await prisma.agentSession.findFirst({
-    where: { sandboxId, status: { in: ACTIVE_STATUSES } },
-    orderBy: { startedAt: 'desc' },
+  const result = await startOrAttach({
+    postId,
+    sandbox: { id: sandboxId, path: sandboxPath, status: sandboxStatus },
   });
-  if (existing) {
-    const runtime = getAgentRuntime();
-    try {
-      await runtime.attach({ id: existing.id, sandboxId });
-      return { id: existing.id };
-    } catch {
-      // 활성 행은 있으나 프로세스가 사라진 비정상 상태: 행을 닫고 fresh spawn 으로 진행.
-      await prisma.agentSession.update({
-        where: { id: existing.id },
-        data: { status: 'STOPPED', endedAt: new Date() },
-      });
-    }
+  if (!result.ok) {
+    return null; // 시작 불가 상태(NOT_READY).
   }
-
-  if (sandboxStatus !== 'READY' && sandboxStatus !== 'SUSPENDED') {
-    return null; // 시작 불가 상태.
-  }
-
-  const runtime = getAgentRuntime();
-  const rt = getLlmRuntimeConfig(); // 내부 전용 — 응답/로그/이벤트에 절대 미포함.
-  const { pid } = await runtime.spawn({ id: sandboxId, path: sandboxPath });
-
-  const session = await prisma.agentSession.create({
-    data: { sandboxId, status: 'STARTING', model: rt.model, runtimePid: pid },
-  });
-  publishToPost(postId, makeSessionStatusEvent({ sessionId: session.id, status: 'STARTING' }));
-
-  await setSandboxStatus(sandboxId, 'RUNNING');
-
-  const idle = await prisma.agentSession.update({
-    where: { id: session.id },
-    data: { status: 'IDLE' },
-  });
-  publishToPost(postId, makeSessionStatusEvent({ sessionId: idle.id, status: 'IDLE' }));
-
-  return { id: idle.id };
+  return { id: result.session.id };
 }

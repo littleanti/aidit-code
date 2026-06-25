@@ -78,6 +78,17 @@ interface RuntimeHandle {
 const handles = new Map<string, RuntimeHandle>();
 
 /**
+ * 핸들의 자식이 아직 살아있는지 검사한다(멱등 spawn 가드용).
+ * child.exitCode/signalCode 가 모두 null 이고 kill 되지 않았으면 살아있다고 본다.
+ */
+function isHandleLive(h: RuntimeHandle): boolean {
+  const c = h.child;
+  // 종료 코드/시그널이 잡혔으면 이미 죽음. killed 플래그도 확인.
+  if (c.exitCode !== null || c.signalCode !== null || c.killed) return false;
+  return true;
+}
+
+/**
  * ready 이후 worker stdout 의 JSON-line(턴 프로토콜)을 파싱해 활성 턴 sink 로 디스패치한다.
  * 보안: delta/메시지는 에이전트 텍스트만 — 키를 절대 포함하지 않는다(worker 가 echo 안 함).
  */
@@ -179,6 +190,14 @@ class PiRuntime implements AgentRuntime {
     sandbox: Pick<Sandbox, 'id' | 'path'>,
     langHint = 'en',
   ): Promise<SpawnResult> {
+    // 멱등 가드(Race A/D): 이미 이 sandbox 에 살아있는 자식이 있으면 새로 띄우지 않고 기존 핸들을 재사용한다.
+    //   (mutex 가 같은 sandbox 호출을 직렬화하므로 통상 여기에 도달하지 않지만, 다른 경로의 직접 spawn 호출에도 안전.)
+    //   죽은 핸들이 남아있으면 아래 정상 경로로 떨어져 교체한다(set 직전에 stale 핸들을 정리).
+    const prior = handles.get(sandbox.id);
+    if (prior && isHandleLive(prior)) {
+      return { pid: prior.pid, sessionRef: prior.sessionRef };
+    }
+
     const env = buildInjectedEnv(langHint);
 
     const child = spawn(process.execPath, [WORKER_PATH], {
@@ -208,6 +227,14 @@ class PiRuntime implements AgentRuntime {
         const pid = child.pid;
         if (pid == null) {
           reject(new Error('agent worker spawned without a pid'));
+          return;
+        }
+        // set 직전 멱등 재확인(Race A/D): onReady 시점에 다른 live 자식이 이미 등록돼 있으면,
+        // 방금 띄운 이 자식을 loser 로 보고 SIGTERM 한 뒤 기존 핸들을 그대로 반환한다(고아 방지).
+        const existing = handles.get(sandbox.id);
+        if (existing && existing.child !== child && isHandleLive(existing)) {
+          try { child.kill('SIGTERM'); } catch { /* noop */ }
+          resolve({ pid: existing.pid, sessionRef: existing.sessionRef });
           return;
         }
         const handle: RuntimeHandle = {

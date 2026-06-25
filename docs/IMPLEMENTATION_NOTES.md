@@ -11,6 +11,35 @@
 
 ## Changelog
 
+### 2026-06-26 · [feat] · 완료 · 글 진입 시 lazy auto-attach UX(인증+활성세션 한정, eager spawn 금지, StrictMode 중복 방지)
+- **요청(사용자)**: 글 진입 시, 이미 활성 세션이 있으면 사용자가 "세션 시작" 버튼을 누르지 않아도 조용히 attach 되어 실행 중(running) 배지가 떠야 한다. 단, **새 프로세스를 spawn 하는 비용이 큰 절반은 하지 않는다**(no eager spawn).
+- **설계(lazy auto-attach, NOT eager spawn)**:
+  - 진입 시 `id` 가 바뀔 때마다 단발성 effect 가 다음 4중 게이트를 모두 통과할 때만 기존 `handleStartSession()` 경로를 1회 호출(백엔드는 이를 값싼 attach/no-op fan-out 으로 처리 — 신규 spawn 아님).
+    - **① 인증 게이트**: `token` 이 있어야 함. 게스트(token 없음)는 절대 자동 트리거 안 함, `openLogin()` 도 절대 호출 안 함(읽기 전용 브라우징 + 기존 클릭→로그인 흐름 유지).
+    - **② 활성 세션 게이트**: `getPost` 가 활성 세션을 반환했을 때만(`post.session` 존재 + status 가 STOPPED/ERROR 아님). 활성 세션이 없으면 자동 spawn/자동 startSession 안 함 — 기존 수동 버튼 그대로 두고, 첫 사용자 메시지(aiMode)가 기존 백엔드 경로로 spawn.
+    - **③ no-spawn 불변식**: 누군가 글을 열었다는 이유만으로 새 프로세스를 절대 띄우지 않음(②가 보장 — 활성 세션이 있을 때만 attach).
+    - **④ StrictMode/재렌더 중복 방지**: `autoAttachedRef`(useRef) 가드로 StrictMode 더블 마운트·재렌더에도 스레드(id)당 최대 1회만 발화. `id` 변경 시 리셋. 기존 스크롤/가드 effect 와 충돌 없음(별도 effect).
+  - 자동 attach 도 `handleStartSession` 을 재사용하므로 실패 시 기존 `errors.sessionFailed`/`errors.networkError` 처리·`startingSession` 스피너·`setActiveSession` 동작을 그대로 공유. 신규 사용자 노출 문자열 없음.
+- **보안(TRD §8)**: 프런트 변경만이며 LLM apiKey 를 다루지 않음(`startSession` 응답은 `{ session }` 만 — apiKey 미포함).
+- **검증(③)**: frontend `npx tsc --noEmit` **클린(에러 0)**, `npx vite build` **PASS(88 모듈 transformed, built in ~1.8s, exit 0)**. 로직 재검토 — ① `autoAttachedRef` 기본 false, id 변경 effect 에서 false 로 re-arm → 스레드당 1회. ② effect 가드 `if (autoAttachedRef.current) return; if (loading || !token || !sessionActive || startingSession) return;` → 게스트(token 없음)·비활성 세션·로딩 중·수동 시작 중엔 발화 안 함. ③ 활성 세션 없을 때 startSession 미호출(no-spawn-on-entry). ④ 자동 경로는 `handleStartSession`(token 있을 때만 진입하므로 `openLogin()` 미도달) 재사용. backend 무변경이라 기존 57 테스트 영향 없음(프런트 전용).
+- 변경 파일: `frontend/src/pages/Thread.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
+### 2026-06-26 · [feat] · 완료 · 세션 시작/attach 동시성 가드(per-sandbox mutex + spawn 멱등 + Race B 복구 공용 헬퍼화)
+- **배경/문제**: 글 진입 시 자동 세션 시작(auto-session-on-entry)이 같은 sandbox 로 고빈도 동시 호출을 유발한다. 현재 `lookup→attach→spawn→create` 임계구역을 직렬화하는 락/트랜잭션/UNIQUE 가 전혀 없어 다음 경합이 가능하다.
+  - **Race A/D (process-level)**: `pi.ts:spawn()` 이 `handles.set(sandbox.id, ...)` 를 **무조건 덮어써** 직전의 살아있는 자식을 고아로 만든다. 동시 두 호출이 두 자식을 띄우고 하나만 레지스트리에 남는다.
+  - **Race B (messages/aiMode)**: `messages.ts:ensureActiveSession` 은 attach 실패 시 stale 세션을 STOPPED 로 닫기만 하고 **stale RUNNING 정규화도, spawn 도 하지 않아** `null` 반환 → 서버 재시작 후 aiMode 전송·`maybeAutoReply` 가 조용히 실패(`session.ts` 의 최근 수정이 여기엔 미적용).
+- **설계(한 지점으로 수렴)**:
+  - 신규 `backend/src/agent/sessionStart.ts` 가 임계구역 전체를 캡슐화하는 `startOrAttach()` 를 export. 동작: 활성 세션 lookup → attach(live 면 no-op) → attach-fail 시 stale 세션 STOPPED + stale RUNNING→SUSPENDED 정규화 → READY/SUSPENDED 면 spawn → AgentSession(STARTING→IDLE) → sandbox RUNNING. session.status/sandbox.status 이벤트는 헬퍼 내부에서 publish(라우트와 동일 동작). 반환은 `{ session, attached }` 또는 실패 시 `{ reason:'NOT_READY' }`(라우트가 409 로 매핑).
+  - **per-sandbox mutex(최우선 가드)**: 모듈 레벨 `Map<sandboxId, Promise>` 로 같은 sandboxId 의 동시 호출을 하나의 in-flight Promise 로 coalesce. 두 번째 호출은 첫 호출 결과를 await(자체 lookup/spawn 안 함). `finally` 에서 맵 정리. 프로세스 내 Race A/D 봉쇄.
+  - **pi.ts spawn 멱등**: `spawn()` 이 기존 핸들이 **살아있으면** 새 자식을 SIGTERM 으로 정리(loser)하고 기존 pid 를 반환(고아 방지). 죽은 핸들이면 정상 교체. on-exit cleanup 은 `h.child===child` 가드로 유지.
+  - 라우트 3곳(`session.ts` POST /session, `messages.ts` ensureActiveSession, `posts.ts` maybeAutoReply)을 모두 헬퍼로 경유 → Race B 복구 + mutex 가 전역 적용. `session.ts` 의 inline stale-RUNNING 블록은 헬퍼로 이동(중복 제거). 응답코드 유지(200 attach / 201 fresh / 409 not-ready).
+- **DB defense-in-depth**: datasource=**sqlite**(schema.prisma:11). 활성 상태 한정 partial/filtered UNIQUE(sandboxId) 는 SQLite + Prisma 에서 비자명(Prisma 가 partial index unique 제약을 직접 표현 못 함) → **SKIP**. in-process mutex 가 1차 가드이며 멀티 인스턴스(수평확장) 안전성은 open item(후속: Postgres 전환 시 partial unique + advisory lock).
+- **capacity gate(optional)**: spawn 직전 `sandboxLimiter` 획득은 기존 provision(POST /posts)과 슬롯 의미가 얽혀(거기서 선점→provision finally 반납) 세션 시작에 끼우면 provisioning 의미가 흔들릴 위험 → **SKIP**(노트만). mutex + 멱등 + Race B 가 필수 항목.
+- **검증(③)**: backend `npx tsc --noEmit` **클린(에러 0)**. `npx vitest run` **61/61 GREEN(19 파일)** — 기존 57 유지 + 신규 `sessionStart.test.ts` 4 케이스. 응답코드 보존 확인(로그: fresh 201 → attach 200 → CREATING 409). 키 누출 없음(헬퍼 반환/이벤트에 apiKey 미포함, AgentSession.model 은 모델명만).
+- **회귀 테스트**: `backend/test/sessionStart.test.ts`(4 케이스) — (a) 동일 sandbox 8개 동시 `startOrAttach`: `piRuntime.spawn` 정확히 **1회** 호출 + 활성 세션 행 **1개** + 모든 호출자 동일 session id(coalesce 증명), 핸들 1개. (b) Race B: stale RUNNING + 활성 IDLE 행 + `attach` throw 일 때 `ensureActiveSession` 이 **null 대신** 새 IDLE 세션 반환(stale→STOPPED, sandbox 재-RUNNING). (c) `session.ts` 201(fresh)→200(attach, 동일 id)→409(CREATING) 유지. `vi.spyOn(piRuntime, 'spawn'|'attach')` 시임 사용. 실제 stub piWorker spawn(네트워크 없음).
+- **mutex 동작(요약)**: `startOrAttach()` 진입 시 `inFlight.get(sandboxId)` 에 진행 중 Promise 가 있으면 그것을 그대로 await(자체 lookup/spawn 안 함). 없으면 임계구역 본체 Promise 를 만들어 맵에 등록 후 await, `finally` 에서 (자기 Promise 일 때만) 제거. + pi.ts spawn 멱등(live 핸들이면 기존 pid 반환, onReady 시점 set 직전 재확인으로 loser SIGTERM)이 보강.
+- 변경 파일: `backend/src/agent/sessionStart.ts`(신규), `backend/src/agent/pi.ts`, `backend/src/routes/session.ts`, `backend/src/routes/messages.ts`, `backend/test/sessionStart.test.ts`(신규), `docs/IMPLEMENTATION_NOTES.md`. (`posts.ts:maybeAutoReply` 는 이미 `ensureActiveSession` 경유라 자동으로 헬퍼/mutex 적용 — 코드 변경 불필요.)
+
 ### 2026-06-25 · [fix] · 완료 · 서버 재시작 후 세션 시작 실패(stale RUNNING 샌드박스 → 409) → SUSPENDED 정규화로 resume
 - **증상(사용자)**: 이미 에이전트 활동이 있던 글에서 서버 재시작 후 "세션 시작" 시 프런트가 "Failed to start the agent session. Please retry." 표시. 작성자/게스트 무관(소유권 문제 아님).
 - **원인(stale-state)**: 활동 이력이 있는 글은 DB 에 `sandbox.status='RUNNING'` + 활성(IDLE) AgentSession 행이 남는다. 서버 재시작 시 in-memory 핸들이 사라져 `runtime.attach` 가 `no active runtime process to attach to` throw(`backend/src/agent/pi.ts`). attach-fail catch 가 stale 행을 STOPPED 로 닫고 `startFreshSession` 으로 떨어지지만, 샌드박스가 여전히 `RUNNING`(READY/SUSPENDED 아님) → 409 `sandbox is RUNNING; cannot start a session`.

@@ -64,6 +64,11 @@ export default function Thread() {
   // One-shot guard: skip only the very first messages-driven scroll for a
   // thread (the initial hydrate), so live-follow still works afterwards.
   const hasAutoScrolledRef = useRef(false);
+  // Lazy auto-attach guard: fire the entry auto-attach at most ONCE per thread
+  // (id). React StrictMode double-invokes effects in dev and re-renders can
+  // re-run it; this ref dedupes so we never call startSession twice on entry.
+  // Reset on id change (the id-scoped effect below).
+  const autoAttachedRef = useRef(false);
 
   // Load post + initial messages, then hydrate the store (seq-ascending).
   const load = useCallback(async () => {
@@ -105,6 +110,7 @@ export default function Thread() {
     pinnedRef.current = false;
     hasAutoScrolledRef.current = false;
     prevLastIdRef.current = null;
+    autoAttachedRef.current = false; // re-arm the entry auto-attach for the new thread
     window.scrollTo(0, 0);
   }, [id]);
 
@@ -194,6 +200,26 @@ export default function Thread() {
     !!activeSession &&
     activeSession.status !== 'STOPPED' &&
     activeSession.status !== 'ERROR';
+
+  // Lazy auto-attach on entry: when an authenticated user opens a post that
+  // ALREADY has an active session, silently attach (the backend treats this
+  // as a cheap attach/no-op fan-out — it does NOT spawn a new process) so the
+  // running badge appears without a manual click. Gates:
+  //  ① auth: token present (guests never auto-trigger; openLogin() is NEVER
+  //     called on entry — they keep read-only browsing + the click→login flow);
+  //  ② active session: only when getPost returned one (sessionActive) — if
+  //     there is NO active session we do NOT auto-spawn / do NOT call
+  //     startSession; the manual button stays, and the first aiMode message
+  //     spawns via the existing backend path (no-spawn-on-entry invariant);
+  //  ③ StrictMode/re-render dedupe: autoAttachedRef fires this at most ONCE
+  //     per thread (reset on id change above). loading/startingSession guards
+  //     avoid racing the initial load and the manual button.
+  useEffect(() => {
+    if (autoAttachedRef.current) return;
+    if (loading || !token || !sessionActive || startingSession) return;
+    autoAttachedRef.current = true;
+    void handleStartSession();
+  }, [loading, token, sessionActive, startingSession, handleStartSession]);
 
   // Surface terminal session/sandbox ERROR as a user-facing SYSTEM-style notice (TRD §11).
   // Sandbox error takes precedence (it blocks any session work).
