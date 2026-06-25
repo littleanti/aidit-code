@@ -28,11 +28,30 @@ export interface SandboxStatusEvent {
   lastActiveAt: string;
 }
 
+/** TRD §3 AgentSessionStatus 와 1:1 (Prisma enum 과 동일 문자열). */
+export type AgentSessionStatusValue =
+  | 'STARTING'
+  | 'IDLE'
+  | 'RUNNING'
+  | 'INTERRUPTED'
+  | 'STOPPED'
+  | 'ERROR';
+
+/**
+ * 에이전트 세션 상태 변화 이벤트(TRD §7).
+ * payload: { sessionId, status }. 키 필드 금지(apiKey/baseURL 등 절대 미포함).
+ */
+export interface SessionStatusEvent {
+  type: 'session.status';
+  sessionId: string;
+  status: AgentSessionStatusValue;
+}
+
 /**
  * 모든 실시간 이벤트의 discriminated union.
- * M2: sandbox.status 만. 후속 마일스톤에서 `| MessageCreatedEvent | AgentTokenEvent | ...` 로 확장.
+ * M2: sandbox.status. M3: + session.status. 후속 마일스톤에서 message/agent.token/tool 이벤트로 확장.
  */
-export type RealtimeEvent = SandboxStatusEvent;
+export type RealtimeEvent = SandboxStatusEvent | SessionStatusEvent;
 
 /**
  * sandbox.status 이벤트 빌더.
@@ -51,5 +70,21 @@ export function makeSandboxStatusEvent(args: {
     status,
     lastActiveAt:
       lastActiveAt instanceof Date ? lastActiveAt.toISOString() : lastActiveAt,
+  };
+}
+
+/**
+ * session.status 이벤트 빌더(TRD §7).
+ * sessionId + status 만 받음으로써 키 누출 가능성을 구조적으로 차단한다.
+ */
+export function makeSessionStatusEvent(args: {
+  sessionId: string;
+  status: AgentSessionStatusValue;
+}): SessionStatusEvent {
+  const { sessionId, status } = args;
+  return {
+    type: 'session.status',
+    sessionId,
+    status,
   };
 }

@@ -6,6 +6,8 @@ import type { FastifyInstance } from 'fastify';
 import authPlugin from '../plugins/auth.js';
 import { authRoutes } from './auth.js';
 import { postRoutes } from './posts.js';
+import { sessionRoutes } from './session.js';
+import { runtimeRoutes } from './runtime.js';
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
   // GET /health → { ok: true }
@@ -19,4 +21,6 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   // 도메인 라우트.
   await app.register(authRoutes);
   await app.register(postRoutes);
+  await app.register(sessionRoutes);
+  await app.register(runtimeRoutes);
 }
