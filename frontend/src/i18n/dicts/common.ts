@@ -15,6 +15,11 @@ export const common = {
     cancel: '취소',
     close: '닫기',
     loginRequired: '로그인이 필요해요',
+    // shared state components (FE-STATES)
+    emptyTitle: '아무것도 없어요',
+    errorTitle: '문제가 발생했어요',
+    offline: '오프라인 — 연결을 확인하세요',
+    reconnecting: '재연결 중…',
   },
   en: {
     appName: 'AIDIT-CODE',
@@ -31,5 +36,10 @@ export const common = {
     cancel: 'Cancel',
     close: 'Close',
     loginRequired: 'Login required',
+    // shared state components (FE-STATES)
+    emptyTitle: 'Nothing here yet',
+    errorTitle: 'Something went wrong',
+    offline: 'Offline — check your connection',
+    reconnecting: 'Reconnecting…',
   },
 } as const;

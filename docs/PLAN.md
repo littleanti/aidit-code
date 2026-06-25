@@ -385,24 +385,24 @@ PRD §M7 매핑. NFR + 지표 + i18n + 라이선스.
 > 범례: `[ ]` 미착수(PoC v0.1 계획 단계) · 구현 후 `[x]`(자동검증/스모크) 또는 `[~]`(코드검증 완료, 명시 항목 미측정)로 갱신. 상세는 [IMPLEMENTATION_NOTES.md](./IMPLEMENTATION_NOTES.md)에 기록.
 
 ### PRD 수용기준 (각각 검증 WP/여정에 연결)
-- [ ] **#1** 홈 게시글 피드(hot/new) + 카드 샌드박스 상태 요약 — BE-POST/BE-HOT/FE-HOME + RT-SBXEV.
-- [ ] **#2** 글 작성 → Sandbox 1:1 자동 생성 → Thread 이동 — BE-POST/BE-PROV/FE-CREATE.
-- [ ] **#3** 스레드 진입 → pi agent 세션 spawn/attach(OpenAI-compatible 주입, 키 미노출) — BE-SESS/AR-PI/AR-CFG.
-- [ ] **#4** 다중 참여자 동일 세션 attach, 에이전트 출력 전원 fan-out — AR-TURN/RT-STREAM/FE-STREAM.
-- [ ] **#5** AI on/off 토글 채팅; 본인=우/타인·에이전트=좌 — FE-COMPOSER/FE-BUBBLE(`authorId===userId`).
-- [ ] **#6** 도구 실행(파일CRUD·쉘·venv·패키지) → TOOL_CALL/TOOL_RESULT 버블(성공/실패 색) — BE-TOOL/AR-TOOL/FE-TOOL*.
-- [ ] **#7** 워크스페이스/파일 트리 패널 + file.changed 라이브 갱신(경로 탈출 차단) — BE-FILES/RT-FILEEV/FE-FILETREE.
-- [ ] **#8** 인터럽트/스티어링·suspend/resume — BE-INT/BE-SUSPEND/AR-PI.
-- [ ] **키 모델** 모든 LLM 호출이 서버 `.env` 키로, 클라/로그에 키 0건 — L1/AR-CFG/XC-REDACT.
+- [x] **#1** 홈 게시글 피드(hot/new) + 카드 샌드박스 상태 요약 — BE-POST/BE-HOT/FE-HOME + RT-SBXEV. (M1/M2)
+- [x] **#2** 글 작성 → Sandbox 1:1 자동 생성 → Thread 이동 — BE-POST/BE-PROV/FE-CREATE. (M1/M2)
+- [x] **#3** 스레드 진입 → pi agent 세션 spawn/attach(OpenAI-compatible 주입, 키 미노출) — BE-SESS/AR-PI/AR-CFG. (M3; PoC stub 런타임)
+- [x] **#4** 다중 참여자 동일 세션 attach, 에이전트 출력 전원 fan-out — AR-TURN/RT-STREAM/FE-STREAM. (M4; 2-구독자 바이트 동일 검증)
+- [x] **#5** AI on/off 토글 채팅; 본인=우/타인·에이전트=좌 — FE-COMPOSER/FE-BUBBLE(`authorId===userId`). (M4)
+- [x] **#6** 도구 실행(파일CRUD·쉘·venv·패키지) → TOOL_CALL/TOOL_RESULT 버블(성공/실패 색) — BE-TOOL/AR-TOOL/FE-TOOL*. (M5)
+- [x] **#7** 워크스페이스/파일 트리 패널 + file.changed 라이브 갱신(경로 탈출 차단) — BE-FILES/RT-FILEEV/FE-FILETREE. (M6)
+- [x] **#8** 인터럽트/스티어링·suspend/resume — BE-INT/BE-SUSPEND/AR-PI. (M3/M4)
+- [x] **키 모델** 모든 LLM 호출이 서버 `.env` 키로, 클라/로그에 키 0건 — L1/AR-CFG/XC-REDACT. (센티넬 누출 0 검증)
 
 ### 엔지니어링 게이트
-- [ ] **실시간**: 재접속 재생 정확 + message/agent.token/tool.*/file.changed/session.status/sandbox.status seq 순서 — SSE integration green. P95 < 1.5s는 PoC 측정 권장.
-- [ ] **격리**: 경로 탈출 차단(`..`/symlink/절대경로 거부) + 리소스/네트워크 정책 — pathGuard unit + 도구/파일 contract.
-- [ ] **신뢰성**: 세션/도구 실패 시 메시지 보존, FAILED/ERROR 표면화(SYSTEM 버블) — AR-TURN/FE-STATES.
-- [ ] **보안**: LLM 키 redaction(로그/응답/소스 0건) + 레이트리밋 + 동시 실행 제한 — XC-REDACT/XC-RATE.
-- [ ] **디자인**: term-* 팔레트만 사용(새 색 0), 신규 버블/패널/상태 배지 품질 바닥선 충족 — DESIGN-SYSTEM v2 계승.
-- [ ] **i18n**: KO↔EN 전환 + 에이전트 응답 언어 추종(best-effort) + 서버 오류 사전 — I18N.
-- [ ] **지표**: 글당 평균 에이전트 턴·고유 참여자·세션 성공률 — BE-METRICS.
-- [ ] **배포**: 정적 프론트 + Node 서버 + 샌드박스 호스트 구조 확립. SQLite→Postgres는 추상화만(L10).
-- [ ] **라이선스**: MIT LICENSE + 헤더 — XC-LICENSE.
-- [ ] **테스트**: 통합 스위트 unit/contract/integration green; E2E(글→샌드박스→세션→AI 턴→도구→파일)는 pi 모킹 스캐폴드 + 실런타임 레인(XC-T).
+- [~] **실시간**: 재접속 재생 정확 + message/agent.token/tool.*/file.changed/session.status/sandbox.status seq 순서 — SSE integration green. (P95 < 1.5s는 미측정)
+- [~] **격리**: 경로 탈출 차단(`..`/symlink/절대경로 거부) green + 도구 wall-clock 타임아웃·프로세스 캡. (cgroup/메모리·CPU·네트워크 egress 강제는 크로스플랫폼 한계로 연기, 플래그만)
+- [x] **신뢰성**: 세션/도구 실패 시 메시지 보존, FAILED/ERROR 표면화(SYSTEM 버블) — AR-TURN/FE-STATES.
+- [x] **보안**: LLM 키 redaction(로그/응답/소스 0건, keygate) + 레이트리밋 + 동시 실행 제한 — XC-REDACT/XC-RATE.
+- [x] **디자인**: term-* 팔레트만 사용(새 색 0), 신규 버블/패널/상태 배지 — DESIGN-SYSTEM v2 계승.
+- [x] **i18n**: KO↔EN 전환 + 에이전트 응답 언어 추종(best-effort, LANG_HINT 전파) + 서버 오류 사전 — I18N.
+- [x] **지표**: 글당 평균 에이전트 턴·고유 참여자·세션 성공률 — BE-METRICS.
+- [~] **배포**: 정적 프론트 + Node 서버 + 샌드박스 호스트 구조 확립(로컬 실행·검증). SQLite→Postgres는 추상화만(L10). (실 배포 파이프라인 미구성)
+- [~] **라이선스**: MIT LICENSE 존재 — XC-LICENSE. (per-file 소스 헤더는 동시 레인 충돌 회피로 연기)
+- [x] **테스트**: 통합 스위트 unit/contract/integration green(52 vitest); E2E(글→샌드박스→세션→AI 턴→도구→파일)는 pi 모킹 스캐폴드 레인(XC-T `test/e2e.test.ts`).

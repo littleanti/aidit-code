@@ -163,10 +163,12 @@ export interface FileContent {
 }
 
 // ── Runtime read-only info (TRD §4 GET /runtime). NEVER includes a key. ──
+// Field name mirrors the backend payload exactly (getPublicRuntimeInfo →
+// { model, baseURLHost }). Host only — never the full key/url with secrets.
 
 export interface RuntimeInfo {
   model: string; // active model name
-  baseUrlHost?: string; // host only — never the full key/url with secrets
+  baseURLHost?: string; // host only — never the full key/url with secrets
 }
 
 // ── Messages page (TRD §4 GET /posts/:id/messages?afterSeq=). seq ascending. ──

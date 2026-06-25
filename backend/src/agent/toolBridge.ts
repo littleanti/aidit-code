@@ -86,7 +86,10 @@ export async function runToolIntent(
 
   let result;
   try {
-    result = await executeTool(ctx.sandboxRoot, req, onChunk, onFileChange);
+    // M7 XC-ISO: per-sandbox proc cap + 벽시계 타임아웃. cap 키는 격리 루트(샌드박스당 유일).
+    result = await executeTool(ctx.sandboxRoot, req, onChunk, onFileChange, {
+      sandboxId: ctx.sandboxRoot,
+    });
   } catch {
     // toolExec 가 던지는 예외(예상 외)는 FAILED 로 흡수.
     result = { status: 'FAILED' as const, exitCode: 1, result: 'tool execution error' };

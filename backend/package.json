@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "db:push": "prisma db push",
-    "test": "vitest run"
+    "test": "vitest run",
+    "keygate": "node scripts/key-grep-gate.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

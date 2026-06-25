@@ -6,6 +6,7 @@ import { useT } from '../i18n/useT';
 import { useAuthStore } from '../stores/authStore';
 import { useUiStore } from '../stores/uiStore';
 import LangToggle from '../components/LangToggle';
+import OfflineBanner from '../components/states/OfflineBanner';
 
 function Header() {
   const t = useT();
@@ -103,6 +104,7 @@ export default function AppShell() {
 
       <div className="flex min-h-screen flex-col bg-term-screen">
         <Header />
+        <OfflineBanner />
         <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-4">
           <Outlet />
         </main>

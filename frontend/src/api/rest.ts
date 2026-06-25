@@ -13,8 +13,10 @@ import type {
   MessagesPage,
   Post,
   PostsPage,
+  RuntimeInfo,
   Sandbox,
 } from './types';
+import type { Lang } from '../stores/langStore';
 
 /** Typed error carrying the HTTP status (or 0 for network failure). */
 export class ApiError extends Error {
@@ -144,6 +146,59 @@ export function patchPost(id: string, body: { title?: string; body?: string }): 
   return request<Post>(`/posts/${encodeURIComponent(id)}`, { method: 'PATCH', body });
 }
 
+// ── Profile: user posts / bookmarks (TRD §4.2) ─────────────────
+// HARD RULE: NO key fields are ever sent or read here. Cursor pagination only.
+
+/**
+ * GET /users/:id/posts?cursor= — a user's authored posts.
+ * Ordered createdAt DESC, id DESC; cursor-anchored on the POST row (TRD §4.2).
+ */
+export function getUserPosts(userId: string, cursor?: string): Promise<PostsPage> {
+  const qs = new URLSearchParams();
+  if (cursor) qs.set('cursor', cursor);
+  const tail = qs.toString();
+  return request<PostsPage>(
+    `/users/${encodeURIComponent(userId)}/posts${tail ? `?${tail}` : ''}`
+  );
+}
+
+/**
+ * GET /users/:id/bookmarks?cursor= — a user's bookmarked posts.
+ * Ordered/anchored on the BOOKMARK row createdAt DESC, id DESC (TRD §4.2).
+ */
+export function getUserBookmarks(userId: string, cursor?: string): Promise<PostsPage> {
+  const qs = new URLSearchParams();
+  if (cursor) qs.set('cursor', cursor);
+  const tail = qs.toString();
+  return request<PostsPage>(
+    `/users/${encodeURIComponent(userId)}/bookmarks${tail ? `?${tail}` : ''}`
+  );
+}
+
+// ── Bookmarks (TRD §4.2 — idempotent) ──────────────────────────
+
+/** POST /posts/:id/bookmark — idempotent add. */
+export function bookmark(id: string): Promise<{ bookmarked: boolean }> {
+  return request<{ bookmarked: boolean }>(`/posts/${encodeURIComponent(id)}/bookmark`, {
+    method: 'POST',
+  });
+}
+
+/** DELETE /posts/:id/bookmark — idempotent removal. */
+export function unbookmark(id: string): Promise<{ bookmarked: boolean }> {
+  return request<{ bookmarked: boolean }>(`/posts/${encodeURIComponent(id)}/bookmark`, {
+    method: 'DELETE',
+  });
+}
+
+// ── Runtime read-only info (TRD §4 GET /runtime) ───────────────
+// HARD RULE: response is { model, baseURLHost } — NEVER a key/secret.
+
+/** GET /runtime — public runtime info for the read-only Settings row. */
+export function getRuntime(): Promise<RuntimeInfo> {
+  return request<RuntimeInfo>('/runtime');
+}
+
 // ── Votes (TRD §4) ─────────────────────────────────────────────
 
 export interface VoteResult {
@@ -181,12 +236,13 @@ export function getMessages(postId: string, afterSeq?: number): Promise<Messages
 
 /**
  * POST /posts/:id/messages — send a HUMAN message (TRD §4.1).
- * Body { body, aiMode, clientId }. Server assigns seq + fans out via SSE.
+ * Body { body, aiMode, clientId, lang? }. Server assigns seq + fans out via SSE.
+ * The optional UI-language hint (TRD §14) steers the agent's reply language.
  * Returns the created HUMAN message (clientId idempotent).
  */
 export function sendMessage(
   postId: string,
-  payload: { body: string; aiMode: boolean; clientId: string }
+  payload: { body: string; aiMode: boolean; clientId: string; lang?: Lang }
 ): Promise<{ message: Message }> {
   return request<{ message: Message }>(`/posts/${encodeURIComponent(postId)}/messages`, {
     method: 'POST',

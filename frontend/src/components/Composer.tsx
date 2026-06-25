@@ -6,6 +6,7 @@
 // HARD RULE: no key fields anywhere. Sends only { body, aiMode, clientId }.
 import { useState } from 'react';
 import { useT } from '../i18n/useT';
+import { useLangStore } from '../stores/langStore';
 import { useAuthStore } from '../stores/authStore';
 import { useUiStore } from '../stores/uiStore';
 import { useThreadStore } from '../stores/threadStore';
@@ -18,6 +19,7 @@ interface ComposerProps {
 
 export default function Composer({ postId }: ComposerProps) {
   const t = useT();
+  const lang = useLangStore((s) => s.lang);
   const token = useAuthStore((s) => s.token);
   const userId = useAuthStore((s) => s.userId);
   const openLogin = useUiStore((s) => s.openLogin);
@@ -73,7 +75,7 @@ export default function Composer({ postId }: ComposerProps) {
       // created HUMAN message WITH its clientId (the SSE message.created payload
       // does not), so reconcile the optimistic temp row here — adopting the real
       // id + seq. A later replayed SSE message.created dedupes by id in the store.
-      const { message } = await sendMessage(postId, { body: trimmed, aiMode, clientId });
+      const { message } = await sendMessage(postId, { body: trimmed, aiMode, clientId, lang });
       reconcileByClientId(message);
     } catch (e) {
       setError(e instanceof ApiError ? t('errors.generic') : t('errors.networkError'));

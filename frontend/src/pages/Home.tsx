@@ -6,6 +6,8 @@ import { useT } from '../i18n/useT';
 import { getPosts, type PostSort } from '../api/rest';
 import { usePagedList } from '../hooks/usePagedList';
 import PostCard from '../components/PostCard';
+import EmptyState from '../components/states/EmptyState';
+import ErrorState from '../components/states/ErrorState';
 import type { Post } from '../api/types';
 
 export default function Home() {
@@ -17,7 +19,10 @@ export default function Home() {
     [sort]
   );
 
-  const { items, loading, done, error, sentinelRef } = usePagedList<Post>(fetcher, [sort]);
+  const { items, loading, done, error, sentinelRef, loadMore, reset } = usePagedList<Post>(
+    fetcher,
+    [sort]
+  );
 
   const promptSort = sort === 'hot' ? 'popular' : 'new';
 
@@ -60,16 +65,18 @@ export default function Home() {
       </div>
 
       {/* empty state */}
-      {!loading && done && items.length === 0 && (
-        <p className="py-8 text-center font-mono text-sm text-term-dim">
-          {t('post.feedEmpty')}
-        </p>
+      {!loading && !error && done && items.length === 0 && (
+        <EmptyState message={t('post.feedEmpty')} />
       )}
 
       {error && (
-        <p className="py-4 text-center font-mono text-xs text-term-red" role="alert">
-          {t('errors.networkError')}
-        </p>
+        <ErrorState
+          message={t('errors.networkError')}
+          onRetry={() => {
+            reset();
+            loadMore();
+          }}
+        />
       )}
 
       {loading && (

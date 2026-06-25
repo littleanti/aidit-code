@@ -14,6 +14,8 @@ import Composer from '../components/Composer';
 import FileTree from '../components/FileTree';
 import FileView from '../components/FileView';
 import { useThreadStream } from '../stream/useThreadStream';
+import ReconnectBanner from '../components/states/ReconnectBanner';
+import { errorKeyForSandbox, errorKeyForSession } from '../i18n/serverError';
 import { useThreadStore } from '../stores/threadStore';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import { useAuthStore } from '../stores/authStore';
@@ -113,6 +115,12 @@ export default function Thread() {
     activeSession.status !== 'STOPPED' &&
     activeSession.status !== 'ERROR';
 
+  // Surface terminal session/sandbox ERROR as a user-facing SYSTEM-style notice (TRD §11).
+  // Sandbox error takes precedence (it blocks any session work).
+  const sandboxErrKey = sandboxStatus ? errorKeyForSandbox(sandboxStatus) : null;
+  const sessionErrKey = activeSession ? errorKeyForSession(activeSession.status) : null;
+  const statusErrorKey = sandboxErrKey ?? sessionErrKey;
+
   return (
     <div className="flex flex-col" style={{ minHeight: 'calc(100vh - 7rem)' }}>
       {/* Header: back + sandbox badge + reconnect indicator */}
@@ -136,6 +144,19 @@ export default function Thread() {
           </span>
         )}
       </div>
+
+      {/* Prominent SSE reconnect banner (in addition to the compact header indicator). */}
+      <ReconnectBanner show={streamStatus === 'reconnecting'} />
+
+      {/* Session/sandbox ERROR → SYSTEM-style inline notice (TRD §11). */}
+      {statusErrorKey && (
+        <div
+          role="alert"
+          className="mb-2 px-2 text-center font-mono text-[11px] leading-relaxed text-term-red"
+        >
+          {t(`errors.${statusErrorKey}`)}
+        </div>
+      )}
 
       {loading && (
         <p className="py-8 text-center font-mono text-sm text-term-dim">

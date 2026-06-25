@@ -16,6 +16,14 @@ import { writeFile, readFile, rm, mkdir, access } from 'node:fs/promises';
 import path from 'node:path';
 import { resolveInsideRoot, PathEscapeError } from '../sandbox/pathGuard.js';
 import type { ToolKindValue, FileChangeKind } from '../realtime/events.js';
+import { config } from '../config.js';
+import {
+  attachToolTimeout,
+  tryAcquireProc,
+  releaseProc,
+  TOOL_TIMEOUT_RESULT,
+  PROC_CAP_RESULT,
+} from '../sandbox/limits.js';
 
 /** path violation 시 사용하는 결과 문구(이벤트/행에 남는 일반 문구 — 민감정보 아님). */
 export const PATH_VIOLATION_RESULT = 'path violation';
@@ -44,6 +52,14 @@ export interface ToolExecRequest {
   relPath?: string;
   /** FILE_WRITE: 기록할 내용. */
   content?: string;
+}
+
+/** 격리 하드닝 옵션(M7 XC-ISO). 미지정 시 config.isolation 기본값을 따른다. */
+export interface ToolExecOptions {
+  /** per-sandbox child-process cap 적용 키(없으면 cap 미적용). */
+  sandboxId?: string;
+  /** SHELL/PACKAGE 벽시계 타임아웃(ms). 미지정 시 config.isolation.toolTimeoutMs. */
+  timeoutMs?: number;
 }
 
 /** 도구 실행 결과(toolBridge 가 finalizeToolCall 로 넘긴다). */
@@ -84,6 +100,7 @@ export async function executeTool(
   req: ToolExecRequest,
   onChunk: ToolChunkSink,
   onFileChange?: FileChangeSink,
+  opts: ToolExecOptions = {},
 ): Promise<ToolExecResult> {
   switch (req.kind) {
     case 'FILE_WRITE':
@@ -94,7 +111,7 @@ export async function executeTool(
       return await runFileDelete(sandboxRoot, req, onChunk, onFileChange);
     case 'SHELL':
     case 'PACKAGE':
-      return await runShell(sandboxRoot, req, onChunk);
+      return await runShell(sandboxRoot, req, onChunk, opts);
     default:
       onChunk(`unsupported tool kind: ${req.kind}`);
       return { status: 'FAILED', exitCode: 1, result: `unsupported tool kind: ${req.kind}` };
@@ -200,12 +217,21 @@ function runShell(
   root: string,
   req: ToolExecRequest,
   onChunk: ToolChunkSink,
+  opts: ToolExecOptions = {},
 ): Promise<ToolExecResult> {
   const command = req.command ?? '';
   if (!command.trim()) {
     onChunk('empty command\n');
     return Promise.resolve({ status: 'FAILED', exitCode: 1, result: 'empty command' });
   }
+
+  // (b) per-sandbox child-process cap(M7 XC-ISO). 초과 시 자식을 스폰하지 않고 FAILED.
+  if (!tryAcquireProc(opts.sandboxId)) {
+    onChunk(PROC_CAP_RESULT + '\n');
+    return Promise.resolve({ status: 'FAILED', exitCode: 1, result: PROC_CAP_RESULT });
+  }
+
+  const timeoutMs = opts.timeoutMs ?? config.isolation.toolTimeoutMs;
 
   return new Promise<ToolExecResult>((resolve) => {
     // 플랫폼별 셸: Windows=cmd /c, POSIX=sh -c. cwd 격리(루트 밖 접근은 OS 권한/경로 가드 밖이나
@@ -217,6 +243,11 @@ function runShell(
 
     liveChildren.add(child);
 
+    // (a) 벽시계 타임아웃(M7 XC-ISO). 초과 시 child kill → FAILED 'timeout'.
+    const guard = attachToolTimeout(child, timeoutMs, () => {
+      onChunk(TOOL_TIMEOUT_RESULT + '\n');
+    });
+
     child.stdout?.setEncoding('utf8');
     child.stderr?.setEncoding('utf8');
     child.stdout?.on('data', (c: string) => onChunk(c));
@@ -226,7 +257,14 @@ function runShell(
     const finish = (exitCode: number | null): void => {
       if (settled) return;
       settled = true;
+      guard.clear();
+      releaseProc(opts.sandboxId);
       liveChildren.delete(child);
+      // 타임아웃으로 죽은 경우: exitCode 와 무관하게 FAILED 'timeout'.
+      if (guard.timedOut()) {
+        resolve({ status: 'FAILED', exitCode: exitCode ?? 1, result: TOOL_TIMEOUT_RESULT });
+        return;
+      }
       const status: 'SUCCEEDED' | 'FAILED' = exitCode === 0 ? 'SUCCEEDED' : 'FAILED';
       resolve({ status, exitCode });
     };

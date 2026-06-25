@@ -26,6 +26,28 @@ export interface LlmConfig {
   model: string;
 }
 
+/** 쓰기 라우트용 인메모리 레이트리밋 설정(TRD §8 남용 방지, M7 XC-RATE). */
+export interface RateLimitConfig {
+  /** 1 이면 레이트리밋 미적용(테스트/스모크에서 기존 스위트 영향 차단). */
+  disabled: boolean;
+  /** 고정 윈도우 길이(ms). */
+  windowMs: number;
+  /** 윈도우당 POST /posts 허용 횟수(userId+ip). 초과 시 429. */
+  postsPerWindow: number;
+  /** 윈도우당 POST /posts/:id/messages 허용 횟수(userId+ip). 초과 시 429. */
+  messagesPerWindow: number;
+}
+
+/** 샌드박스 격리 하드닝 설정(TRD §8, M7 XC-ISO). best-effort PoC. */
+export interface IsolationConfig {
+  /** SHELL/PACKAGE 자식 도구의 벽시계 타임아웃(ms). 초과 시 kill → ToolCall FAILED 'timeout'. */
+  toolTimeoutMs: number;
+  /** 샌드박스당 동시 실행 자식 프로세스 상한(best-effort). 초과 시 도구 실행 거부. */
+  maxProcsPerSandbox: number;
+  /** 네트워크 정책 플래그. 'restricted' | 'open'. 메타에 기록(실제 강제는 범위 외 — 정직히 문서화). */
+  networkPolicy: 'restricted' | 'open';
+}
+
 export interface AppConfig {
   port: number;
   jwtSecret: string;
@@ -35,6 +57,10 @@ export interface AppConfig {
   sandboxRoot: string;
   /** 동시 샌드박스 프로비저닝/활성 실행 상한(TRD §8 남용 방지). 초과 시 429. */
   sandboxMaxConcurrent: number;
+  /** 쓰기 라우트 레이트리밋(M7 XC-RATE). */
+  rateLimit: RateLimitConfig;
+  /** 샌드박스 격리 하드닝(M7 XC-ISO). */
+  isolation: IsolationConfig;
   /** LLM 설정 — 읽되 절대 로그/응답/SSE 에 노출 금지. */
   llm: LlmConfig;
 }
@@ -46,6 +72,19 @@ export const config: AppConfig = {
   databaseUrl: process.env.DATABASE_URL || 'file:./prisma/dev.db',
   sandboxRoot: process.env.SANDBOX_ROOT || defaultSandboxRoot,
   sandboxMaxConcurrent: Number(process.env.SANDBOX_MAX_CONCURRENT) || 4,
+  rateLimit: {
+    // 테스트/스모크는 RATE_LIMIT_DISABLED=1 로 끈다(M1-M6 스위트 무영향). 기본 활성.
+    disabled: process.env.RATE_LIMIT_DISABLED === '1',
+    windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
+    // GENEROUS — 정상 흐름/기존 테스트를 절대 막지 않는 넉넉한 한도.
+    postsPerWindow: Number(process.env.RATE_LIMIT_POSTS_PER_WINDOW) || 30,
+    messagesPerWindow: Number(process.env.RATE_LIMIT_MESSAGES_PER_WINDOW) || 120,
+  },
+  isolation: {
+    toolTimeoutMs: Number(process.env.TOOL_TIMEOUT_MS) || 30_000,
+    maxProcsPerSandbox: Number(process.env.SANDBOX_MAX_PROCS) || 16,
+    networkPolicy: process.env.NETWORK_POLICY === 'open' ? 'open' : 'restricted',
+  },
   llm: {
     apiKey: process.env.API_KEY || '',
     baseURL: process.env.BASE_URL || 'https://models.github.ai/inference',
@@ -65,6 +104,8 @@ export function redactConfig(cfg: AppConfig = config): Record<string, unknown> {
     databaseUrl: cfg.databaseUrl,
     sandboxRoot: cfg.sandboxRoot,
     sandboxMaxConcurrent: cfg.sandboxMaxConcurrent,
+    rateLimit: cfg.rateLimit,
+    isolation: cfg.isolation,
     llm: {
       apiKey: cfg.llm.apiKey ? '[REDACTED]' : '[EMPTY]',
       baseURL: cfg.llm.baseURL,

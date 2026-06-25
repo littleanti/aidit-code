@@ -16,6 +16,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Sandbox } from '@prisma/client';
 import { prisma } from '../db.js';
+import { config } from '../config.js';
 import { setSandboxStatus, sandboxLimiter } from './service.js';
 
 const META_FILENAME = '.sandbox-meta.json';
@@ -24,8 +25,11 @@ const META_FILENAME = '.sandbox-meta.json';
 interface SandboxMeta {
   runtime: string;
   provisionedAt: string;
-  /** PoC 플레이스홀더 리소스/네트워크 정책. */
-  policy: { network: 'restricted'; maxProcs: number };
+  /**
+   * 리소스/네트워크 정책(M7 XC-ISO). network 플래그는 config.isolation 에서 기록.
+   * ※ 정직한 범위: network 강제는 본 PoC 범위 밖(플래그 기록만). maxProcs 는 best-effort cap.
+   */
+  policy: { network: 'restricted' | 'open'; maxProcs: number };
 }
 
 export interface ProvisionOptions {
@@ -59,7 +63,10 @@ export async function provisionSandbox(
     const meta: SandboxMeta = {
       runtime: sandbox.runtime,
       provisionedAt: new Date().toISOString(),
-      policy: { network: 'restricted', maxProcs: 16 },
+      policy: {
+        network: config.isolation.networkPolicy,
+        maxProcs: config.isolation.maxProcsPerSandbox,
+      },
     };
     const metaJson = JSON.stringify(meta);
     await writeFile(path.join(sandbox.path, META_FILENAME), metaJson, 'utf8');
