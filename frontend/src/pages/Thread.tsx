@@ -70,6 +70,16 @@ export default function Thread() {
   // Reset on id change (the id-scoped effect below).
   const autoAttachedRef = useRef(false);
 
+  // ── Jump chip (ported from Aidit, adapted to window scroll) ──
+  // A single square chip at the composer's top-right that follows scroll
+  // DIRECTION: ↑ while scrolling up (jump to top), ↓ while scrolling down
+  // (jump to bottom). Fades in only during active scroll, fades out after 1s
+  // idle. `isProgrammatic` blocks our own scrollTo from re-arming the chip.
+  const [activeChip, setActiveChip] = useState<'none' | 'top' | 'bottom'>('none');
+  const lastScrollYRef = useRef(0);
+  const scrollIdleTimerRef = useRef<number | null>(null);
+  const isProgrammaticRef = useRef(false);
+
   // Load post + initial messages, then hydrate the store (seq-ascending).
   const load = useCallback(async () => {
     if (!id) return;
@@ -124,14 +134,49 @@ export default function Thread() {
 
   // Track whether the user is parked near the bottom (window scroll). When they
   // scroll up to read history we stop yanking them down on every new token.
+  // Also drives the jump chip: direction from the scrollY delta (>2px deadzone),
+  // fading out 1s after scrolling stops. Skipped while a programmatic jump runs.
   useEffect(() => {
+    const SCROLL_DIR_DEADZONE = 2;
     const onScroll = () => {
       const doc = document.documentElement;
-      pinnedRef.current =
-        window.innerHeight + window.scrollY >= doc.scrollHeight - 120;
+      const y = window.scrollY;
+      pinnedRef.current = window.innerHeight + y >= doc.scrollHeight - 120;
+
+      if (isProgrammaticRef.current) return;
+      const dY = y - lastScrollYRef.current;
+      lastScrollYRef.current = y;
+      if (dY < -SCROLL_DIR_DEADZONE) setActiveChip('top');
+      else if (dY > SCROLL_DIR_DEADZONE) setActiveChip('bottom');
+      // Below the deadzone (jitter): keep whatever chip is currently showing.
+      if (scrollIdleTimerRef.current) window.clearTimeout(scrollIdleTimerRef.current);
+      scrollIdleTimerRef.current = window.setTimeout(() => setActiveChip('none'), 1000);
     };
     window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      if (scrollIdleTimerRef.current) window.clearTimeout(scrollIdleTimerRef.current);
+    };
+  }, []);
+
+  // Jump to the top / bottom of the window. Blocks our own scroll events from
+  // re-arming the chip, hides it instantly, and re-pins when jumping to bottom.
+  const jumpTo = useCallback((edge: 'top' | 'bottom') => {
+    isProgrammaticRef.current = true;
+    setActiveChip('none');
+    pinnedRef.current = edge === 'bottom';
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    window.scrollTo({
+      top: edge === 'top' ? 0 : document.documentElement.scrollHeight,
+      behavior: reduce ? 'auto' : 'smooth',
+    });
+    window.setTimeout(
+      () => {
+        isProgrammaticRef.current = false;
+        lastScrollYRef.current = window.scrollY;
+      },
+      reduce ? 0 : 700
+    );
   }, []);
 
   // Auto-scroll to the newest bubble as messages/tokens arrive. The user's own
@@ -403,6 +448,40 @@ export default function Thread() {
               {/* Composer pinned ABOVE the bottom TabBar (both were sticky
                   bottom-0 and overlapped, hiding the composer's lower edge). */}
               <div className="sticky bottom-[var(--tabbar-h)] z-10">
+                {/* Jump chip (Aidit parity): floats just above the composer,
+                    bottom-right; follows scroll direction, fades when idle. */}
+                <div className="pointer-events-none absolute bottom-full right-3 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => jumpTo(activeChip === 'top' ? 'top' : 'bottom')}
+                    aria-label={t(
+                      activeChip === 'top' ? 'thread.jumpTopAria' : 'thread.jumpBottomAria'
+                    )}
+                    title={t(
+                      activeChip === 'top' ? 'thread.jumpTopAria' : 'thread.jumpBottomAria'
+                    )}
+                    aria-hidden={activeChip === 'none'}
+                    tabIndex={activeChip === 'none' ? -1 : 0}
+                    className={`grid h-10 w-10 place-items-center rounded-[2px] border border-term-border bg-term-panel/85 text-term-dim backdrop-blur transition hover:border-term-fg-bright hover:text-term-fg-bright hover:[box-shadow:0_0_8px_rgba(125,255,160,0.25)] active:scale-95 ${
+                      activeChip !== 'none'
+                        ? 'pointer-events-auto opacity-100'
+                        : 'pointer-events-none opacity-0'
+                    }`}
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="18"
+                      height="18"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      strokeLinecap="square"
+                      aria-hidden="true"
+                    >
+                      <path d={activeChip === 'top' ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'} />
+                    </svg>
+                  </button>
+                </div>
                 <Composer postId={post.id} />
               </div>
             </>

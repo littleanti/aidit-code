@@ -52,6 +52,9 @@ export const thread = {
     // Composer 레이아웃(Aidit 구조) — AI 팝오버 / 전송 버튼 접근성
     aiMenuAria: 'AI 설정',
     sendAria: '보내기',
+    // 점프 칩(Aidit 동일) — 스크롤 방향 추종
+    jumpTopAria: '맨 위로 이동',
+    jumpBottomAria: '맨 아래로 이동',
   },
   en: {
     composerPlaceholder: 'Type a message…',
@@ -104,5 +107,8 @@ export const thread = {
     // Composer layout (Aidit structure) — AI popover / send button a11y
     aiMenuAria: 'AI settings',
     sendAria: 'Send',
+    // Jump chip (Aidit parity) — follows scroll direction
+    jumpTopAria: 'Scroll to top',
+    jumpBottomAria: 'Scroll to bottom',
   },
 } as const;

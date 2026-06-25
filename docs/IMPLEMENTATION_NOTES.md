@@ -11,6 +11,13 @@
 
 ## Changelog
 
+### 2026-06-26 · [feat] · 완료 · 게시글 점프 칩 — Aidit 과 모양/위치/기능 동일하게 적용
+- **요청(사용자)**: Thread 화면의 점프 칩을 부모 Aidit 과 동일하게(모양·위치·기능).
+- **Aidit 사양**: 단일 정사각형 버튼(`h-10 w-10 rounded-[2px]`, term-border + 반투명 card bg + backdrop-blur, hover 시 bright+glow), 스크롤 영역 우하단(`sticky bottom-3` h-0 래퍼 + `absolute right-3`), **스크롤 방향 추종**(위로 스크롤=↑ 맨위로, 아래로=↓ 맨아래로; deadzone 2px), 스크롤 중에만 페이드인 후 1초 유휴 시 페이드아웃, 클릭 시 smooth scrollTo(reduced-motion 존중), `isProgrammatic` 으로 자기 스크롤 재트리거 차단. aria/title `thread.jumpTopAria`/`jumpBottomAria`.
+- **이식(대상 차이 적응)**: Aidit 은 내부 컨테이너 스크롤(`scrollRef`)이지만 Audit-Code 는 **window 스크롤** → 방향은 `window.scrollY` 델타, 점프는 `window.scrollTo({top:0 | documentElement.scrollHeight})`. 칩은 컴포저 sticky 래퍼 안에서 `absolute bottom-full right-3` 로 **컴포저 바로 위** 우측에 띄움(TabBar/컴포저 위, 매직넘버 없이). 토큰은 Audit-Code 명칭(term-panel/term-fg-bright)으로, 없는 `shadow-glow-soft` 대신 인라인 hover 글로우. 기존 window 스크롤 리스너(pinnedRef)에 방향 감지+유휴타이머 통합. 점프=bottom 시 pinnedRef 재핀, top 시 해제.
+- **검증(③)**: frontend `tsc --noEmit` 클린, `vite build` PASS(90 모듈). 칩은 sticky 컴포저 래퍼(positioned containing block) 안 `absolute bottom-full right-3` 로 컴포저 바로 위 우측에 위치, 방향/유휴/점프 로직은 window 스크롤로 이식.
+- 변경 파일: `frontend/src/pages/Thread.tsx`, `frontend/src/i18n/dicts/thread.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [fix] · 완료 · 유저명 닫는 `]` 사라짐 + Thread 컴포저가 TabBar 에 가려 잘리는 문제
 - **증상(사용자)**: ① 헤더 `[ username ]` 에서 닫는 `]` 가 사라짐. ② 게시글 진입 시 댓글 작성창(Composer) 하단 일부가 잘려 안 보임(메인 화면 세로 길이가 실기기보다 미묘하게 김).
 - **원인**: ① 직전 수정에서 `[ name ]` 전체 문자열에 `truncate` 를 걸어 닫는 `]` 까지 잘림. ② Composer 래퍼가 `sticky bottom-0` 인데 하단 `TabBar` 도 `sticky bottom-0`(z-20) → 둘 다 뷰포트 맨 아래에 겹쳐 TabBar(~56px)가 Composer 하단(전송 버튼)을 가림.
