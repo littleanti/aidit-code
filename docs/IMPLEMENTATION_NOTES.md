@@ -11,6 +11,13 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · 컴포저 좌우 공백 제거 — Aidit 처럼 풀블리드 footer
+- **요청(사용자, 스크린샷)**: 게시글 메시지 컴포저 좌/우에 공백이 있음 → Aidit 참고해 제거.
+- **원인**: 컴포저 루트는 `border-t bg` 풀폭이지만 `AppShell` 의 `<main class="… px-4">`(전 페이지 16px 인셋) 안에 들어 있어 좌우 16px 공백 발생. Aidit 은 컴포저가 컬럼 풀블리드 footer 이고 내부만 `px-3`.
+- **수정**: Thread 의 sticky 컴포저 래퍼에 `-mx-4` 추가 → main 의 `px-4` 를 상쇄해 컴포저(테두리/배경)가 화면 가장자리까지 풀블리드. 내부 행은 기존 `px-3` 유지(콘텐츠는 가장자리에 붙지 않음). 같은 래퍼에 anchored 된 점프 칩도 함께 풀블리드되어 `right-3` 가 화면에서 12px(Aidit 동일).
+- **검증(③)**: frontend `tsc --noEmit` 클린, `vite build` PASS(90 모듈). `-mx-4` 가 `<main>`의 `px-4`(1rem)를 정확히 상쇄하는 결정적 CSS 라 빌드 검증으로 충분(모바일 풀블리드; 데스크톱은 컬럼 대비 ±16px 확장이나 mobile-first 의도상 허용).
+- 변경 파일: `frontend/src/pages/Thread.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [feat] · 완료 · 게시글 점프 칩 — Aidit 과 모양/위치/기능 동일하게 적용
 - **요청(사용자)**: Thread 화면의 점프 칩을 부모 Aidit 과 동일하게(모양·위치·기능).
 - **Aidit 사양**: 단일 정사각형 버튼(`h-10 w-10 rounded-[2px]`, term-border + 반투명 card bg + backdrop-blur, hover 시 bright+glow), 스크롤 영역 우하단(`sticky bottom-3` h-0 래퍼 + `absolute right-3`), **스크롤 방향 추종**(위로 스크롤=↑ 맨위로, 아래로=↓ 맨아래로; deadzone 2px), 스크롤 중에만 페이드인 후 1초 유휴 시 페이드아웃, 클릭 시 smooth scrollTo(reduced-motion 존중), `isProgrammatic` 으로 자기 스크롤 재트리거 차단. aria/title `thread.jumpTopAria`/`jumpBottomAria`.

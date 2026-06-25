@@ -446,8 +446,10 @@ export default function Thread() {
               </div>
 
               {/* Composer pinned ABOVE the bottom TabBar (both were sticky
-                  bottom-0 and overlapped, hiding the composer's lower edge). */}
-              <div className="sticky bottom-[var(--tabbar-h)] z-10">
+                  bottom-0 and overlapped, hiding the composer's lower edge).
+                  -mx-4 cancels <main>'s px-4 so the composer is full-bleed
+                  (edge-to-edge) like Aidit; inner rows keep their own px-3. */}
+              <div className="sticky bottom-[var(--tabbar-h)] z-10 -mx-4">
                 {/* Jump chip (Aidit parity): floats just above the composer,
                     bottom-right; follows scroll direction, fades when idle. */}
                 <div className="pointer-events-none absolute bottom-full right-3 mb-2">
