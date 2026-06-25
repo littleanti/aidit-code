@@ -2,7 +2,7 @@
 // Shape mirrors docs/TRD.md §14.2.
 export const thread = {
   ko: {
-    composerPlaceholder: '메시지를 입력하세요… (AI on이면 에이전트가 응답)',
+    composerPlaceholder: '메시지를 입력하세요…',
     aiToggleOn: 'AI 켜짐',
     aiToggleOff: 'AI 꺼짐',
     agentThinking: '에이전트가 작업 중…',
@@ -38,7 +38,7 @@ export const thread = {
     deleting: '삭제 중…',
   },
   en: {
-    composerPlaceholder: 'Type a message… (agent replies when AI is on)',
+    composerPlaceholder: 'Type a message…',
     aiToggleOn: 'AI on',
     aiToggleOff: 'AI off',
     agentThinking: 'Agent is working…',

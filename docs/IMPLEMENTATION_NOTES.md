@@ -11,6 +11,12 @@
 
 ## Changelog
 
+### 2026-06-25 · [fix] · 완료 · 입력창 placeholder 가 두 줄로 줄바꿈 → 한 줄로 단축(ko/en)
+- **증상(사용자)**: 모바일에서 composer placeholder `메시지를 입력하세요… (AI on이면 에이전트가 응답)` 가 너무 길어 두 줄로 표시 → UX 불편.
+- **수정**: `(AI on…)` 부가 설명 제거(바로 옆 AI 토글 칩이 같은 정보를 전달). KO `메시지를 입력하세요…`, EN `Type a message…` 로 단축. TRD §14.2 예시도 동일하게 정정.
+- **검증(③)**: frontend `tsc --noEmit` 클린, `vite build` PASS. `thread.ts` ko/en `composerPlaceholder` 가 단축 문구로 갱신됨 확인.
+- 변경 파일: `frontend/src/i18n/dicts/thread.ts`, `docs/TRD.md`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-25 · [fix] · 완료 · 도구 결과 버블이 완료 후에도 "실행 중…" 으로 남는 문제 → "실행 완료."
 - **증상(사용자)**: 도구(write_file/shell) 실행이 끝나도 TOOL_RESULT 버블 배지가 계속 "실행 중…". 끝나면 "실행 완료." 로 바뀌어야 함.
 - **원인**: `ToolResultBubble.tsx` 가 상태를 `tc?.status ?? (message.status==='FAILED'?'FAILED':'RUNNING')` 로 도출 — ① TOOL_RESULT 버블은 `toolCallId` 가 없어(연결은 TOOL_CALL 버블) 라이브 tool.* 패치가 닿지 않아 `tc` 가 null, ② 폴백이 `COMPLETE` 를 `RUNNING` 으로 매핑. 결과적으로 항상 RUNNING. 실제로 TOOL_RESULT 의 생명주기는 자신의 `message.status`(서버 finalize 가 `message.updated` 로 COMPLETE/FAILED 확정)가 권위인데 이를 무시.
