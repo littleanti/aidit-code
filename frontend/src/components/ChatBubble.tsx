@@ -1,0 +1,115 @@
+// src/components/ChatBubble.tsx
+// FE-BUBBLE (M4): render a Message by type using ONLY term-* tokens
+// (WIREFRAME §6.1 chat bubble table). seq ordering is handled by the store.
+//
+//   HUMAN (self)  → right; bg-term-cta + border-term-active + text #c8ffe0
+//   HUMAN (peer)  → left;  bg-term-panel + border-term-border + text-term-fg, author label term-dim
+//   AGENT_REPLY   → left;  amber tint + border-term-amber-line + text-term-fg-bright,
+//                          '[AGENT] pi agent' label term-amber; STREAMING → blinking .term-cursor
+//   SYSTEM        → centered, text-term-dim-3
+//   TOOL_CALL / TOOL_RESULT → minimal fallback (M5); never crash.
+import { useT } from '../i18n/useT';
+import { useAuthStore } from '../stores/authStore';
+import type { Message } from '../api/types';
+
+interface ChatBubbleProps {
+  message: Message;
+  /** Author display name for peer HUMAN bubbles (optional). */
+  authorName?: string;
+}
+
+// WIREFRAME self-bubble text color (literal from the design table; not a token class).
+const SELF_TEXT = '#c8ffe0';
+
+export default function ChatBubble({ message, authorName }: ChatBubbleProps) {
+  const t = useT();
+  const currentUserId = useAuthStore((s) => s.userId);
+
+  const { type, status, body } = message;
+
+  // ── SYSTEM: centered micro-text band ───────────────────────────
+  if (type === 'SYSTEM') {
+    return (
+      <div className="my-1 px-2 text-center font-mono text-[11px] leading-relaxed text-term-dim-3">
+        {body}
+      </div>
+    );
+  }
+
+  // ── AGENT_REPLY: left, amber tint, [AGENT] label, streaming cursor ─
+  if (type === 'AGENT_REPLY') {
+    const streaming = status === 'STREAMING' || status === 'PENDING';
+    return (
+      <div className="flex justify-start">
+        <div className="max-w-[78%]">
+          <div className="mb-1 font-mono text-[10px] uppercase tracking-wider text-term-amber">
+            ⚡ {t('thread.agentLabel')}
+          </div>
+          <div className="rounded-[3px] border border-term-amber-line bg-term-amber-bg px-3 py-2 font-mono text-sm leading-relaxed text-term-fg-bright">
+            <span className="whitespace-pre-wrap break-words">{body}</span>
+            {streaming && (
+              <span className="term-cursor ml-0.5 align-text-bottom" aria-hidden="true">
+                &nbsp;
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── TOOL_CALL / TOOL_RESULT: minimal fallback (M5) ─────────────
+  if (type === 'TOOL_CALL') {
+    return (
+      <div className="flex justify-start">
+        <div className="w-full max-w-full overflow-x-auto rounded-[3px] border border-term-line bg-term-sunken px-3 py-2 font-mono text-xs text-term-dim">
+          <span className="text-term-faint">▌$ </span>
+          <span className="whitespace-pre break-words">{body}</span>
+        </div>
+      </div>
+    );
+  }
+  if (type === 'TOOL_RESULT') {
+    const failed = status === 'FAILED';
+    return (
+      <div className="flex justify-start">
+        <div
+          className={`w-full max-w-full overflow-x-auto rounded-[3px] border px-3 py-2 font-mono text-xs ${
+            failed ? 'border-term-red-line bg-term-red-bg text-term-red' : 'border-term-line bg-term-sunken text-term-dim'
+          }`}
+        >
+          <pre className="whitespace-pre">{body}</pre>
+        </div>
+      </div>
+    );
+  }
+
+  // ── HUMAN: self (right) vs peer (left) ─────────────────────────
+  const isSelf = !!currentUserId && message.authorId === currentUserId;
+
+  if (isSelf) {
+    return (
+      <div className="flex justify-end">
+        <div
+          className="max-w-[78%] rounded-[3px] border border-term-active bg-term-cta px-3 py-2 font-mono text-sm leading-relaxed"
+          style={{ color: SELF_TEXT }}
+        >
+          <span className="whitespace-pre-wrap break-words">{body}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex justify-start">
+      <div className="max-w-[78%]">
+        {authorName && (
+          <div className="mb-1 font-mono text-[10px] text-term-dim">{authorName}</div>
+        )}
+        <div className="rounded-[3px] border border-term-border bg-term-panel px-3 py-2 font-mono text-sm leading-relaxed text-term-fg">
+          <span className="whitespace-pre-wrap break-words">{body}</span>
+        </div>
+      </div>
+    </div>
+  );
+}

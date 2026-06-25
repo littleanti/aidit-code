@@ -14,6 +14,7 @@ import { getLlmRuntimeConfig } from '../agent/config.js';
 import { publishToPost } from '../realtime/publish.js';
 import {
   makeSessionStatusEvent,
+  makeMessageUpdatedEvent,
   type AgentSessionStatusValue,
 } from '../realtime/events.js';
 
@@ -149,6 +150,64 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     await setSandboxStatus(sandbox.id, 'SUSPENDED');
 
     return reply.code(200).send({ session: serializeSession(stopped) });
+  });
+
+  // ── 인터럽트/스티어(BE-INT, TRD §6.1 step4·§11) ──────
+  app.post('/posts/:id/interrupt', { preHandler: app.requireAuth }, async (req, reply) => {
+    const { id: postId } = req.params as { id: string };
+    const body = (req.body ?? {}) as { steer?: unknown };
+    const steer = typeof body.steer === 'string' && body.steer.trim() ? body.steer : undefined;
+
+    const post = await prisma.post.findUnique({
+      where: { id: postId },
+      include: { sandbox: true },
+    });
+    if (!post) {
+      return reply.code(404).send({ error: 'post not found' });
+    }
+    const sandbox = post.sandbox;
+    if (!sandbox) {
+      return reply.code(409).send({ error: 'sandbox not provisioned for this post' });
+    }
+
+    const active = await prisma.agentSession.findFirst({
+      where: { sandboxId: sandbox.id, status: { in: ACTIVE_STATUSES } },
+      orderBy: { startedAt: 'desc' },
+    });
+    if (!active) {
+      return reply.code(409).send({ error: 'no active session to interrupt' });
+    }
+
+    // 런타임에 인터럽트 전달(남은 토큰 방출 즉시 중단, 선택 steer 로 방향 전환).
+    const runtime = getAgentRuntime();
+    await runtime.interrupt({ id: active.id, sandboxId: sandbox.id }, steer);
+
+    // 진행 중 STREAMING/PENDING AGENT_REPLY 를 COMPLETE(부분 본문 보존)로 확정 후 통지.
+    const inflight = await prisma.message.findFirst({
+      where: { postId, type: 'AGENT_REPLY', status: { in: ['PENDING', 'STREAMING'] } },
+      orderBy: { seq: 'desc' },
+    });
+    let finalized: { id: string; body: string; status: string } | null = null;
+    if (inflight) {
+      const updated = await prisma.message.update({
+        where: { id: inflight.id },
+        data: { status: 'COMPLETE' }, // 부분 본문 보존(TRD §6.1 step4).
+      });
+      finalized = { id: updated.id, body: updated.body, status: 'COMPLETE' };
+      publishToPost(
+        postId,
+        makeMessageUpdatedEvent({ id: updated.id, body: updated.body, status: 'COMPLETE' }),
+      );
+    }
+
+    // 세션 INTERRUPTED 전이 + 통지.
+    await prisma.agentSession.update({
+      where: { id: active.id },
+      data: { status: 'INTERRUPTED' },
+    });
+    publishSessionStatus(postId, active.id, 'INTERRUPTED');
+
+    return reply.code(200).send({ interrupted: true, message: finalized });
   });
 }
 

@@ -1,0 +1,220 @@
+// backend/src/agent/turn.ts
+// AR-TURN — 에이전트 턴 오케스트레이션(TRD §6.1 step3).
+//
+// runAgentTurn(post, session, humanMessage, lang):
+//   1) AGENT_REPLY Message(authorId=null, status PENDING, seq, replyToId=humanMessage.id) 생성
+//      → message.created publish.
+//   2) 세션 RUNNING 전이 → session.status publish.
+//   3) runtime.send(session, input, lang, onToken): 토큰 delta 마다 reply body 누적 +
+//      agent.token{messageId, seq, delta} publish.
+//   4) 완료 시 status COMPLETE(에러 시 FAILED) + 최종 body 영속화 → message.updated publish.
+//      에러면 SYSTEM 버블(TRD §11)도 추가 — 키는 절대 노출하지 않는다.
+//   5) 세션 IDLE 복귀 → session.status publish.
+//
+// 보안(CLAUDE.md/TRD §8): agent.token delta 는 에이전트 텍스트만. apiKey/baseURL 절대 미포함.
+//   런타임 에러 메시지는 일반 문구만 SYSTEM 버블에 담는다(원문/키 미노출).
+
+import type { Post, AgentSession, Message } from '@prisma/client';
+import { prisma } from '../db.js';
+import { nextSeq } from '../domain/seq.js';
+import { getAgentRuntime } from './runtime.js';
+import { publishToPost } from '../realtime/publish.js';
+import {
+  makeMessageCreatedEvent,
+  makeAgentTokenEvent,
+  makeMessageUpdatedEvent,
+  makeSessionStatusEvent,
+} from '../realtime/events.js';
+
+/** AGENT_REPLY 생성 시 사용할 입력 시드(사람 메시지 본문). */
+export interface RunAgentTurnArgs {
+  post: Pick<Post, 'id'>;
+  session: Pick<AgentSession, 'id' | 'sandboxId'>;
+  humanMessage: Pick<Message, 'id' | 'body'>;
+  lang: string;
+}
+
+/**
+ * 한 에이전트 턴을 실행한다(스트리밍). HTTP 응답을 막지 않도록 호출부에서 await 없이 띄운다.
+ * 예외는 내부에서 흡수해 AGENT_REPLY=FAILED + SYSTEM 버블로 표면화한다(throw 하지 않음).
+ */
+export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
+  const { post, session, humanMessage, lang } = args;
+  const runtime = getAgentRuntime();
+
+  // ── 1) AGENT_REPLY(PENDING) 생성 + message.created ──
+  const reply = await prisma.$transaction(async (tx) => {
+    const seq = await nextSeq(tx, post.id);
+    return tx.message.create({
+      data: {
+        postId: post.id,
+        sessionId: session.id,
+        authorId: null,
+        type: 'AGENT_REPLY',
+        status: 'PENDING',
+        body: '',
+        replyToId: humanMessage.id,
+        seq,
+      },
+    });
+  });
+
+  publishToPost(
+    post.id,
+    makeMessageCreatedEvent({
+      id: reply.id,
+      type: 'AGENT_REPLY',
+      status: 'PENDING',
+      body: '',
+      authorId: null,
+      seq: reply.seq,
+      replyToId: reply.replyToId,
+      toolCallId: reply.toolCallId,
+      createdAt: reply.createdAt,
+    }),
+  );
+
+  // ── 2) 세션 RUNNING ──
+  await prisma.agentSession.update({
+    where: { id: session.id },
+    data: { status: 'RUNNING' },
+  });
+  publishToPost(
+    post.id,
+    makeSessionStatusEvent({ sessionId: session.id, status: 'RUNNING' }),
+  );
+
+  // ── 3) 스트리밍: 토큰 delta 누적 + agent.token publish ──
+  let accumulated = '';
+  let firstToken = true;
+  // 인터럽트(별도 요청)가 부분 본문을 보존할 수 있도록 누적 본문을 DB 에 점진 영속화한다.
+  //   - onToken 은 동기 콜백이므로 fire-and-forget 으로 기록하되, 겹치는 쓰기를 막는 가드를 둔다.
+  //   - 마지막 토큰까지 반영되도록, 진행 중 쓰기가 끝나면 더 새로운 본문이 있을 때 한 번 더 쓴다.
+  //   - 최종 확정(status/본문)은 step4 에서 한 번 더 수행한다(이 점진 쓰기는 body 만 갱신).
+  let persisting = false;
+  let pendingPersist = false;
+  const persistAccumulated = (): void => {
+    if (persisting) {
+      pendingPersist = true;
+      return;
+    }
+    persisting = true;
+    const snapshot = accumulated;
+    void prisma.message
+      .update({ where: { id: reply.id }, data: { body: snapshot } })
+      .catch(() => {
+        /* 점진 영속화 실패는 무해 — step4 최종 쓰기가 본문을 다시 확정한다. */
+      })
+      .finally(() => {
+        persisting = false;
+        if (pendingPersist) {
+          pendingPersist = false;
+          // 진행 중 더 들어온 토큰을 반영하기 위해 한 번 더 기록.
+          persistAccumulated();
+        }
+      });
+  };
+  const onToken = (delta: string): void => {
+    accumulated += delta;
+    // 첫 토큰에서 PENDING→STREAMING 으로 표면화(클라 타이핑 시작).
+    if (firstToken) {
+      firstToken = false;
+      // status 전이는 message.updated 로도 알리지만, 누적 본문 확정은 done 에서 한 번 더.
+      publishToPost(
+        post.id,
+        makeMessageUpdatedEvent({ id: reply.id, body: accumulated, status: 'STREAMING' }),
+      );
+    }
+    publishToPost(
+      post.id,
+      makeAgentTokenEvent({ messageId: reply.id, seq: reply.seq, delta }),
+    );
+    // 부분 본문을 DB 에 반영(인터럽트가 보존할 수 있도록).
+    persistAccumulated();
+  };
+
+  let finalStatus: 'COMPLETE' | 'FAILED' = 'COMPLETE';
+  let errored = false;
+  try {
+    // PENDING→STREAMING(본문 누적 시작). 실제 전이는 첫 토큰에서 publish.
+    await prisma.message.update({
+      where: { id: reply.id },
+      data: { status: 'STREAMING' },
+    });
+    await runtime.send(session, humanMessage.body, lang, onToken);
+  } catch {
+    errored = true;
+    finalStatus = 'FAILED';
+  }
+
+  // ── 4) 최종 본문/상태 영속화 + message.updated ──
+  const finalized = await prisma.message.update({
+    where: { id: reply.id },
+    data: { body: accumulated, status: finalStatus },
+  });
+  publishToPost(
+    post.id,
+    makeMessageUpdatedEvent({
+      id: finalized.id,
+      body: finalized.body,
+      status: finalStatus,
+    }),
+  );
+
+  // 에러 시 SYSTEM 버블(TRD §11) — 일반 문구만, 키/원문 미노출.
+  if (errored) {
+    await postSystemBubble(post.id, '에이전트 응답 실패 — 잠시 후 다시 시도하세요.', session.id);
+  }
+
+  // ── 5) 세션 IDLE 복귀 ──
+  await prisma.agentSession.update({
+    where: { id: session.id },
+    data: { status: 'IDLE' },
+  });
+  publishToPost(
+    post.id,
+    makeSessionStatusEvent({ sessionId: session.id, status: 'IDLE' }),
+  );
+}
+
+/**
+ * SYSTEM 버블을 한 개 생성하고 message.created 를 publish 한다(TRD §11 안내/오류 표면화).
+ * authorId=null, status COMPLETE. body 는 일반 문구만(키/원문 절대 미포함).
+ */
+export async function postSystemBubble(
+  postId: string,
+  body: string,
+  sessionId: string | null = null,
+): Promise<Message> {
+  const msg = await prisma.$transaction(async (tx) => {
+    const seq = await nextSeq(tx, postId);
+    return tx.message.create({
+      data: {
+        postId,
+        sessionId,
+        authorId: null,
+        type: 'SYSTEM',
+        status: 'COMPLETE',
+        body,
+        seq,
+      },
+    });
+  });
+
+  publishToPost(
+    postId,
+    makeMessageCreatedEvent({
+      id: msg.id,
+      type: 'SYSTEM',
+      status: 'COMPLETE',
+      body: msg.body,
+      authorId: null,
+      seq: msg.seq,
+      replyToId: msg.replyToId,
+      toolCallId: msg.toolCallId,
+      createdAt: msg.createdAt,
+    }),
+  );
+
+  return msg;
+}

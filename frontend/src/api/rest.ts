@@ -4,7 +4,15 @@
 //
 // HARD RULE: NO LLM key fields are ever sent, stored, or read here.
 import { getAuthToken } from '../stores/authStore';
-import type { AuthResult, Post, PostsPage, Sandbox } from './types';
+import type {
+  AgentSession,
+  AuthResult,
+  Message,
+  MessagesPage,
+  Post,
+  PostsPage,
+  Sandbox,
+} from './types';
 
 /** Typed error carrying the HTTP status (or 0 for network failure). */
 export class ApiError extends Error {
@@ -151,4 +159,53 @@ export function upvote(id: string): Promise<VoteResult> {
 /** DELETE /posts/:id/upvote — idempotent removal. */
 export function unupvote(id: string): Promise<VoteResult> {
   return request<VoteResult>(`/posts/${encodeURIComponent(id)}/upvote`, { method: 'DELETE' });
+}
+
+// ── Thread: messages / session / interrupt (TRD §4 + §4.1) ─────
+// HARD RULE: no key fields are ever sent or read here.
+
+/**
+ * GET /posts/:id/messages?afterSeq= — bubble pagination, seq ascending.
+ * Linked toolCall summaries are included by the server when present.
+ */
+export function getMessages(postId: string, afterSeq?: number): Promise<MessagesPage> {
+  const qs = new URLSearchParams();
+  if (afterSeq !== undefined) qs.set('afterSeq', String(afterSeq));
+  const tail = qs.toString();
+  return request<MessagesPage>(
+    `/posts/${encodeURIComponent(postId)}/messages${tail ? `?${tail}` : ''}`
+  );
+}
+
+/**
+ * POST /posts/:id/messages — send a HUMAN message (TRD §4.1).
+ * Body { body, aiMode, clientId }. Server assigns seq + fans out via SSE.
+ * Returns the created HUMAN message (clientId idempotent).
+ */
+export function sendMessage(
+  postId: string,
+  payload: { body: string; aiMode: boolean; clientId: string }
+): Promise<{ message: Message }> {
+  return request<{ message: Message }>(`/posts/${encodeURIComponent(postId)}/messages`, {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+/** POST /posts/:id/session — start/attach the agent session. */
+export function startSession(postId: string): Promise<{ session: AgentSession }> {
+  return request<{ session: AgentSession }>(`/posts/${encodeURIComponent(postId)}/session`, {
+    method: 'POST',
+  });
+}
+
+/**
+ * POST /posts/:id/interrupt — interrupt/steer the current agent turn.
+ * Optional `steer` text is sent as the body when provided.
+ */
+export function interrupt(postId: string, steer?: string): Promise<void> {
+  return request<void>(`/posts/${encodeURIComponent(postId)}/interrupt`, {
+    method: 'POST',
+    body: steer ? { steer } : undefined,
+  });
 }

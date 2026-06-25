@@ -8,6 +8,8 @@ import { authRoutes } from './auth.js';
 import { postRoutes } from './posts.js';
 import { sessionRoutes } from './session.js';
 import { runtimeRoutes } from './runtime.js';
+import { messageRoutes } from './messages.js';
+import { streamRoutes } from '../realtime/stream.js';
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
   // GET /health → { ok: true }
@@ -23,4 +25,6 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   await app.register(postRoutes);
   await app.register(sessionRoutes);
   await app.register(runtimeRoutes);
+  await app.register(messageRoutes);
+  await app.register(streamRoutes);
 }

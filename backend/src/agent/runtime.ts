@@ -3,7 +3,7 @@
 //
 // TRD §5.1: AgentRuntime 은 서버가 의존하는 추상 경계다. 실제 pi 바인딩 형태(프로세스 spawn /
 //   in-proc SDK / 원격 RPC)는 이 인터페이스 뒤로 숨는다(PLAN §8 open question 1).
-//   M3 PoC = process spawn(pi.ts). sendInput/interrupt 는 M4(AR-TURN)에서 풀 스트리밍으로 구현.
+//   M3 PoC = process spawn(pi.ts). send/interrupt 는 M4(AR-TURN)에서 풀 스트리밍으로 구현.
 //
 // context/history/summary 는 런타임 책임(TRD §5.3) — 서버는 관리하지 않는다.
 // 보안: 어떤 메서드도 apiKey 를 반환/로그하지 않는다(주입은 ENV 로만, pi.ts 참조).
@@ -23,7 +23,7 @@ export interface SpawnResult {
 
 /**
  * 교체 가능한 에이전트 런타임 seam(TRD §5.1).
- * spawn/attach/suspend 는 M3 에서 동작. sendInput/interrupt 는 M3 에서 stub, M4 에서 완성.
+ * spawn/attach/suspend 는 M3 에서 동작. send/interrupt 는 M3 에서 stub, M4 에서 완성.
  */
 export interface AgentRuntime {
   /** 샌드박스에 대해 에이전트 프로세스를 띄운다(STARTING -> IDLE). */
@@ -33,14 +33,18 @@ export interface AgentRuntime {
   attach(session: Pick<AgentSession, 'id' | 'sandboxId'>): Promise<void>;
 
   /**
-   * 사용자 입력을 현재 턴으로 전달한다(M4/AR-TURN 에서 풀 스트리밍).
-   * lang 은 응답 언어 힌트. emit 으로 토큰/툴/상태 이벤트를 흘린다.
+   * 사용자 입력을 현재 턴으로 전달한다(M4/AR-TURN 풀 스트리밍, TRD §5.1).
+   * lang 은 응답 언어 힌트('ko'|'en' 등).
+   * onToken 은 토큰 delta(에이전트 텍스트 조각)만 받는 콜백이다 — messageId/seq 는
+   * 런타임이 알 수 없으므로(AR-TURN 이 부여) 토큰 텍스트만 흘리고, 이벤트 빌드/publish 는
+   * 호출부(turn.ts)가 자신의 messageId/seq 로 수행한다.
+   * Promise 는 턴이 완료(done)되면 resolve, 실패(error)/프로세스 종료 시 reject 된다.
    */
-  sendInput(
+  send(
     session: Pick<AgentSession, 'id' | 'sandboxId'>,
     input: string,
     lang: string,
-    emit: EmitFn,
+    onToken: (delta: string) => void,
   ): Promise<void>;
 
   /** 현재 턴 인터럽트(옵션 steer 텍스트로 방향 전환). M4 에서 완성. */
