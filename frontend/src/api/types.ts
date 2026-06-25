@@ -106,6 +106,12 @@ export interface Message {
   type: MessageType;
   status: MessageStatus;
   body: string;
+  // 첨부 이미지의 정적 경로(/uploads/<uuid>.<ext>). 없으면 null/undefined.
+  // (Feature A) 서버 직렬화가 항상 동봉; SSE message.created 페이로드에는 없으므로
+  // 낙관 행은 localImagePreview(objectURL)로 즉시 표시 후 REST reconcile 로 정정.
+  imageUrl?: string | null;
+  // 낙관 전용: 업로드 완료 전 로컬 미리보기 objectURL(서버/스토어로는 절대 전송 안 함).
+  localImagePreview?: string | null;
   replyToId: string | null;
   toolCallId: string | null;
   toolCall?: ToolCall | null; // linked summary when present

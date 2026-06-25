@@ -131,6 +131,9 @@ model Message {
   type        MessageType
   status      MessageStatus @default(COMPLETE)
   body        String                           // 사람 텍스트 / 에이전트 답변 텍스트 / 시스템 문구
+  // 컴포저에서 첨부한 이미지의 자기-소유 정적 경로(/uploads/<uuid>.<ext>). 없으면 null.
+  //   에이전트 비전(multimodal) 입력의 출처. 절대경로/외부 URL/traversal 은 라우트에서 거부(화이트리스트).
+  imageUrl    String?
   // 어떤 사람 메시지에 대한 에이전트 응답인지(스티어링 추적)
   replyToId   String?
   replyTo     Message?      @relation("ReplyChain", fields: [replyToId], references: [id])

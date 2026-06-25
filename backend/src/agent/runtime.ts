@@ -10,7 +10,7 @@
 
 import type { Sandbox, AgentSession } from '@prisma/client';
 import type { RealtimeEvent } from '../realtime/events.js';
-import type { ToolIntent, ToolAckResult } from './pi.js';
+import type { ToolIntent, ToolAckResult, TurnOptions } from './pi.js';
 
 /** 런타임이 서버로 흘려보내는 실시간 이벤트 emitter(토큰/툴/상태). M4 turn 스트리밍에서 사용. */
 export type EmitFn = (event: RealtimeEvent) => void;
@@ -52,6 +52,11 @@ export interface AgentRuntime {
      * ackTool 로 런타임을 다음 의도로 진행시킨다. 미지정 시 도구 의도는 무시된다.
      */
     onTool?: (intent: ToolIntent) => void,
+    /**
+     * 이 턴의 옵션(Feature A/B): image{absPath,mime}(비전 입력), reasoningEffort(low/medium/high).
+     * 미지정이면 텍스트-only/필드 생략(기존 동작 보존).
+     */
+    options?: TurnOptions,
   ): Promise<void>;
 
   /**

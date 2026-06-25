@@ -36,6 +36,7 @@
 //   '!'-접두사 도구 컨벤션 라인은 두 모드 공통으로 도구 의도를 방출한다(부모 toolBridge 가 실행).
 
 import { createInterface } from 'node:readline';
+import { buildCompletionBody, buildUserContent, reasoningEffortApplies } from './piWorkerBody.mjs';
 
 // ── LLM 런타임 설정(부모 pi.ts 가 주입한 env). 키는 절대 stdout/이벤트로 흘리지 않는다. ──
 const LLM_API_KEY = process.env.OPENAI_API_KEY || process.env.PI_API_KEY || '';
@@ -67,6 +68,11 @@ const LLM_TIMEOUT_MS = Number(process.env.AGENT_LLM_TIMEOUT_MS) || 60_000;
 function chatCompletionsURL() {
   return `${LLM_BASE_URL.replace(/\/+$/, '')}/chat/completions`;
 }
+
+// ── 비전 입력(Feature A) ────────────────────────────────────────────────
+// 부모(pi.ts)가 주입한 업로드 디렉토리. 워커가 이미지 파일을 읽기 전 경로 가드 기준.
+//   실제 파일 읽기/data-url 변환/content 구성은 순수 헬퍼(piWorkerBody.mjs)로 분리(단위 테스트 가능).
+const UPLOAD_DIR = process.env.UPLOAD_DIR || '';
 
 /** LLM 응답 언어/역할 system 지시(LANG_HINT/lang 기준). 도구 사용을 명시 안내. */
 function systemForLang(lang) {
@@ -182,8 +188,13 @@ function capConvo() {
  * tool_calls delta(id/name/arguments)는 index 별로 누적해 반환한다.
  * @returns { text, toolCalls: [{id,name,arguments}], finishReason }
  * 보안: 키/응답 원문/상태코드/URL 을 에러 메시지·stdout 에 절대 싣지 않는다(일반 문구만 throw).
+ *
+ * reasoningEffort(Feature B): 'low'|'medium'|'high' 가 주어지면 body 에 `reasoning_effort` 를 포함한다.
+ *   값이 없으면 필드를 생략한다 — reasoning 비지원 모델(예: 일부 chat 모델)이 거부하지 않도록.
+ *   (NOTE) 이 필드는 reasoning 모델에서만 효과가 있다. 비-reasoning 모델은 무시/거부할 수 있으며,
+ *   그것은 모델/설정 선택의 문제이지 버그가 아니다.
  */
-async function streamOneCompletion(turn) {
+async function streamOneCompletion(turn, reasoningEffort) {
   const controller = new AbortController();
   turn.controller = controller;
   const timer = setTimeout(() => {
@@ -203,13 +214,7 @@ async function streamOneCompletion(turn) {
           'content-type': 'application/json',
           authorization: `Bearer ${LLM_API_KEY}`,
         },
-        body: JSON.stringify({
-          model: LLM_MODEL,
-          stream: true,
-          tools: TOOLS,
-          tool_choice: 'auto',
-          messages: convo,
-        }),
+        body: JSON.stringify(buildCompletionBody(convo, LLM_MODEL, TOOLS, reasoningEffort)),
         signal: controller.signal,
       });
     } catch {
@@ -281,15 +286,28 @@ async function streamOneCompletion(turn) {
 /**
  * 실 모드 에이전트 루프: completion → (도구 호출 있으면) 실행/되먹임 → 반복.
  * 텍스트만 나오면 종료. interrupted 시 즉시 중단. 단계 상한(MAX_AGENT_STEPS)으로 런어웨이 방지.
+ *
+ * opts(Feature A/B): { image?: {absPath, mime}, reasoningEffort?: 'low'|'medium'|'high' }.
+ *   - image: 이 턴의 user 메시지 content 를 multimodal 배열로(에이전트가 이미지를 본다).
+ *   - reasoningEffort: 매 completion body 에 reasoning_effort 로 전달(값 있을 때만).
  */
-async function runLlmAgent(prompt, lang, turn) {
+async function runLlmAgent(prompt, lang, turn, opts = {}) {
   ensureConvo(lang);
-  convo.push({ role: 'user', content: prompt });
+  const content = await buildUserContent(prompt, opts.image, UPLOAD_DIR);
+  convo.push({ role: 'user', content });
   capConvo();
+  // 안전 게이트: 비-reasoning 모델(예: gpt-4o-mini)엔 reasoning_effort 를 싣지 않는다(400 회귀 방지).
+  const reasoningEffort = reasoningEffortApplies(
+    LLM_MODEL,
+    opts.reasoningEffort,
+    process.env.REASONING_EFFORT,
+  )
+    ? opts.reasoningEffort
+    : undefined;
 
   for (let step = 0; step < MAX_AGENT_STEPS; step++) {
     if (turn.interrupted) return;
-    const { text, toolCalls } = await streamOneCompletion(turn);
+    const { text, toolCalls } = await streamOneCompletion(turn, reasoningEffort);
     if (turn.interrupted) return;
 
     const assistant = { role: 'assistant', content: text || '' };
@@ -419,7 +437,7 @@ async function streamEchoReply(plain, lang, turn) {
  *   2) 평범한 텍스트 → 실 모드면 LLM 스트리밍, 스텁 모드면 에코 토큰.
  * turn.interrupted 가 true 가 되면 즉시 중단한다(LLM 모드는 fetch abort 도 동반).
  */
-async function runTurn(text, lang, turn) {
+async function runTurn(text, lang, turn, opts = {}) {
   const raw = String(text ?? '');
   const lines = raw.split('\n');
 
@@ -442,14 +460,18 @@ async function runTurn(text, lang, turn) {
     await emitToolAndWait(intent);
   }
 
-  // 2) 평범한 텍스트가 있으면 응답을 흘린다(도구만 있는 입력은 토큰 없이 종료 가능).
+  // 2) 평범한 텍스트가 있으면(또는 이미지가 첨부됐으면) 응답을 흘린다.
+  //    - 이미지-only(텍스트 빈) 메시지도 에이전트가 이미지를 보도록 LLM 을 호출한다.
+  //    - 도구만 있고 텍스트/이미지가 없으면 토큰 없이 종료 가능(기존 동작 보존).
   const plain = plainLines.join('\n');
-  if (plain.length > 0) {
+  const hasImage = !!(opts && opts.image);
+  if (plain.length > 0 || hasImage) {
     if (STUB_MODE) {
-      await streamEchoReply(plain, lang, turn);
+      // 스텁 모드: 실 네트워크 없이 결정적 에코(이미지가 있으면 표식만 덧붙여 비전 경로를 표면화).
+      await streamEchoReply(plain + (hasImage ? '\n[image attached]' : ''), lang, turn);
     } else {
-      // 실 모드: function-calling 에이전트 루프(도구로 파일 저장/실행 가능).
-      await runLlmAgent(plain, lang, turn);
+      // 실 모드: function-calling 에이전트 루프(도구로 파일 저장/실행 가능 + 비전/reasoning_effort).
+      await runLlmAgent(plain, lang, turn, { image: opts.image, reasoningEffort: opts.reasoningEffort });
     }
   }
 }
@@ -500,7 +522,15 @@ rl.on('line', (line) => {
     }
     const turn = { interrupted: false, controller: null };
     currentTurn = turn;
-    runTurn(msg.text, msg.lang, turn)
+    // Feature A/B: image {absPath, mime}, reasoningEffort 를 이 턴 옵션으로 전달.
+    const opts = {
+      image:
+        msg.image && typeof msg.image === 'object' && typeof msg.image.absPath === 'string'
+          ? { absPath: msg.image.absPath, mime: String(msg.image.mime || '') }
+          : undefined,
+      reasoningEffort: typeof msg.reasoningEffort === 'string' ? msg.reasoningEffort : undefined,
+    };
+    runTurn(msg.text, msg.lang, turn, opts)
       .then(() => {
         if (currentTurn === turn) currentTurn = null;
         emit({ type: 'done' });

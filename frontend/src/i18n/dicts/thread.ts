@@ -36,6 +36,19 @@ export const thread = {
     deleteYes: '확인',
     deleteNo: '취소',
     deleting: '삭제 중…',
+    // Feature A: 이미지 첨부(컴포저) — 검증 오류/접근성/대체텍스트
+    unsupportedImageFormat: '지원하지 않는 이미지 형식이에요 (PNG·JPEG·WebP·GIF).',
+    imageTooLarge: '이미지가 너무 커요 (최대 5MB).',
+    imageReadError: '이미지를 읽지 못했어요. 다시 시도해 주세요.',
+    attachImageAria: '이미지 첨부',
+    removeImageAria: '첨부 이미지 제거',
+    attachPreviewAlt: '첨부 이미지 미리보기',
+    messageImageAlt: '첨부된 이미지',
+    // Feature B: reasoning_effort 선택기(컴포저)
+    reasoningEffortAria: '추론 강도',
+    reasoningEffortLow: '낮음',
+    reasoningEffortMedium: '중간',
+    reasoningEffortHigh: '높음',
   },
   en: {
     composerPlaceholder: 'Type a message…',
@@ -72,5 +85,18 @@ export const thread = {
     deleteYes: 'Confirm',
     deleteNo: 'Cancel',
     deleting: 'Deleting…',
+    // Feature A: image attachment (composer) — validation / a11y / alt text
+    unsupportedImageFormat: 'Unsupported image format (PNG, JPEG, WebP, GIF).',
+    imageTooLarge: 'Image is too large (max 5MB).',
+    imageReadError: 'Could not read the image. Please try again.',
+    attachImageAria: 'Attach image',
+    removeImageAria: 'Remove attached image',
+    attachPreviewAlt: 'Attached image preview',
+    messageImageAlt: 'Attached image',
+    // Feature B: reasoning_effort selector (composer)
+    reasoningEffortAria: 'Reasoning effort',
+    reasoningEffortLow: 'low',
+    reasoningEffortMedium: 'medium',
+    reasoningEffortHigh: 'high',
   },
 } as const;

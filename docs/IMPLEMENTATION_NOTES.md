@@ -11,6 +11,50 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · reasoning_effort 를 추론 모델일 때만 전송 — gpt-4o-mini 회귀 방지
+- **증상(잠재 회귀)**: 프런트가 aiMode 에서 항상 기본값 `medium` 을 보내므로, 워커가 매 AI 메시지에 `reasoning_effort` 를 실어 보냄. 현재 설정 모델은 `openai/gpt-4o-mini`(GitHub Models)인데, 이 필드는 reasoning 모델 전용이라 비-reasoning 모델에서 400(Unknown parameter) 위험 → **잘 동작하던 채팅을 깨뜨릴 수 있음**. 기존 가드(`값 있을 때만 포함`)는 프런트가 항상 값을 보내므로 무력.
+- **수정**: `piWorkerBody.mjs` 에 `reasoningEffortApplies(model, effort, envOverride)` 추가 — 유효 effort + 게이트 통과일 때만 적용. 게이트(`REASONING_EFFORT` env, 기본 `auto`): `off`→미전송, `on`→항상 전송, `auto`→모델명이 reasoning 패턴(o1~o9 계열, gpt-5 계열; `openai/` 프리픽스 허용)일 때만. `piWorker.mjs` 의 `runLlmAgent` 가 이 함수로 effective effort 를 계산해 전달 → gpt-4o-mini 는 `auto` 에서 미전송(기존 동작 보존), 추론 모델·`on` 에서만 전송. `buildCompletionBody` 는 불변(기존 단위테스트 유효).
+- **검증(③)**: backend `tsc --noEmit` 클린, `vitest run` **82/82 GREEN**(이전 79 + 게이트 3 케이스: auto→gpt-4o-mini 미전송·o3/o4-mini/gpt-5 전송, on/off override, 무효 effort 미적용). `buildCompletionBody` 불변이라 기존 단위테스트 유효.
+- 변경 파일: `backend/src/agent/piWorkerBody.mjs`, `backend/src/agent/piWorker.mjs`, `backend/test/reasoningEffort.test.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
+### 2026-06-26 · [feat] · 완료 · 이미지 첨부+에이전트 비전(Feature A) + per-message reasoning_effort(Feature B) — 프런트엔드
+- **요청(사용자)**: 백엔드(완료) 위에 프런트 UI 를 얹는다. (A) 메시지 컴포저에서 이미지 1장 첨부(미리보기/제거) → `POST /uploads` → `{imageUrl}` → `sendMessage` 에 동봉(이미지-only 전송 허용). 버블에 이미지 렌더. (B) 컴포저에 3분할 `reasoning_effort`(low/medium/high) 선택기(aiMode 켜졌을 때만 활성, 기본 medium) → `sendMessage` 에 `reasoningEffort` 동봉.
+- **설계(프런트)**:
+  - **rest.ts**: `uploadImage(file): Promise<{imageUrl}>` 추가(multipart FormData, Bearer, 400/413 → ApiError). `sendMessage` payload 타입에 optional `imageUrl?:string|null` · `reasoningEffort?:'low'|'medium'|'high'` 추가. `assetUrl()` 헬퍼 추가(상대 `/uploads/*` 를 API origin 으로 해석 — dev 는 프록시라 상대경로 그대로, prod 는 `VITE_API_ORIGIN` prefix).
+  - **types.ts**: `Message` DTO 에 `imageUrl?:string|null` 추가.
+  - **Composer.tsx**: 숨김 `<input type=file accept=image/png,image/jpeg,image/webp,image/gif>` + 첨부 버튼(term-*, ≥44px, i18n aria). 선택 시 타입/5MB 검증 → 썸네일 미리보기 + 제거 버튼(objectURL revoke). 전송 시 파일 있으면 먼저 `uploadImage` → imageUrl 포함해 `sendMessage`. 이미지-only(빈 텍스트+이미지) 허용. 낙관 버블에 로컬 미리보기(objectURL) 표시 후 reconcile. aiMode 켜졌을 때만 활성인 3분할 reasoning_effort 선택기(기본 medium), 값은 컴포넌트 state(세션 한정), payload 동봉.
+  - **ChatBubble.tsx**: `imageUrl`(또는 낙관 로컬 `localImagePreview`) 있으면 이미지 렌더(반응형 max-width, term-* 프레이밍, i18n alt). `assetUrl()` 로 백엔드 origin 해석.
+  - **vite.config.ts**: dev 프록시에 `/uploads` 추가(단일 origin — CSP connect-src 'self', 이미지 src 도 동일 origin).
+  - **i18n thread.ts(ko/en)**: `unsupportedImageFormat`, `imageTooLarge`, `imageReadError`, `attachImageAria`, `removeImageAria`, `attachPreviewAlt`, `messageImageAlt`, `reasoningEffortAria`, `reasoningEffortLow`(낮음/low), `reasoningEffortMedium`(중간/medium), `reasoningEffortHigh`(높음/high).
+- **이미지 URL cross-origin 해석**: dev 는 vite 프록시(`/uploads`→Fastify)로 상대경로가 그대로 동일 origin. prod 빌드는 `assetUrl()` 이 `VITE_API_ORIGIN`(설정 시)을 prefix, 미설정이면 상대경로 유지(동일 origin 배포 가정). 백엔드 반환 경로 `/uploads/<uuid>.<ext>` 와 정확히 일치.
+- **보안(TRD §8)**: 프런트는 LLM apiKey 를 다루지 않음. 업로드는 Bearer + 서버측 UUID/MIME/5MB 가드(백엔드). 클라 검증(타입/5MB)은 UX 보조이며 서버가 권위. objectURL 미리보기는 reconcile/실패 시 정확히 1회 revoke(누수 방지).
+- **검증(③)**: frontend `npx tsc --noEmit` **클린(exit 0)**, `npx vite build` **PASS(88 모듈 transformed, built in 1.84s, exit 0)**. 백엔드 무변경 — 기존 79 테스트 영향 없음(프런트 전용). i18n: `resolveKey` 가 첫 점만 분리하므로 `thread.reasoningEffort*`/`thread.*Image*` 키 정상 해석(ko/en). reasoning 옵션 라벨은 정확히 KO 낮음/중간/높음, EN low/medium/high.
+- 변경 파일: `frontend/src/api/rest.ts`, `frontend/src/api/types.ts`, `frontend/src/components/Composer.tsx`, `frontend/src/components/ChatBubble.tsx`, `frontend/vite.config.ts`, `frontend/src/i18n/dicts/thread.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
+### 2026-06-26 · [feat] · 완료 · 이미지 첨부+에이전트 비전(Feature A) + per-message reasoning_effort(Feature B) — 백엔드
+- **요청(사용자)**: (A) 메시지 컴포저에서 이미지 1장을 첨부하면 에이전트가 그 이미지를 **실제로 본다**(OpenAI multimodal `image_url` content part). (B) Aidit 의 "답변 길이(짧게/보통/길게)"를 여기서는 **per-message `reasoning_effort`(low/medium/high)** 로 용도 변경. 둘 다 컴포저에서 메시지 단위로 선택.
+- **설계(백엔드)**:
+  - **deps**: `@fastify/multipart@^9`(5MB fileSize limit, files:1), `@fastify/static@^8`(/uploads 정적 서빙, index/list 비활성) 추가. app.ts 에서 multipart→mkdir(uploadDir)→static 순으로 register.
+  - **업로드 디렉토리**: `UPLOAD_DIR`(미설정 시 `backend/uploads`) 부팅 시 생성. `.gitignore` 에 추가. URL prefix `/uploads`.
+  - **POST /uploads (requireAuth)**: multipart 파일 1개. MIME ∈ {image/png,image/jpeg,image/webp,image/gif} 화이트리스트 — 비이미지 400, 5MB 초과 413. `<uuid>.<ext>`(확장자는 MIME 에서 도출, 클라 파일명 절대 미사용)로 기록. 201 `{ imageUrl: '/uploads/<uuid>.<ext>' }`. 응답에 키/시크릿 없음.
+  - **schema**: `Message.imageUrl String?`(optional) 추가. `prisma db push`(non-interactive) + `prisma generate`. 테스트 DB(`backend/prisma/prisma/dev.db`, db push 모드 — 마이그레이션 없음)도 동일 컬럼 반영.
+  - **POST /posts/:id/messages**: optional `imageUrl` 수용. 자기 소유 `/uploads/<uuid>.<ext>` 형태만 화이트리스트(절대경로/traversal/타 prefix 거부). HUMAN 메시지에 저장. imageUrl 있으면 빈 body 허용(이미지-only 메시지). optional `reasoningEffort ∈ {low,medium,high}` 파싱(aiMode 시 기본 'medium', 그 외 무시).
+  - **비전 스레드-스루**: messages.ts → `runAgentTurn`(RunAgentTurnArgs 에 `image?:{absPath,mime}` 추가) → `runtime.send`(image/reasoningEffort 인자 추가) → pi.ts stdin(`{type:'input',...,image?,reasoningEffort?}`) → piWorker.mjs. 워커가 절대경로를 업로드 디렉토리 가드 후 읽어 base64 data-url 로 구성, user content 를 `[{type:'text',text},{type:'image_url',image_url:{url:<data-url>}}]` 배열로. 이미지 없으면 기존 plain string content(동작 무변).
+  - **reasoning_effort**: piWorker 의 /chat/completions body 에 값이 있을 때만 `reasoning_effort` 포함(없으면 필드 생략 — 비지원 모델 호환). 모델이 reasoning 지원해야 적용됨(주석).
+- **보안(TRD §8)**: apiKey 는 어떤 응답/이벤트/로그에도 미포함(기존 redact 유지). 업로드 파일은 UUID 파일명, MIME 화이트리스트, 5MB 캡. 워커의 이미지 파일 읽기는 업로드 디렉토리 경로 가드(.. 차단).
+- **A/B 스레드-스루(시그니처 변경)**:
+  - `turn.ts` `RunAgentTurnArgs` 에 `image?:{absPath,mime}`·`reasoningEffort?:string` 추가 → `runtime.send(session,input,lang,onToken,onTool?, options?)` 로 `{image,reasoningEffort}` 전달.
+  - `runtime.ts` `AgentRuntime.send` 에 6번째 인자 `options?: TurnOptions` 추가(`TurnOptions = {image?:TurnImage; reasoningEffort?:string}`, `pi.ts` export).
+  - `pi.ts` `PiRuntime.send` 가 `options` 를 받아 stdin `{type:'input',text,lang, image?, reasoningEffort?}` 로 기록(값 있을 때만 포함). `buildInjectedEnv` 가 워커에 `UPLOAD_DIR` 주입(경로 가드 기준). `redactSpawnEnv` 에 `UPLOAD_DIR`(비밀 아님) 추가.
+  - `piWorker.mjs` 의 `input` 핸들러가 `image{absPath,mime}`·`reasoningEffort` 를 파싱해 `runTurn`→`runLlmAgent` 로 전달.
+- **워커의 비전 content + reasoning_effort(순수 헬퍼 분리)**: 부트스트랩 부작용(readline/'ready'/keepalive) 없는 `backend/src/agent/piWorkerBody.mjs` 로 분리(단위 테스트 가능):
+  - `buildUserContent(prompt,image,uploadDir)`: 이미지 없으면 plain string(동작 무변); 있으면 `imageToDataUrl` 로 파일을 읽어 `[{type:'text',text},{type:'image_url',image_url:{url:<data-url>}}]` 배열. `imageToDataUrl` 은 absPath 가 `uploadDir` 내부일 때만 읽음(.. /외부/미허용 MIME/uploadDir 미주입 → null → 텍스트-only 폴백). 이미지-only(빈 텍스트)도 LLM 호출(text 파트는 빈 문자열).
+  - `buildCompletionBody(messages,model,tools,reasoningEffort)`: `reasoning_effort` 는 값이 low/medium/high 일 때만 포함(없거나 무효면 필드 생략 — 비-reasoning 모델 거부 방지). 워커 fetch body 가 이 함수를 사용.
+- **/uploads 계약**: `POST /uploads`(requireAuth, multipart 파일 1개) → 비이미지 400, 5MB 초과 413, 성공 201 `{ imageUrl: '/uploads/<uuid>.<ext>' }`(ext 는 MIME 도출, 클라 파일명 미사용). MIME→ext: png→png, jpeg→jpg, webp→webp, gif→gif. 정적 서빙 `GET /uploads/<uuid>.<ext>`.
+- **schema 적용**: `Message.imageUrl String?` 추가 → `npx prisma db push`(non-interactive) 성공(DB 동기화 31ms). `prisma generate` 는 실행 중인 dev tsx 프로세스가 query engine DLL 을 잠가 EPERM(엔진 rename 만 실패) — 그러나 추가 컬럼은 엔진 바이너리 불변이고 생성된 TS 타입(`node_modules/.prisma/client/index.d.ts`)에는 `imageUrl` 이 정상 반영됨(확인). 테스트 DB(`backend/prisma/prisma/dev.db`, db push 모드 — 마이그레이션 없음)도 같은 db push 로 컬럼 반영됨(스위트 통과로 확인).
+- **검증(③)**: backend `npx tsc --noEmit` **클린(exit 0)**. `npx vitest run` **79/79 GREEN(22 파일)** — 기존 61 유지 + 신규 18(uploads 4, messageImage 4, reasoningEffort 10). `node scripts/key-grep-gate.mjs` **PASS**(130 파일 스캔, 하드코딩 키 0 — 테스트의 base64 PNG/UUID 도 통과).
+- 변경 파일: `backend/package.json`(+package-lock.json), `backend/src/app.ts`, `backend/src/config.ts`, `backend/src/routes/uploads.ts`(신규), `backend/src/routes/index.ts`, `backend/src/routes/messages.ts`, `backend/src/domain/imageRef.ts`(신규), `backend/prisma/schema.prisma`, `backend/src/agent/turn.ts`, `backend/src/agent/runtime.ts`, `backend/src/agent/pi.ts`, `backend/src/agent/piWorker.mjs`, `backend/src/agent/piWorkerBody.mjs`(신규), `backend/test/uploads.test.ts`(신규), `backend/test/messageImage.test.ts`(신규), `backend/test/reasoningEffort.test.ts`(신규), `backend/.gitignore`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [feat] · 완료 · 글 진입 시 lazy auto-attach UX(인증+활성세션 한정, eager spawn 금지, StrictMode 중복 방지)
 - **요청(사용자)**: 글 진입 시, 이미 활성 세션이 있으면 사용자가 "세션 시작" 버튼을 누르지 않아도 조용히 attach 되어 실행 중(running) 배지가 떠야 한다. 단, **새 프로세스를 spawn 하는 비용이 큰 절반은 하지 않는다**(no eager spawn).
 - **설계(lazy auto-attach, NOT eager spawn)**:

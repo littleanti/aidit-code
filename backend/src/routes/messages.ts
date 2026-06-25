@@ -12,6 +12,10 @@ import { publishToPost } from '../realtime/publish.js';
 import { makeMessageCreatedEvent } from '../realtime/events.js';
 import { runAgentTurn, postSystemBubble } from '../agent/turn.js';
 import { startOrAttach } from '../agent/sessionStart.js';
+import { isOwnUploadUrl, resolveImageRef } from '../domain/imageRef.js';
+
+/** 유효한 per-message reasoning_effort 값(Feature B). */
+const REASONING_EFFORTS = new Set(['low', 'medium', 'high']);
 
 /** 페이지 크기(TRD §4.1 권장값과 일관, 메시지 전용 50). */
 const PAGE_SIZE = 50;
@@ -34,6 +38,7 @@ function serializeMessage(m: {
   type: string;
   status: string;
   body: string;
+  imageUrl?: string | null;
   replyToId: string | null;
   toolCallId: string | null;
   seq: number;
@@ -66,6 +71,7 @@ function serializeMessage(m: {
     type: m.type,
     status: m.status,
     body: m.body,
+    imageUrl: m.imageUrl ?? null,
     replyToId: m.replyToId,
     toolCallId: m.toolCallId,
     seq: m.seq,
@@ -85,6 +91,8 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       aiMode?: unknown;
       clientId?: unknown;
       lang?: unknown;
+      imageUrl?: unknown;
+      reasoningEffort?: unknown;
     };
 
     const text = typeof body.body === 'string' ? body.body : '';
@@ -92,7 +100,31 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     const clientId = typeof body.clientId === 'string' && body.clientId.length > 0 ? body.clientId : null;
     const lang = body.lang === 'ko' ? 'ko' : 'en';
 
-    if (!text.trim()) {
+    // ── imageUrl(Feature A): 자기-소유 /uploads/<uuid>.<ext> 형태만 허용. ──
+    //   주어졌는데 화이트리스트 불통과면 400(절대경로/외부URL/traversal/타 prefix 거부).
+    let imageUrl: string | null = null;
+    if (body.imageUrl !== undefined && body.imageUrl !== null && body.imageUrl !== '') {
+      if (!isOwnUploadUrl(body.imageUrl)) {
+        return reply.code(400).send({ error: 'invalid imageUrl' });
+      }
+      imageUrl = body.imageUrl;
+    }
+
+    // ── reasoningEffort(Feature B): 주어지면 low/medium/high 만 허용(그 외 400). ──
+    //   aiMode 인데 미지정이면 기본 'medium'. aiMode 가 아니면 무시(에이전트 턴 없음).
+    let reasoningEffort: string | undefined;
+    if (body.reasoningEffort !== undefined && body.reasoningEffort !== null) {
+      if (typeof body.reasoningEffort !== 'string' || !REASONING_EFFORTS.has(body.reasoningEffort)) {
+        return reply.code(400).send({ error: 'invalid reasoningEffort' });
+      }
+      reasoningEffort = body.reasoningEffort;
+    }
+    if (aiMode && reasoningEffort === undefined) {
+      reasoningEffort = 'medium'; // 기본값.
+    }
+
+    // body 는 imageUrl 이 있으면 비어 있어도 된다(이미지-only 메시지). 둘 다 없으면 400.
+    if (!text.trim() && !imageUrl) {
       return reply.code(400).send({ error: 'body is required' });
     }
 
@@ -126,6 +158,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
             type: 'HUMAN',
             status: 'COMPLETE',
             body: text,
+            imageUrl, // Feature A: 첨부 이미지 정적 경로(없으면 null).
             clientId,
             seq,
           },
@@ -174,12 +207,16 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
           // 세션을 시작할 수 없는 상태(CREATING/ERROR 등): 안내 버블(TRD §4.1).
           await postSystemBubble(postId, '세션을 시작하세요');
         } else {
+          // Feature A: 저장된 imageUrl 을 호스트 절대경로 + MIME 으로 해석(가드 통과 시에만 비전 동봉).
+          const imageRef = imageUrl ? resolveImageRef(imageUrl) : null;
           // 응답을 막지 않고 비동기로 턴 실행. 예외는 turn.ts 내부에서 흡수(FAILED+SYSTEM).
           void runAgentTurn({
             post: { id: postId },
             session: { id: session.id, sandboxId: sandbox.id },
             humanMessage: { id: human.id, body: human.body },
             lang,
+            image: imageRef ? { absPath: imageRef.absPath, mime: imageRef.mime } : undefined,
+            reasoningEffort, // Feature B: aiMode 면 medium 기본, 또는 사용자 선택값.
           });
         }
       }

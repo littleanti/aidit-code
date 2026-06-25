@@ -35,6 +35,9 @@ export default defineConfig({
       '/runtime': apiProxy,
       '/metrics': apiProxy,
       '/health': apiProxy,
+      // Feature A: 업로드 이미지 정적 서빙(/uploads/<uuid>.<ext>)을 동일 origin 으로 프록시.
+      // <img src>(Accept: image/*)이라 HTML 문서 bypass 에 걸리지 않고 그대로 백엔드로 전달.
+      '/uploads': apiProxy,
     },
   },
 });

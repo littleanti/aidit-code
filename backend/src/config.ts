@@ -16,6 +16,9 @@ const __dirname = path.dirname(__filename);
 // backend/src/ → backend/ → Audit-Code/  (repo 루트)
 const repoRoot = path.resolve(__dirname, '..', '..');
 const defaultSandboxRoot = path.join(repoRoot, '.sandboxes');
+// backend/src/ → backend/ (서버 루트). 업로드 기본 디렉토리는 서버 루트의 uploads/.
+const backendRoot = path.resolve(__dirname, '..');
+const defaultUploadDir = path.join(backendRoot, 'uploads');
 
 export interface LlmConfig {
   /** 운영자 LLM 키. NEVER log/expose. */
@@ -57,6 +60,8 @@ export interface AppConfig {
   databaseUrl: string;
   /** 샌드박스 격리 루트(호스트 절대경로). */
   sandboxRoot: string;
+  /** 이미지 업로드 저장 디렉토리(호스트 절대경로). /uploads URL prefix 로 정적 서빙. */
+  uploadDir: string;
   /** 동시 샌드박스 프로비저닝/활성 실행 상한(TRD §8 남용 방지). 초과 시 429. */
   sandboxMaxConcurrent: number;
   /** 쓰기 라우트 레이트리밋(M7 XC-RATE). */
@@ -74,6 +79,7 @@ export const config: AppConfig = {
   jwtExpires: process.env.JWT_EXPIRES || '7d',
   databaseUrl: process.env.DATABASE_URL || 'file:./prisma/dev.db',
   sandboxRoot: process.env.SANDBOX_ROOT || defaultSandboxRoot,
+  uploadDir: process.env.UPLOAD_DIR || defaultUploadDir,
   sandboxMaxConcurrent: Number(process.env.SANDBOX_MAX_CONCURRENT) || 4,
   rateLimit: {
     // 테스트/스모크는 RATE_LIMIT_DISABLED=1 로 끈다(M1-M6 스위트 무영향). 기본 활성.
@@ -106,6 +112,7 @@ export function redactConfig(cfg: AppConfig = config): Record<string, unknown> {
     jwtExpires: cfg.jwtExpires,
     databaseUrl: cfg.databaseUrl,
     sandboxRoot: cfg.sandboxRoot,
+    uploadDir: cfg.uploadDir,
     sandboxMaxConcurrent: cfg.sandboxMaxConcurrent,
     rateLimit: cfg.rateLimit,
     isolation: cfg.isolation,

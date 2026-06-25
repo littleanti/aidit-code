@@ -32,6 +32,25 @@ export class ApiError extends Error {
 
 export type PostSort = 'hot' | 'new';
 
+/** per-message reasoning_effort(Feature B). 백엔드 화이트리스트와 일치. */
+export type ReasoningEffort = 'low' | 'medium' | 'high';
+
+/**
+ * 상대 정적 경로(/uploads/<uuid>.<ext>)를 표시 가능한 URL 로 해석한다.
+ * - dev: vite 프록시(/uploads → Fastify)로 동일 origin 이므로 상대경로를 그대로 둔다.
+ * - prod: VITE_API_ORIGIN 이 설정되어 있으면 그 origin 을 prefix(별도 호스트 배포 대비),
+ *   미설정이면 동일 origin 배포로 보고 상대경로 유지. 절대 URL(http/https/data)은 그대로 통과.
+ * 보안: API origin 이 아닌 임의 호스트로의 재작성은 하지 않는다(자기-소유 /uploads 경로 전제).
+ */
+export function assetUrl(p: string | null | undefined): string {
+  if (!p) return '';
+  // 이미 절대(URL/스킴) 이거나 data: 면 그대로.
+  if (/^(https?:)?\/\//i.test(p) || p.startsWith('data:') || p.startsWith('blob:')) return p;
+  const origin = (import.meta.env.VITE_API_ORIGIN as string | undefined)?.replace(/\/+$/, '');
+  if (!origin) return p; // 동일 origin(dev 프록시 포함) — 상대경로 유지.
+  return `${origin}${p.startsWith('/') ? '' : '/'}${p}`;
+}
+
 interface RequestOptions {
   method?: string;
   body?: unknown;
@@ -265,12 +284,64 @@ export function getMessages(postId: string, afterSeq?: number): Promise<Messages
  */
 export function sendMessage(
   postId: string,
-  payload: { body: string; aiMode: boolean; clientId: string; lang?: Lang }
+  payload: {
+    body: string;
+    aiMode: boolean;
+    clientId: string;
+    lang?: Lang;
+    // Feature A: 첨부 이미지 정적 경로(uploadImage 가 반환한 /uploads/<uuid>.<ext>).
+    imageUrl?: string | null;
+    // Feature B: per-message reasoning_effort(aiMode 시 컴포저에서 선택, 기본 medium).
+    reasoningEffort?: ReasoningEffort;
+  }
 ): Promise<{ message: Message }> {
   return request<{ message: Message }>(`/posts/${encodeURIComponent(postId)}/messages`, {
     method: 'POST',
     body: payload,
   });
+}
+
+/**
+ * POST /uploads — 메시지 컴포저용 이미지 업로드(Feature A, multipart, Bearer).
+ * 단일 파일을 FormData 로 보내고 { imageUrl: '/uploads/<uuid>.<ext>' } 를 받는다.
+ * 서버가 권위(UUID 파일명/MIME 화이트리스트/5MB 캡): 400(비이미지)·413(초과)은 ApiError 로.
+ * HARD RULE: 키 필드는 어디에도 싣지 않는다(Authorization Bearer 만).
+ */
+export async function uploadImage(file: File): Promise<{ imageUrl: string }> {
+  const form = new FormData();
+  form.append('file', file);
+
+  const headers: Record<string, string> = {};
+  const token = getAuthToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  // Content-Type 은 설정하지 않는다 — 브라우저가 multipart boundary 를 자동 부여.
+
+  let res: Response;
+  try {
+    res = await fetch('/uploads', { method: 'POST', headers, body: form });
+  } catch (e) {
+    throw new ApiError(0, e instanceof Error ? e.message : 'network error');
+  }
+
+  const text = await res.text();
+  let parsed: unknown = undefined;
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = text;
+    }
+  }
+
+  if (!res.ok) {
+    const msg =
+      (parsed && typeof parsed === 'object' && 'error' in parsed
+        ? String((parsed as { error: unknown }).error)
+        : undefined) ?? `upload failed (${res.status})`;
+    throw new ApiError(res.status, msg, parsed);
+  }
+
+  return parsed as { imageUrl: string };
 }
 
 // ── Workspace files (TRD §4) ───────────────────────────────────

@@ -20,7 +20,26 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Sandbox, AgentSession } from '@prisma/client';
 import { getLlmRuntimeConfig } from './config.js';
+import { config } from '../config.js';
 import type { AgentRuntime, SpawnResult } from './runtime.js';
+
+/**
+ * 한 턴에 동봉되는 이미지 참조(Feature A 비전). 워커가 absPath 를 업로드 디렉토리 가드 후 읽어
+ * data-url 로 인코딩해 OpenAI multimodal content 로 넣는다. 키 없음.
+ */
+export interface TurnImage {
+  /** 호스트 절대경로(업로드 디렉토리 내부 — imageRef.resolveImageRef 가 보장). */
+  absPath: string;
+  /** image/png|jpeg|webp|gif. */
+  mime: string;
+}
+
+/** 한 턴의 옵션(이미지/추론강도). 둘 다 선택. */
+export interface TurnOptions {
+  image?: TurnImage;
+  /** Feature B: 'low'|'medium'|'high'. 워커가 reasoning_effort 로 전달(값 있을 때만). */
+  reasoningEffort?: string;
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -156,6 +175,8 @@ function buildInjectedEnv(langHint: string): NodeJS.ProcessEnv {
     PI_MODEL: rt.model,
     // 응답 언어 힌트(TRD §5).
     LANG_HINT: langHint,
+    // 업로드 디렉토리(Feature A 비전) — 워커가 이미지 파일을 읽기 전 경로 가드 기준.
+    UPLOAD_DIR: config.uploadDir,
   };
 }
 
@@ -166,7 +187,7 @@ function buildInjectedEnv(langHint: string): NodeJS.ProcessEnv {
 export function redactSpawnEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   const isSecret = (k: string) => /API_KEY|TOKEN|SECRET|PASSWORD/i.test(k);
   const out: Record<string, string> = {};
-  for (const k of ['OPENAI_BASE_URL', 'OPENAI_MODEL', 'PI_BASE_URL', 'PI_MODEL', 'LANG_HINT', 'OPENAI_API_KEY', 'PI_API_KEY']) {
+  for (const k of ['OPENAI_BASE_URL', 'OPENAI_MODEL', 'PI_BASE_URL', 'PI_MODEL', 'LANG_HINT', 'UPLOAD_DIR', 'OPENAI_API_KEY', 'PI_API_KEY']) {
     const v = env[k];
     if (v === undefined) continue;
     out[k] = isSecret(k) ? '[REDACTED]' : v;
@@ -314,6 +335,7 @@ class PiRuntime implements AgentRuntime {
     lang: string,
     onToken: (delta: string) => void,
     onTool?: (intent: ToolIntent) => void,
+    options?: TurnOptions,
   ): Promise<void> {
     const h = handles.get(session.sandboxId);
     if (!h) {
@@ -338,9 +360,18 @@ class PiRuntime implements AgentRuntime {
       };
       h.activeTurn = sink;
       try {
-        h.child.stdin?.write(
-          JSON.stringify({ type: 'input', text: input, lang }) + '\n',
-        );
+        // Feature A/B: image{absPath,mime}·reasoningEffort 를 턴 프로토콜에 동봉(값 있을 때만).
+        //   image 의 absPath 는 라우트(imageRef.resolveImageRef)가 업로드 디렉토리 내부로 검증한 경로.
+        const payload: {
+          type: 'input';
+          text: string;
+          lang: string;
+          image?: TurnImage;
+          reasoningEffort?: string;
+        } = { type: 'input', text: input, lang };
+        if (options?.image) payload.image = options.image;
+        if (options?.reasoningEffort) payload.reasoningEffort = options.reasoningEffort;
+        h.child.stdin?.write(JSON.stringify(payload) + '\n');
       } catch (err) {
         h.activeTurn = null;
         reject(err instanceof Error ? err : new Error('failed to write input'));

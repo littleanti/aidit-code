@@ -35,6 +35,14 @@ export interface RunAgentTurnArgs {
   /** humanMessage 가 없는 자동 인트로 턴에서 런타임에 먹일 입력 텍스트. */
   prompt?: string;
   lang: string;
+  /**
+   * Feature A(비전): 사람 메시지에 첨부된 이미지의 해석된 호스트 절대경로 + MIME.
+   * 있으면 런타임 send 에 동봉되어 워커가 OpenAI multimodal content 로 이미지를 본다.
+   * absPath 는 호출부(messages.ts/imageRef)가 업로드 디렉토리 내부로 검증한 경로다.
+   */
+  image?: { absPath: string; mime: string };
+  /** Feature B: per-message reasoning_effort('low'|'medium'|'high'). 값 있을 때만 전달. */
+  reasoningEffort?: string;
 }
 
 /**
@@ -181,7 +189,11 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
       where: { id: reply.id },
       data: { status: 'STREAMING' },
     });
-    await runtime.send(session, input, lang, onToken, onTool);
+    // Feature A/B: 이미지/reasoning_effort 옵션을 런타임으로 전달(값 있을 때만 포함).
+    await runtime.send(session, input, lang, onToken, onTool, {
+      image: args.image,
+      reasoningEffort: args.reasoningEffort,
+    });
     // worker 의 done 이후에도 마지막 도구 체인이 남아있을 수 있으니 마저 기다린다.
     await toolChain;
   } catch {

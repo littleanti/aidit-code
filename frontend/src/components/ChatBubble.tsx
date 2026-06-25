@@ -11,6 +11,7 @@
 //   TOOL_RESULT  → ToolResultBubble (fixed-width terminal pane, M5)
 import { useT } from '../i18n/useT';
 import { useAuthStore } from '../stores/authStore';
+import { assetUrl } from '../api/rest';
 import type { Message } from '../api/types';
 import ToolCallBubble from './ToolCallBubble';
 import ToolResultBubble from './ToolResultBubble';
@@ -29,6 +30,18 @@ export default function ChatBubble({ message, authorName }: ChatBubbleProps) {
   const currentUserId = useAuthStore((s) => s.userId);
 
   const { type, status, body } = message;
+
+  // 첨부 이미지(Feature A): 서버 imageUrl 을 origin 해석하거나, 업로드 완료 전 낙관
+  // 로컬 미리보기(objectURL)를 그대로 사용. term-* 프레이밍 + 반응형 max-width.
+  const imgSrc = message.localImagePreview || assetUrl(message.imageUrl);
+  const attachedImage = imgSrc ? (
+    <img
+      src={imgSrc}
+      alt={t('thread.messageImageAlt')}
+      className="mt-1 max-w-full rounded-[3px] border border-term-border"
+      style={{ maxHeight: '20rem' }}
+    />
+  ) : null;
 
   // ── SYSTEM: centered micro-text band ───────────────────────────
   if (type === 'SYSTEM') {
@@ -79,7 +92,8 @@ export default function ChatBubble({ message, authorName }: ChatBubbleProps) {
           className="max-w-[78%] rounded-[3px] border border-term-active bg-term-cta px-3 py-2 font-mono text-sm leading-relaxed"
           style={{ color: SELF_TEXT }}
         >
-          <span className="whitespace-pre-wrap break-words">{body}</span>
+          {body && <span className="whitespace-pre-wrap break-words">{body}</span>}
+          {attachedImage}
         </div>
       </div>
     );
@@ -92,7 +106,8 @@ export default function ChatBubble({ message, authorName }: ChatBubbleProps) {
           <div className="mb-1 font-mono text-[10px] text-term-dim">{authorName}</div>
         )}
         <div className="rounded-[3px] border border-term-border bg-term-panel px-3 py-2 font-mono text-sm leading-relaxed text-term-fg">
-          <span className="whitespace-pre-wrap break-words">{body}</span>
+          {body && <span className="whitespace-pre-wrap break-words">{body}</span>}
+          {attachedImage}
         </div>
       </div>
     </div>
