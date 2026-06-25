@@ -7,6 +7,8 @@ import { getAuthToken } from '../stores/authStore';
 import type {
   AgentSession,
   AuthResult,
+  FileContent,
+  FileEntry,
   Message,
   MessagesPage,
   Post,
@@ -190,6 +192,33 @@ export function sendMessage(
     method: 'POST',
     body: payload,
   });
+}
+
+// ── Workspace files (TRD §4) ───────────────────────────────────
+// HARD RULE: no key fields are ever sent or read here.
+
+/**
+ * GET /posts/:id/files?path= — directory entries (root-relative).
+ * Omitting path lists the sandbox root. Path escape ('..'/absolute/symlink) → 400.
+ */
+export function getFiles(postId: string, path?: string): Promise<FileEntry[]> {
+  const qs = new URLSearchParams();
+  if (path) qs.set('path', path);
+  const tail = qs.toString();
+  return request<FileEntry[]>(
+    `/posts/${encodeURIComponent(postId)}/files${tail ? `?${tail}` : ''}`
+  );
+}
+
+/**
+ * GET /posts/:id/files/content?path= — single file content (root-relative).
+ * Binary files come back meta-only (binary:true); large files are truncated.
+ */
+export function getFileContent(postId: string, path: string): Promise<FileContent> {
+  const qs = new URLSearchParams({ path });
+  return request<FileContent>(
+    `/posts/${encodeURIComponent(postId)}/files/content?${qs.toString()}`
+  );
 }
 
 /** POST /posts/:id/session — start/attach the agent session. */

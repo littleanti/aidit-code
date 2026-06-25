@@ -10,8 +10,10 @@
 // HARD RULE: payloads never carry LLM keys; agent.token deltas are agent text only.
 import { useEffect, useRef, useState } from 'react';
 import { useThreadStore } from '../stores/threadStore';
+import { useWorkspaceStore } from '../stores/workspaceStore';
 import type {
   AgentTokenPayload,
+  FileChangedPayload,
   Message,
   MessageCreatedPayload,
   MessageUpdatedPayload,
@@ -76,6 +78,7 @@ export function useThreadStream(postId: string | undefined): UseThreadStreamResu
   const upsertToolCall = useThreadStore((s) => s.upsertToolCall);
   const appendToolOutput = useThreadStore((s) => s.appendToolOutput);
   const finalizeToolCall = useThreadStore((s) => s.finalizeToolCall);
+  const applyFileChanged = useWorkspaceStore((s) => s.applyFileChanged);
 
   useEffect(() => {
     if (!postId) {
@@ -170,10 +173,13 @@ export function useThreadStream(postId: string | undefined): UseThreadStreamResu
       });
     });
 
-    // file.changed is M5+ (file explorer) — no-op listener so the named event
-    // never bubbles as an error before that lane lands.
-    const noop = () => {};
-    es.addEventListener('file.changed', noop);
+    // file.changed (M6) — mark the changed path so FileTree can refresh and
+    // FileView can re-fetch the open file. Path is root-relative (TRD §7).
+    es.addEventListener('file.changed', (ev) => {
+      const p = safeParse<FileChangedPayload>((ev as MessageEvent).data);
+      if (!p?.path || !p.change) return;
+      applyFileChanged(p.path, p.change);
+    });
 
     return () => {
       closed = true;
@@ -190,6 +196,7 @@ export function useThreadStream(postId: string | undefined): UseThreadStreamResu
     upsertToolCall,
     appendToolOutput,
     finalizeToolCall,
+    applyFileChanged,
   ]);
 
   return { status };

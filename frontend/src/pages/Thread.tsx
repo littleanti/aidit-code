@@ -11,11 +11,16 @@ import { relativeTime } from '../lib/time';
 import StatusBadge from '../components/StatusBadge';
 import ChatBubble from '../components/ChatBubble';
 import Composer from '../components/Composer';
+import FileTree from '../components/FileTree';
+import FileView from '../components/FileView';
 import { useThreadStream } from '../stream/useThreadStream';
 import { useThreadStore } from '../stores/threadStore';
+import { useWorkspaceStore } from '../stores/workspaceStore';
 import { useAuthStore } from '../stores/authStore';
 import { useUiStore } from '../stores/uiStore';
 import type { Post } from '../api/types';
+
+type WorkspaceTab = 'chat' | 'files';
 
 export default function Thread() {
   const t = useT();
@@ -27,6 +32,7 @@ export default function Thread() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [startingSession, setStartingSession] = useState(false);
+  const [tab, setTab] = useState<WorkspaceTab>('chat');
 
   const hydrate = useThreadStore((s) => s.hydrate);
   const reset = useThreadStore((s) => s.reset);
@@ -34,6 +40,10 @@ export default function Thread() {
   const messages = useThreadStore((s) => s.messages);
   const activeSession = useThreadStore((s) => s.activeSession);
   const sandboxStatus = useThreadStore((s) => s.sandboxStatus);
+
+  const selectedPath = useWorkspaceStore((s) => s.selectedPath);
+  const selectFile = useWorkspaceStore((s) => s.selectFile);
+  const resetWorkspace = useWorkspaceStore((s) => s.reset);
 
   const { status: streamStatus } = useThreadStream(id);
 
@@ -61,8 +71,19 @@ export default function Thread() {
 
   useEffect(() => {
     load();
-    return () => reset();
-  }, [load, reset]);
+    return () => {
+      reset();
+      resetWorkspace();
+    };
+  }, [load, reset, resetWorkspace]);
+
+  // Selecting a file from the tree switches to the file view on mobile.
+  const handleSelectFile = useCallback(
+    (path: string) => {
+      selectFile(path);
+    },
+    [selectFile]
+  );
 
   // Auto-scroll to the newest bubble as messages/tokens arrive.
   useEffect(() => {
@@ -144,48 +165,102 @@ export default function Thread() {
             </p>
           </article>
 
-          {/* Start-session affordance when no active session */}
-          {!sessionActive && (
-            <div className="mb-3 flex justify-center">
-              <button
-                type="button"
-                onClick={handleStartSession}
-                disabled={startingSession}
-                className="min-h-[44px] rounded-[3px] border border-term-amber-line px-4 font-mono text-sm text-term-amber disabled:opacity-50"
-              >
-                {startingSession ? t('thread.startingSession') : t('thread.startSession')}
-              </button>
-            </div>
+          {/* Workspace tabs (mobile-first): Chat | Files */}
+          <div className="mb-3 flex gap-1 border-b border-term-line" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'chat'}
+              onClick={() => setTab('chat')}
+              className={`min-h-[44px] px-3 font-mono text-xs uppercase tracking-wider ${
+                tab === 'chat'
+                  ? 'border-b-2 border-term-active text-term-fg-bright'
+                  : 'text-term-dim hover:text-term-fg'
+              }`}
+            >
+              {t('workspace.tabChat')}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'files'}
+              onClick={() => setTab('files')}
+              className={`min-h-[44px] px-3 font-mono text-xs uppercase tracking-wider ${
+                tab === 'files'
+                  ? 'border-b-2 border-term-active text-term-fg-bright'
+                  : 'text-term-dim hover:text-term-fg'
+              }`}
+            >
+              {t('workspace.tabFiles')}
+            </button>
+          </div>
+
+          {/* ── Chat tab ── */}
+          {tab === 'chat' && (
+            <>
+              {/* Start-session affordance when no active session */}
+              {!sessionActive && (
+                <div className="mb-3 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={handleStartSession}
+                    disabled={startingSession}
+                    className="min-h-[44px] rounded-[3px] border border-term-amber-line px-4 font-mono text-sm text-term-amber disabled:opacity-50"
+                  >
+                    {startingSession ? t('thread.startingSession') : t('thread.startSession')}
+                  </button>
+                </div>
+              )}
+
+              {/* Bubble list */}
+              <div className="flex flex-1 flex-col gap-2 pb-2">
+                {messages.length === 0 ? (
+                  <p className="py-6 text-center font-mono text-xs text-term-dim">
+                    {t('thread.empty')}
+                  </p>
+                ) : (
+                  messages.map((m) => (
+                    <ChatBubble
+                      key={m.id}
+                      message={m}
+                      // Known author name only for the post author's own messages;
+                      // other participants' names aren't loaded in this M4 cut.
+                      authorName={
+                        m.type === 'HUMAN' && m.authorId === post.authorId
+                          ? post.author?.username
+                          : undefined
+                      }
+                    />
+                  ))
+                )}
+                <div ref={bottomRef} />
+              </div>
+
+              {/* Composer pinned at the bottom of the column */}
+              <div className="sticky bottom-0">
+                <Composer postId={post.id} />
+              </div>
+            </>
           )}
 
-          {/* Bubble list */}
-          <div className="flex flex-1 flex-col gap-2 pb-2">
-            {messages.length === 0 ? (
-              <p className="py-6 text-center font-mono text-xs text-term-dim">
-                {t('thread.empty')}
-              </p>
-            ) : (
-              messages.map((m) => (
-                <ChatBubble
-                  key={m.id}
-                  message={m}
-                  // Known author name only for the post author's own messages;
-                  // other participants' names aren't loaded in this M4 cut.
-                  authorName={
-                    m.type === 'HUMAN' && m.authorId === post.authorId
-                      ? post.author?.username
-                      : undefined
-                  }
+          {/* ── Files (workspace) tab ── */}
+          {tab === 'files' && (
+            <div
+              className="flex flex-1 flex-col gap-2 pb-2 sm:flex-row"
+              style={{ minHeight: '24rem' }}
+            >
+              <div className="sm:w-2/5 sm:min-w-[12rem]" style={{ minHeight: '12rem' }}>
+                <FileTree
+                  postId={post.id}
+                  selectedPath={selectedPath}
+                  onSelect={handleSelectFile}
                 />
-              ))
-            )}
-            <div ref={bottomRef} />
-          </div>
-
-          {/* Composer pinned at the bottom of the column */}
-          <div className="sticky bottom-0">
-            <Composer postId={post.id} />
-          </div>
+              </div>
+              <div className="flex-1" style={{ minHeight: '12rem' }}>
+                <FileView postId={post.id} path={selectedPath} />
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

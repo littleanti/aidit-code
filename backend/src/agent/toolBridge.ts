@@ -14,9 +14,11 @@
 //   args 는 명령/경로만 JSON 직렬화한다. 실제 효과는 반드시 샌드박스 루트 안에서만(경로 가드).
 
 import { createToolCall, appendToolOutput, finalizeToolCall } from '../domain/toolCall.js';
-import { executeTool, type ToolExecRequest } from './toolExec.js';
+import { executeTool, type ToolExecRequest, type FileChangeSink } from './toolExec.js';
 import type { ToolIntent } from './pi.js';
 import type { ToolKindValue } from '../realtime/events.js';
+import { publishToPost } from '../realtime/publish.js';
+import { makeFileChangedEvent } from '../realtime/events.js';
 
 /** 도구 의도 1건을 처리하는 데 필요한 컨텍스트. */
 export interface ToolBridgeContext {
@@ -73,9 +75,18 @@ export async function runToolIntent(
     appendChain = appendChain.then(() => appendToolOutput(toolCallId, chunk));
   };
 
+  // file.changed(M6 RT-FILEEV): FILE_WRITE/FILE_DELETE 성공 시 루트 상대 경로로 전원 중계.
+  //   path 정규화(역슬래시→슬래시)는 makeFileChangedEvent 가 담당. 키 필드 없음.
+  const onFileChange: FileChangeSink = (fc) => {
+    publishToPost(
+      ctx.postId,
+      makeFileChangedEvent({ path: fc.relPath, change: fc.change, size: fc.size }),
+    );
+  };
+
   let result;
   try {
-    result = await executeTool(ctx.sandboxRoot, req, onChunk);
+    result = await executeTool(ctx.sandboxRoot, req, onChunk, onFileChange);
   } catch {
     // toolExec 가 던지는 예외(예상 외)는 FAILED 로 흡수.
     result = { status: 'FAILED' as const, exitCode: 1, result: 'tool execution error' };

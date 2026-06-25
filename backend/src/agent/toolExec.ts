@@ -12,13 +12,26 @@
 //   상위로 흘릴 뿐 키를 주입하지 않는다(주입은 pi.ts 의 worker 전용).
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { writeFile, readFile, rm, mkdir } from 'node:fs/promises';
+import { writeFile, readFile, rm, mkdir, access } from 'node:fs/promises';
 import path from 'node:path';
 import { resolveInsideRoot, PathEscapeError } from '../sandbox/pathGuard.js';
-import type { ToolKindValue } from '../realtime/events.js';
+import type { ToolKindValue, FileChangeKind } from '../realtime/events.js';
 
 /** path violation 시 사용하는 결과 문구(이벤트/행에 남는 일반 문구 — 민감정보 아님). */
 export const PATH_VIOLATION_RESULT = 'path violation';
+
+/**
+ * 파일 변경 알림 콜백(M6 RT-FILEEV).
+ *   - FILE_WRITE 성공: change='CREATED'(이전에 없던 경우)|'MODIFIED'(있던 경우), size=기록 바이트.
+ *   - FILE_DELETE 성공: change='DELETED'(size 생략).
+ *   - relPath 는 루트 상대(정규화는 makeFileChangedEvent 가 담당). 호출부가 publishToPost 로 잇는다.
+ * SHELL/PACKAGE 유발 변경은 추적하지 않는다(PoC 범위 — 단일 파일 도구 효과만 관측).
+ */
+export type FileChangeSink = (change: {
+  relPath: string;
+  change: FileChangeKind;
+  size?: number;
+}) => void;
 
 /** 도구 실행 요청. relPath 는 FILE_* 전용, command 는 SHELL/PACKAGE 전용. */
 export interface ToolExecRequest {
@@ -70,14 +83,15 @@ export async function executeTool(
   sandboxRoot: string,
   req: ToolExecRequest,
   onChunk: ToolChunkSink,
+  onFileChange?: FileChangeSink,
 ): Promise<ToolExecResult> {
   switch (req.kind) {
     case 'FILE_WRITE':
-      return await runFileWrite(sandboxRoot, req, onChunk);
+      return await runFileWrite(sandboxRoot, req, onChunk, onFileChange);
     case 'FILE_READ':
       return await runFileRead(sandboxRoot, req, onChunk);
     case 'FILE_DELETE':
-      return await runFileDelete(sandboxRoot, req, onChunk);
+      return await runFileDelete(sandboxRoot, req, onChunk, onFileChange);
     case 'SHELL':
     case 'PACKAGE':
       return await runShell(sandboxRoot, req, onChunk);
@@ -87,11 +101,12 @@ export async function executeTool(
   }
 }
 
-/** FILE_WRITE — 경로 가드 통과 시 파일 기록. */
+/** FILE_WRITE — 경로 가드 통과 시 파일 기록. 성공 시 file.changed(CREATED|MODIFIED). */
 async function runFileWrite(
   root: string,
   req: ToolExecRequest,
   onChunk: ToolChunkSink,
+  onFileChange?: FileChangeSink,
 ): Promise<ToolExecResult> {
   const relPath = req.relPath ?? '';
   let abs: string;
@@ -100,12 +115,23 @@ async function runFileWrite(
   } catch (err) {
     return pathViolation(err, onChunk);
   }
+  // 변경 종류 판정용: 기록 전에 대상이 이미 존재했는지 확인(존재→MODIFIED, 부재→CREATED).
+  let existed = false;
+  try {
+    await access(abs);
+    existed = true;
+  } catch {
+    existed = false;
+  }
   try {
     // 부모 디렉토리를 보장(루트 안에서만 — abs 는 이미 경로 가드를 통과했다).
     await mkdir(path.dirname(abs), { recursive: true });
+    const bytes = Buffer.byteLength(req.content ?? '', 'utf8');
     await writeFile(abs, req.content ?? '', 'utf8');
-    const msg = `wrote ${relPath} (${Buffer.byteLength(req.content ?? '', 'utf8')} bytes)`;
+    const msg = `wrote ${relPath} (${bytes} bytes)`;
     onChunk(msg + '\n');
+    // file.changed 알림(루트 상대 경로 + 바이트 수). 정규화는 makeFileChangedEvent.
+    onFileChange?.({ relPath, change: existed ? 'MODIFIED' : 'CREATED', size: bytes });
     return { status: 'SUCCEEDED', exitCode: 0, result: msg };
   } catch (err) {
     const msg = `write failed: ${errText(err)}`;
@@ -138,11 +164,12 @@ async function runFileRead(
   }
 }
 
-/** FILE_DELETE — 경로 가드 통과 시 파일/디렉토리 삭제. */
+/** FILE_DELETE — 경로 가드 통과 시 파일/디렉토리 삭제. 성공 시 file.changed(DELETED). */
 async function runFileDelete(
   root: string,
   req: ToolExecRequest,
   onChunk: ToolChunkSink,
+  onFileChange?: FileChangeSink,
 ): Promise<ToolExecResult> {
   const relPath = req.relPath ?? '';
   let abs: string;
@@ -155,6 +182,8 @@ async function runFileDelete(
     await rm(abs, { recursive: true, force: true });
     const msg = `deleted ${relPath}`;
     onChunk(msg + '\n');
+    // file.changed 알림(DELETED — size 생략). 정규화는 makeFileChangedEvent.
+    onFileChange?.({ relPath, change: 'DELETED' });
     return { status: 'SUCCEEDED', exitCode: 0, result: msg };
   } catch (err) {
     const msg = `delete failed: ${errText(err)}`;

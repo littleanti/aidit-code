@@ -166,10 +166,29 @@ export interface ToolResultEvent {
   result: string;
 }
 
+/** TRD §7 file.changed 의 변경 종류(파일 트리/워크스페이스 패널 갱신용). */
+export type FileChangeKind = 'CREATED' | 'MODIFIED' | 'DELETED';
+
+/**
+ * 샌드박스 파일 변경 이벤트(TRD §7 file.changed).
+ * payload(verbatim): { path, change:'CREATED'|'MODIFIED'|'DELETED', size? }.
+ *   - path 는 샌드박스 루트 상대 경로이며 forward-slash('/')로 정규화한다(OS 무관 일관).
+ *   - size 는 CREATED/MODIFIED 일 때 기록된 바이트 수(DELETED 는 생략).
+ * 보안: 경로/크기만 담는다 — 키 필드 절대 금지(M6 PoC: shell 유발 변경은 추적하지 않음).
+ */
+export interface FileChangedEvent {
+  type: 'file.changed';
+  /** 샌드박스 루트 상대 경로(forward-slash 정규화). */
+  path: string;
+  change: FileChangeKind;
+  /** 기록된 바이트 수(CREATED/MODIFIED). DELETED 는 생략. */
+  size?: number;
+}
+
 /**
  * 모든 실시간 이벤트의 discriminated union.
  * M2: sandbox.status. M3: + session.status. M4: + message.created/agent.token/message.updated.
- * M5: + tool.call/tool.output/tool.result. file.changed(M6) 는 후속에서 멤버만 추가한다.
+ * M5: + tool.call/tool.output/tool.result. M6: + file.changed.
  */
 export type RealtimeEvent =
   | SandboxStatusEvent
@@ -179,7 +198,8 @@ export type RealtimeEvent =
   | MessageUpdatedEvent
   | ToolCallEvent
   | ToolOutputEvent
-  | ToolResultEvent;
+  | ToolResultEvent
+  | FileChangedEvent;
 
 /**
  * sandbox.status 이벤트 빌더.
@@ -322,4 +342,21 @@ export function makeToolResultEvent(args: {
 }): ToolResultEvent {
   const { toolCallId, messageId, status, exitCode, result } = args;
   return { type: 'tool.result', toolCallId, messageId, status, exitCode, result };
+}
+
+/**
+ * file.changed 이벤트 빌더(TRD §7).
+ * path 는 루트 상대만 받아 forward-slash 로 정규화한다(역슬래시→슬래시, 선행 './' 제거).
+ * size 는 명시될 때만 실린다(DELETED 는 보통 생략). 키 필드는 받지 않는다.
+ */
+export function makeFileChangedEvent(args: {
+  path: string;
+  change: FileChangeKind;
+  size?: number;
+}): FileChangedEvent {
+  const { path: rawPath, change, size } = args;
+  const normalized = rawPath.replace(/\\/g, '/').replace(/^\.\//, '');
+  const event: FileChangedEvent = { type: 'file.changed', path: normalized, change };
+  if (size !== undefined) event.size = size;
+  return event;
 }

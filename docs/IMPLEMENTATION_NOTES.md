@@ -62,4 +62,14 @@
 - 비고: pi 워커(시뮬 에이전트)가 cwd=sandbox.path에서 실제 fs/쉘 도구를 실행하고 protocol로 tool.* 이벤트 방출 → 백엔드 toolBridge가 ToolCall 행+버블+SSE 매핑. PoC 결정적 트리거로 성공/실패/경로탈출 케이스 검증.
 - 예상 변경 파일: `backend/src/domain/toolCall.ts`, `backend/src/agent/{toolBridge,pi,piWorker}.*`, `backend/src/realtime/{events,stream}.ts`, `backend/src/routes/messages.ts`(toolCall 요약), `backend/test/**`; `frontend/src/components/{ToolCallBubble,ToolResultBubble}.tsx`, `frontend/src/components/ChatBubble.tsx`, `frontend/src/stores/threadStore.ts`, `frontend/src/stream/useThreadStream.ts`.
 
+### 2026-06-25 · [feat] · 완료 · M6 워크스페이스 / 파일 트리 패널
+- PLAN.md §M6 구현 완료. Foundation apiEndpoints(`/files`, `/files/content`), realtimeEvents(file.changed), TRD §7.
+- **검증(③)**: 백엔드 `tsc` 클린, `vitest` 38/38 PASS(10 파일, files 12 신규), 프론트 build PASS(83 모듈). 라이브 E2E PASS — `GET /files?path=` 루트 상대 트리(dirs-first), `GET /files/content` 텍스트/바이너리(binary:true·content 없음)/대용량(truncated:true, 256KiB cap); `path=../`·절대경로 → 400 'path violation'(내용 미누출); SSE `file.changed` {path 루트상대, change CREATED/DELETED, size}; 키 누출 0건; M1–M5 회귀 무사.
+- 설계: file.changed는 toolExec FILE_WRITE/DELETE 경로에서만 발행(쉘 유발 변경 미추적, PoC 범위); 파일 트리는 단일 레벨 얕은 트리(FE가 expand 시 lazy 로드); FE Chat|Files 탭 토글(모바일 sm:flex-row 분할).
+- 변경 파일: `backend/src/{routes/files.ts,realtime/events.ts,agent/{toolExec,toolBridge}.ts,routes/index.ts}`, `backend/test/files.test.ts`; `frontend/src/{components/{FileTree,FileView}.tsx,stores/workspaceStore.ts,stream/useThreadStream.ts,pages/Thread.tsx,api/{rest,types}.ts,i18n/dicts/workspace.ts,i18n/index.ts}`.
+- 작업 패키지: BE-FILES(`GET /posts/:id/files?path=` 디렉토리 트리, 루트 상대·BE-ISO 강제, 위반 400), BE-FILECONTENT(`GET /posts/:id/files/content?path=` 단일 파일, 바이너리 거부/메타, 대용량 truncate), RT-FILEEV(`file.changed` CREATED/MODIFIED/DELETED size? — 도구 FILE_* 실행에서 트리거), FE-FILETREE(워크스페이스 패널: term-panel, 라인 SVG 아이콘, 접기/펼치기, file.changed 라이브 갱신), FE-FILEVIEW(파일 뷰어: 고정폭 단순 표시, 대용량 안내, file.changed 갱신).
+- 종료 기준: 워크스페이스 패널이 샌드박스 파일 트리 렌더(루트 상대만, `..`/symlink 거부 400); 파일 클릭 시 내용 조회(바이너리 거부, 대용량 truncate); 에이전트 파일 변경이 file.changed로 패널 라이브 갱신; 패널은 term-* 팔레트·라인 SVG만(새 색 없음).
+- 비고: file.changed는 M5 toolExec의 FILE_WRITE/DELETE 경로에서 발행(쉘 유발 변경 추적은 PoC 범위 외). BE-ISO(M2 pathGuard) 공용.
+- 예상 변경 파일: `backend/src/routes/files.ts`, `backend/src/realtime/events.ts`(file.changed), `backend/src/agent/toolExec.ts`(file.changed 발행), `backend/src/routes/index.ts`, `backend/test/**`; `frontend/src/components/{FileTree,FileView}.tsx`, `frontend/src/pages/Thread.tsx`, `frontend/src/stream/useThreadStream.ts`, `frontend/src/api/{rest,types}.ts`.
+
 <!-- 새 항목은 이 줄 위에 추가 -->

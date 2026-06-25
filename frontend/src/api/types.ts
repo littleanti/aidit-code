@@ -139,6 +139,29 @@ export interface PostsPage {
   nextCursor: string | null;
 }
 
+// ── Workspace files (TRD §4 GET /posts/:id/files · /files/content). No key fields. ──
+
+/** Directory entry from GET /posts/:id/files?path= (path is root-relative). */
+export interface FileEntry {
+  name: string;
+  path: string; // root-relative path within the sandbox
+  type: 'file' | 'dir';
+  size?: number;
+}
+
+/**
+ * Single-file payload from GET /posts/:id/files/content?path=.
+ * Binary files are rejected with a meta-only response (binary:true, no content);
+ * large files are truncated (truncated:true) carrying a prefix of the content.
+ */
+export interface FileContent {
+  path: string; // root-relative
+  size: number;
+  content?: string; // omitted when binary
+  binary?: boolean;
+  truncated?: boolean;
+}
+
 // ── Runtime read-only info (TRD §4 GET /runtime). NEVER includes a key. ──
 
 export interface RuntimeInfo {
