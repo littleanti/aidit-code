@@ -31,9 +31,11 @@ function Header() {
             <Link
               to="/me"
               title={username ?? ''}
-              className="inline-flex min-h-[44px] max-w-[6.5rem] items-center truncate px-1 font-mono text-sm text-term-dim hover:text-term-fg-bright"
+              className="inline-flex min-h-[44px] max-w-[8rem] items-center px-1 font-mono text-sm text-term-dim hover:text-term-fg-bright"
             >
-              {`[ ${username ?? ''} ]`}
+              <span aria-hidden="true" className="shrink-0">[&nbsp;</span>
+              <span className="min-w-0 truncate">{username ?? ''}</span>
+              <span aria-hidden="true" className="shrink-0">&nbsp;]</span>
             </Link>
           ) : (
             <button
@@ -135,8 +137,11 @@ function TabBar() {
   ];
 
   return (
-    <nav className="sticky bottom-0 z-20 border-t border-term-line bg-term-nav/95 backdrop-blur">
-      <div className="mx-auto flex max-w-2xl items-stretch justify-around">
+    <nav
+      className="sticky bottom-0 z-20 border-t border-term-line bg-term-nav/95 backdrop-blur"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+    >
+      <div className="mx-auto flex h-14 max-w-2xl items-stretch justify-around">
         {tabs.map((tab) => {
           const active = tab.match(pathname);
           const Icon = tab.Icon;
@@ -146,7 +151,7 @@ function TabBar() {
               to={tab.to}
               aria-label={tab.label}
               className={[
-                'inline-flex min-h-[44px] flex-1 flex-col items-center justify-center gap-0.5 py-2 font-mono text-[10px]',
+                'inline-flex h-full flex-1 flex-col items-center justify-center gap-0.5 font-mono text-[10px]',
                 active ? 'text-term-amber' : 'text-term-dim hover:text-term-fg-bright',
               ].join(' ')}
             >
@@ -172,7 +177,14 @@ export default function AppShell() {
       <div className="term-scanlines" aria-hidden="true" />
       <div className="term-vignette" aria-hidden="true" />
 
-      <div className="flex min-h-screen flex-col bg-term-screen">
+      <div
+        className="flex min-h-screen flex-col bg-term-screen"
+        style={{
+          // Deterministic tab-bar height (incl. iOS safe area) shared with the
+          // Thread composer so it can stick ABOVE the bar instead of behind it.
+          ['--tabbar-h' as string]: 'calc(3.5rem + env(safe-area-inset-bottom, 0px))',
+        }}
+      >
         <Header />
         <OfflineBanner />
         <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-4">

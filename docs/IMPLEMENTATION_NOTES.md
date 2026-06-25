@@ -11,6 +11,13 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · 유저명 닫는 `]` 사라짐 + Thread 컴포저가 TabBar 에 가려 잘리는 문제
+- **증상(사용자)**: ① 헤더 `[ username ]` 에서 닫는 `]` 가 사라짐. ② 게시글 진입 시 댓글 작성창(Composer) 하단 일부가 잘려 안 보임(메인 화면 세로 길이가 실기기보다 미묘하게 김).
+- **원인**: ① 직전 수정에서 `[ name ]` 전체 문자열에 `truncate` 를 걸어 닫는 `]` 까지 잘림. ② Composer 래퍼가 `sticky bottom-0` 인데 하단 `TabBar` 도 `sticky bottom-0`(z-20) → 둘 다 뷰포트 맨 아래에 겹쳐 TabBar(~56px)가 Composer 하단(전송 버튼)을 가림.
+- **수정**: ① `AppShell` 헤더 유저명을 `[`·`]` 고정 span + 가운데 username 만 `truncate`(min-w-0) 로 분리 → 대괄호 항상 표시. ② TabBar 높이를 결정적 CSS 변수 `--tabbar-h = calc(3.5rem + safe-area-inset-bottom)` 로 고정(AppShell 루트에 선언, nav 에 safe-area paddingBottom + 내부 행 h-14), Thread 의 Composer 래퍼를 `sticky bottom-[var(--tabbar-h)]` 로 올려 TabBar 바로 위에 고정 → 겹침 해소, iOS 노치 safe-area 도 반영.
+- **검증(③)**: frontend `tsc --noEmit` 클린, `vite build` PASS(90 모듈). 브라우저(localhost:5173)에서 ① `[ wdyoon#e1eb ]` 닫는 대괄호 복구 **시각 확인**. ② 컴포저-TabBar 겹침은 구조적 수정(sticky offset = `--tabbar-h`)으로 해소 — 단 실재현은 모바일 해상도 전용이라 데스크톱 뷰포트 캡처로는 미확인(실기기 확인 권장).
+- 변경 파일: `frontend/src/layout/AppShell.tsx`, `frontend/src/pages/Thread.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [fix] · 완료 · 헤더 깨짐 수정 — `[ KO | EN ]` 대괄호 + 모바일 줄바꿈/오버플로 방지
 - **증상(사용자, 스크린샷)**: 모바일 헤더에서 ① 워드마크 `AIDIT-CODE` 가 두 줄로 줄바꿈, ② `[ username ]` 대괄호가 위/아래로 분리, ③ 언어 토글이 `[ KO | EN ]` 가 아니라 대괄호 없는 `KO | EN`. 우상단 요소들이 헤더 폭을 초과해 줄바꿈됨.
 - **원인**: LangToggle 에 대괄호 없음. 워드마크/유저명에 `whitespace-nowrap` 미적용 → 공백·하이픈에서 줄바꿈. 워드마크(text-lg tracking-[3px]) + LLM 배지 + 토글 + 유저명이 모바일 폭 합산 초과인데 축소/truncate 가드 없음.

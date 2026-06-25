@@ -400,8 +400,9 @@ export default function Thread() {
                 <div ref={bottomRef} style={{ scrollMarginBottom: '7rem' }} />
               </div>
 
-              {/* Composer pinned at the bottom of the column */}
-              <div className="sticky bottom-0">
+              {/* Composer pinned ABOVE the bottom TabBar (both were sticky
+                  bottom-0 and overlapped, hiding the composer's lower edge). */}
+              <div className="sticky bottom-[var(--tabbar-h)] z-10">
                 <Composer postId={post.id} />
               </div>
             </>
