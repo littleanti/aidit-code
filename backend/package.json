@@ -1,0 +1,30 @@
+{
+  "name": "aidit-code-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Aidit-Code backend — Node 20 + Fastify + TypeScript + Prisma",
+  "scripts": {
+    "dev": "tsx watch src/app.ts",
+    "start": "tsx src/app.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "prisma:generate": "prisma generate",
+    "db:push": "prisma db push"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@fastify/jwt": "^9.0.1",
+    "@prisma/client": "^6.1.0",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.2.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.17.10",
+    "prisma": "^6.1.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

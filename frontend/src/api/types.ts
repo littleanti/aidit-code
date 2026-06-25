@@ -1,0 +1,147 @@
+// ───────────────────────────────────────────────────────────
+// Aidit-Code frontend API contract (DTOs).
+// Mirrors docs/TRD.md §3 (Prisma schema) + §4 (REST contracts).
+//
+// HARD RULE: NO LLM key fields anywhere. There is no apiKey / baseURL /
+// model-secret field in any DTO. LLM keys live ONLY in the backend .env
+// and are never sent to, stored by, or rendered in the client.
+// ───────────────────────────────────────────────────────────
+
+// ── Enums (string unions mirroring Prisma enums, TRD §3) ──
+
+/** Sandbox.status — TRD §3 SandboxStatus. */
+export type SandboxStatus =
+  | 'CREATING'
+  | 'READY'
+  | 'RUNNING'
+  | 'SUSPENDED'
+  | 'ERROR';
+
+/** AgentSession.status — TRD §3 AgentSessionStatus. */
+export type AgentSessionStatus =
+  | 'STARTING'
+  | 'IDLE'
+  | 'RUNNING'
+  | 'INTERRUPTED'
+  | 'STOPPED'
+  | 'ERROR';
+
+/** Message.type — TRD §3 MessageType. Drives bubble rendering. */
+export type MessageType =
+  | 'HUMAN'
+  | 'AGENT_REPLY'
+  | 'TOOL_CALL'
+  | 'TOOL_RESULT'
+  | 'SYSTEM';
+
+/** Message.status — TRD §3 MessageStatus. */
+export type MessageStatus = 'PENDING' | 'STREAMING' | 'COMPLETE' | 'FAILED';
+
+/** ToolCall.status — TRD §3 ToolCallStatus. */
+export type ToolCallStatus = 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+
+/** ToolCall.kind — TRD §3 ToolKind. */
+export type ToolKind =
+  | 'SHELL'
+  | 'FILE_WRITE'
+  | 'FILE_DELETE'
+  | 'FILE_READ'
+  | 'PACKAGE'
+  | 'OTHER';
+
+// ── Auth (TRD §4: /auth/register · /auth/session · /auth/guest) ──
+
+/** Returned by all auth endpoints. Client persists token + username only. */
+export interface AuthResult {
+  id: string;
+  token: string;
+  username: string;
+}
+
+// ── User (TRD §3 User; no key fields) ──
+
+export interface User {
+  id: string;
+  username: string;
+  createdAt: string; // ISO-8601
+}
+
+// ── Sandbox (TRD §3; 1:1 with Post). No path secrets exposed beyond status/runtime. ──
+
+export interface Sandbox {
+  id: string;
+  status: SandboxStatus;
+  runtime: string; // runtime identifier, e.g. "pi"
+}
+
+// ── AgentSession summary (TRD §3/§4 GET /posts/:id). No key fields. ──
+
+export interface AgentSession {
+  id: string;
+  status: AgentSessionStatus;
+  model: string; // active model name only — never a key
+}
+
+// ── ToolCall (TRD §3; linked to TOOL_CALL/TOOL_RESULT bubbles 1:1) ──
+
+export interface ToolCall {
+  id: string;
+  kind: ToolKind;
+  name: string; // e.g. "bash", "write_file"
+  args: string; // JSON-serialized args (command string / paths)
+  result: string | null; // stdout/stderr/summary (accumulated)
+  exitCode: number | null;
+  status: ToolCallStatus;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+// ── Message (=bubble, TRD §3). seq is the single sort/replay SoT. ──
+
+export interface Message {
+  id: string;
+  postId: string;
+  sessionId: string | null;
+  authorId: string | null; // human = userId; AGENT/TOOL/SYSTEM = null
+  type: MessageType;
+  status: MessageStatus;
+  body: string;
+  replyToId: string | null;
+  toolCallId: string | null;
+  toolCall?: ToolCall | null; // linked summary when present
+  seq: number; // monotonic per-post sort key
+  clientId: string | null; // human-send idempotency key
+  createdAt: string;
+}
+
+// ── Post (TRD §3/§4 feed card). Includes sandbox status summary. ──
+
+export interface Post {
+  id: string;
+  authorId: string;
+  author?: User;
+  title: string;
+  body: string;
+  score: number;
+  commentCount: number;
+  hotScore: number;
+  createdAt: string;
+  sandbox: Sandbox | null; // status summary for the card badge
+  session?: AgentSession | null; // active session summary (GET /posts/:id)
+  voted?: boolean; // computed when optionally authenticated
+  bookmarked?: boolean;
+}
+
+// ── Cursor-paginated feed envelope (TRD §4.2) ──
+
+export interface PostsPage {
+  items: Post[];
+  nextCursor: string | null;
+}
+
+// ── Runtime read-only info (TRD §4 GET /runtime). NEVER includes a key. ──
+
+export interface RuntimeInfo {
+  model: string; // active model name
+  baseUrlHost?: string; // host only — never the full key/url with secrets
+}

@@ -1,0 +1,210 @@
+// Aidit-Code — Prisma schema (PoC) · SoT
+// Δ from Aidit: Community/Persona/ContextSegment 제거, BYOK 키 저장 개념 제거,
+//               Sandbox / AgentSession / Message(=버블, Comment 대체) / ToolCall(=AgentEvent) 신규.
+// DB: SQLite(PoC) → Postgres(확장). 무상태 서버, seq가 메시지 순서의 단일 출처(SoT).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite" // PoC. 확장 시 "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── 사용자 ──────────────────────────────────────────────
+// username 유지(표시·본인 판별). 게스트는 `닉네임#hex4`(예: 철수#a3f9) 결합 문자열, passwordHash=null.
+// API 키 저장/전송 개념 전면 제거(LLM 키는 서버 .env에만). User는 키 필드를 갖지 않는다.
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique          // 전역 유일. 게스트는 서버가 #hex4 부여로 유일화.
+  passwordHash String?                   // bcrypt 해시. 게스트(닉네임만 진입)는 null.
+  createdAt    DateTime @default(now())
+
+  posts        Post[]
+  messages     Message[]
+  votes        Vote[]
+  bookmarks    Bookmark[]
+}
+
+// ── 게시글 ──────────────────────────────────────────────
+// communityId 제거. 글 생성 시 Sandbox 1:1 자동 생성(서비스 레이어). 홈=게시글 피드.
+model Post {
+  id           String   @id @default(cuid())
+  authorId     String
+  author       User     @relation(fields: [authorId], references: [id])
+  title        String
+  body         String                     // 초기 작업 지시/설명(에이전트 첫 발화의 시드로 사용 가능)
+  score        Int      @default(0)        // Vote 행 수(인기 정렬용)
+  commentCount Int      @default(0)        // Message 중 사람/에이전트 답변 수(버블 카운트)
+  hotScore     Float    @default(0)        // 비정규화 인기점수
+  createdAt    DateTime @default(now())
+
+  sandbox      Sandbox?                    // 1:1(Sandbox.postId @unique)
+  messages     Message[]
+  votes        Vote[]
+  bookmarks    Bookmark[]
+
+  @@index([hotScore])
+  @@index([authorId, createdAt])
+}
+
+// ── 샌드박스 ────────────────────────────────────────────
+// 게시글당 1개(@unique). 호스트 디렉토리 격리(path)가 격리 경계. 내부는 모든 permission 허용.
+enum SandboxStatus {
+  CREATING   // 폴더/런타임 준비 중
+  READY      // 준비 완료, 아직 에이전트 미가동(유휴)
+  RUNNING    // 에이전트 세션 활성(작업/스트리밍 중)
+  SUSPENDED  // 유휴로 일시중단(프로세스 내려감, 디렉토리 보존)
+  ERROR      // 생성/실행 실패
+}
+
+model Sandbox {
+  id           String        @id @default(cuid())
+  postId       String        @unique       // 1:1
+  post         Post          @relation(fields: [postId], references: [id])
+  path         String                       // 호스트 절대경로(격리 루트). 경로 탈출 차단 기준.
+  status       SandboxStatus @default(CREATING)
+  runtime      String        @default("pi") // 런타임 식별자(pi agent)
+  meta         String?                       // JSON: 리소스/네트워크 정책, 디스크 사용량 등
+  createdAt    DateTime      @default(now())
+  lastActiveAt DateTime      @default(now())
+
+  sessions     AgentSession[]
+
+  @@index([status, lastActiveAt])
+}
+
+// ── 에이전트 세션 ──────────────────────────────────────
+// 채팅방=샌드박스에서 도는 pi agent 세션. 모든 참여자가 동일 세션에 attach(fan-out).
+// Sandbox와 분리(세션 재시작 이력 보존). 동시 활성 세션은 샌드박스당 1개 권장(PoC).
+enum AgentSessionStatus {
+  STARTING   // 프로세스 spawn/attach 중
+  IDLE       // attach됨, 입력 대기(스트리밍 아님)
+  RUNNING    // 토큰/툴 스트리밍 중
+  INTERRUPTED// 사용자 인터럽트로 현재 턴 중단
+  STOPPED    // 정상 종료
+  ERROR      // 런타임 오류
+}
+
+model AgentSession {
+  id          String             @id @default(cuid())
+  sandboxId   String
+  sandbox     Sandbox            @relation(fields: [sandboxId], references: [id])
+  status      AgentSessionStatus @default(STARTING)
+  model       String                              // 활성 모델명(.env baseURL/apikey로 주입, 키는 미저장)
+  runtimePid  Int?                                // 호스트 프로세스 PID(있으면)
+  startedAt   DateTime           @default(now())
+  endedAt     DateTime?
+
+  messages    Message[]                            // 이 세션에서 생성/귀속된 버블
+  toolCalls   ToolCall[]
+
+  @@index([sandboxId, startedAt])
+}
+
+// ── 메시지(=버블, Comment 대체/개명) ──────────────────
+// 채팅 버블의 SoT. seq가 post 내 단조 증가 정렬키(SSE 재생/멱등 기준).
+enum MessageType {
+  HUMAN        // 사람 발화(우=본인, 좌=타인)
+  AGENT_REPLY  // 에이전트 텍스트 답변(좌, 앰버 틴트)
+  TOOL_CALL    // 도구 호출 버블($ <cmd> 풍, term-dim/faint)
+  TOOL_RESULT  // 도구 결과/터미널 출력 버블(고정폭, 성공/실패 색)
+  SYSTEM       // 시스템 알림(세션 상태/오류 안내 등)
+}
+
+enum MessageStatus {
+  PENDING    // 생성 예약(아직 본문 없음/대기)
+  STREAMING  // 토큰/출력 누적 중
+  COMPLETE   // 완료
+  FAILED     // 실패
+}
+
+model Message {
+  id          String        @id @default(cuid())
+  postId      String
+  post        Post          @relation(fields: [postId], references: [id])
+  sessionId   String?                          // 어느 AgentSession 턴에 속하는지(사람 입력은 null 가능)
+  session     AgentSession? @relation(fields: [sessionId], references: [id])
+  authorId    String?                          // 사람=userId, AGENT/TOOL/SYSTEM=null
+  author      User?         @relation(fields: [authorId], references: [id])
+  type        MessageType
+  status      MessageStatus @default(COMPLETE)
+  body        String                           // 사람 텍스트 / 에이전트 답변 텍스트 / 시스템 문구
+  // 어떤 사람 메시지에 대한 에이전트 응답인지(스티어링 추적)
+  replyToId   String?
+  replyTo     Message?      @relation("ReplyChain", fields: [replyToId], references: [id])
+  replies     Message[]     @relation("ReplyChain")
+  // TOOL_CALL/TOOL_RESULT 버블이 가리키는 도구 호출 레코드(1:1)
+  toolCallId  String?       @unique
+  toolCall    ToolCall?     @relation("ToolCallBubble", fields: [toolCallId], references: [id])
+  seq         Int                              // post 내 단조 증가(SoT 정렬키). 서버 부여.
+  clientId    String?                          // 사람 전송 멱등키(중복 게시 방지)
+  createdAt   DateTime      @default(now())
+
+  @@unique([postId, seq])
+  @@index([postId, seq])
+  @@index([postId, clientId])
+}
+
+// ── 도구 호출 / 에이전트 이벤트 ─────────────────────────
+// pi agent가 샌드박스에서 실행한 도구(쉘/파일/패키지)의 이름·인자·결과·상태.
+// 채팅에는 TOOL_CALL/TOOL_RESULT Message 버블로 렌더(Message.toolCallId로 연결).
+enum ToolCallStatus {
+  RUNNING    // 실행 중
+  SUCCEEDED  // 종료코드 0/성공
+  FAILED     // 실패(비0 종료/예외)
+}
+
+enum ToolKind {
+  SHELL        // 쉘 명령 실행
+  FILE_WRITE   // 파일 생성/수정
+  FILE_DELETE  // 파일 삭제
+  FILE_READ    // 파일 읽기
+  PACKAGE      // 패키지 설치/venv 세팅
+  OTHER        // 기타 런타임 도구
+}
+
+model ToolCall {
+  id         String         @id @default(cuid())
+  sessionId  String
+  session    AgentSession   @relation(fields: [sessionId], references: [id])
+  kind       ToolKind
+  name       String                          // 도구/명령 이름(예: "bash", "write_file")
+  args       String                          // JSON 직렬화 인자(명령 문자열·경로 등)
+  result     String?                         // stdout/stderr/요약(스트리밍 누적 후 확정)
+  exitCode   Int?
+  status     ToolCallStatus @default(RUNNING)
+  startedAt  DateTime       @default(now())
+  endedAt    DateTime?
+
+  bubble     Message?       @relation("ToolCallBubble") // 연결된 TOOL_CALL/RESULT 버블
+
+  @@index([sessionId, startedAt])
+}
+
+// ── 추천(업보트) ───────────────────────────────────────
+model Vote {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, postId])   // 사용자당 글당 1표
+  @@index([postId])
+}
+
+// ── 북마크 ─────────────────────────────────────────────
+model Bookmark {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, postId])
+  @@index([userId, createdAt]) // 프로필 북마크 최신순
+}

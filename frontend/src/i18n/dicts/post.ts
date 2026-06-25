@@ -1,0 +1,56 @@
+// src/i18n/dicts/post.ts — feed (Home), create, post card, status badges.
+export const post = {
+  ko: {
+    sortHot: '인기',
+    sortNew: '최신',
+    feedEmpty: '아직 게시글이 없어요',
+    upvote: '추천',
+    comments: '댓글',
+    // status badge labels (sandbox)
+    statusCreating: 'CREATING',
+    statusReady: 'READY',
+    statusRunning: 'RUNNING',
+    statusSuspended: 'SUSPENDED',
+    statusError: 'ERROR',
+    statusNone: '준비 안 됨',
+    // create page
+    createTitle: '글 작성',
+    titleLabel: '제목',
+    titlePlaceholder: 'FastAPI 헬스체크 만들어줘',
+    bodyLabel: '본문 / 작업 지시',
+    bodyPlaceholder: '/health 라우트 + pytest 추가…',
+    sandboxNotice:
+      '게시하면 이 글 전용 샌드박스가 자동 생성되고 코드 에이전트가 붙습니다.',
+    publish: '게시하기',
+    publishing: '게시 중…',
+    loginToPost: '글을 작성하려면 로그인이 필요해요',
+    // thread placeholder
+    originalPost: '원본 게시글',
+    threadComingSoon: '에이전트 세션 채팅은 다음 단계(M4)에서 제공됩니다.',
+  },
+  en: {
+    sortHot: 'Hot',
+    sortNew: 'New',
+    feedEmpty: 'No posts yet',
+    upvote: 'Upvote',
+    comments: 'Comments',
+    statusCreating: 'CREATING',
+    statusReady: 'READY',
+    statusRunning: 'RUNNING',
+    statusSuspended: 'SUSPENDED',
+    statusError: 'ERROR',
+    statusNone: 'Not ready',
+    createTitle: 'New post',
+    titleLabel: 'Title',
+    titlePlaceholder: 'Build a FastAPI health check',
+    bodyLabel: 'Body / task instructions',
+    bodyPlaceholder: 'Add a /health route + pytest…',
+    sandboxNotice:
+      'Publishing auto-creates a dedicated sandbox for this post and attaches a code agent.',
+    publish: 'Publish',
+    publishing: 'Publishing…',
+    loginToPost: 'Login is required to create a post',
+    originalPost: 'Original post',
+    threadComingSoon: 'Agent session chat arrives in the next stage (M4).',
+  },
+} as const;
