@@ -11,7 +11,8 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { prisma } from '../db.js';
 import { hotScore } from '../domain/hotScore.js';
 import { encodeCursor, decodeCursor, BadCursorError } from '../domain/cursor.js';
-import { createSandboxForPost } from '../sandbox/service.js';
+import { createSandboxForPost, sandboxLimiter } from '../sandbox/service.js';
+import { provisionSandbox } from '../sandbox/provision.js';
 
 const PAGE_SIZE = 20;
 
@@ -39,12 +40,31 @@ export async function postRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'title is required' });
     }
 
-    const post = await prisma.post.create({
-      data: { authorId: authUser.userId, title, body: text },
-    });
-    // M1: Sandbox 1:1 자동 생성(행 + 디렉토리, status=CREATING).
-    const sandbox = await createSandboxForPost(post.id);
+    // 동시 프로비저닝 상한(TRD §8). PoC 정책: 용량 초과 시 글을 만들지 않고 429(429-on-overflow).
+    // 슬롯은 여기서 선점하고, 비동기 provisionSandbox 가 finally 에서 반납한다(소유권 이전).
+    if (!sandboxLimiter.tryAcquire()) {
+      return reply.code(429).send({ error: 'sandbox capacity exceeded, retry later' });
+    }
 
+    let post;
+    let sandbox;
+    try {
+      post = await prisma.post.create({
+        data: { authorId: authUser.userId, title, body: text },
+      });
+      // Sandbox 1:1 자동 생성(행 + 디렉토리, status=CREATING).
+      sandbox = await createSandboxForPost(post.id);
+    } catch (err) {
+      // 행 생성 실패 시 선점한 슬롯을 반납해야 누수가 없다.
+      sandboxLimiter.release();
+      throw err;
+    }
+
+    // 응답을 막지 않고(fire-and-forget) CREATING → READY 프로비저닝을 비동기로 시작한다.
+    // provisionSandbox 가 슬롯 release 를 책임진다(releaseSlot 기본 true, acquireSlot=false).
+    void provisionSandbox(sandbox);
+
+    // 응답은 즉시 status=CREATING 으로 반환되고, 이후 sandbox.status 이벤트로 READY 전이가 따른다.
     return reply.code(201).send({ post, sandbox });
   });
 

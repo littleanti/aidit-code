@@ -33,6 +33,8 @@ export interface AppConfig {
   databaseUrl: string;
   /** 샌드박스 격리 루트(호스트 절대경로). */
   sandboxRoot: string;
+  /** 동시 샌드박스 프로비저닝/활성 실행 상한(TRD §8 남용 방지). 초과 시 429. */
+  sandboxMaxConcurrent: number;
   /** LLM 설정 — 읽되 절대 로그/응답/SSE 에 노출 금지. */
   llm: LlmConfig;
 }
@@ -43,6 +45,7 @@ export const config: AppConfig = {
   jwtExpires: process.env.JWT_EXPIRES || '7d',
   databaseUrl: process.env.DATABASE_URL || 'file:./prisma/dev.db',
   sandboxRoot: process.env.SANDBOX_ROOT || defaultSandboxRoot,
+  sandboxMaxConcurrent: Number(process.env.SANDBOX_MAX_CONCURRENT) || 4,
   llm: {
     apiKey: process.env.API_KEY || '',
     baseURL: process.env.BASE_URL || 'https://models.github.ai/inference',
@@ -61,6 +64,7 @@ export function redactConfig(cfg: AppConfig = config): Record<string, unknown> {
     jwtExpires: cfg.jwtExpires,
     databaseUrl: cfg.databaseUrl,
     sandboxRoot: cfg.sandboxRoot,
+    sandboxMaxConcurrent: cfg.sandboxMaxConcurrent,
     llm: {
       apiKey: cfg.llm.apiKey ? '[REDACTED]' : '[EMPTY]',
       baseURL: cfg.llm.baseURL,
