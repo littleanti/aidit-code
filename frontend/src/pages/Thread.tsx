@@ -54,6 +54,10 @@ export default function Thread() {
   const { status: streamStatus } = useThreadStream(id);
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  // Auto-scroll bookkeeping: stay "pinned" to the bottom unless the user
+  // scrolls up to read history; the user's own new message always re-pins.
+  const pinnedRef = useRef(true);
+  const prevLastIdRef = useRef<string | null>(null);
 
   // Load post + initial messages, then hydrate the store (seq-ascending).
   const load = useCallback(async () => {
@@ -91,10 +95,36 @@ export default function Thread() {
     [selectFile]
   );
 
-  // Auto-scroll to the newest bubble as messages/tokens arrive.
+  // Track whether the user is parked near the bottom (window scroll). When they
+  // scroll up to read history we stop yanking them down on every new token.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages]);
+    const onScroll = () => {
+      const doc = document.documentElement;
+      pinnedRef.current =
+        window.innerHeight + window.scrollY >= doc.scrollHeight - 120;
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Auto-scroll to the newest bubble as messages/tokens arrive. The user's own
+  // freshly-sent message always re-pins and follows; streaming tokens follow
+  // only while pinned (instant), brand-new bubbles ease in (smooth).
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    const lastId = last?.id ?? null;
+    const isNewBubble = lastId !== prevLastIdRef.current;
+    prevLastIdRef.current = lastId;
+
+    if (isNewBubble && last?.type === 'HUMAN' && last.authorId === userId) {
+      pinnedRef.current = true; // I just sent — always follow.
+    }
+    if (!pinnedRef.current) return;
+    bottomRef.current?.scrollIntoView({
+      block: 'end',
+      behavior: isNewBubble ? 'smooth' : 'auto',
+    });
+  }, [messages, userId]);
 
   const handleStartSession = useCallback(async () => {
     if (!id) return;
@@ -311,7 +341,7 @@ export default function Thread() {
                     />
                   ))
                 )}
-                <div ref={bottomRef} />
+                <div ref={bottomRef} style={{ scrollMarginBottom: '7rem' }} />
               </div>
 
               {/* Composer pinned at the bottom of the column */}

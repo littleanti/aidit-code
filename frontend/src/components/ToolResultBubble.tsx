@@ -10,7 +10,7 @@
 // HARD RULE: raw machine output is preserved verbatim — no translation, no
 // letter-spacing, no key fields (result is stdout/stderr only).
 import { useT } from '../i18n/useT';
-import type { Message, ToolCallStatus } from '../api/types';
+import type { Message } from '../api/types';
 
 interface ToolResultBubbleProps {
   message: Message;
@@ -20,25 +20,33 @@ export default function ToolResultBubble({ message }: ToolResultBubbleProps) {
   const t = useT();
   const tc = message.toolCall ?? null;
 
-  // ToolCall summary is authoritative; before tool.call lands, fall back to the
-  // message body/status so the bubble still renders something coherent.
-  const toolStatus: ToolCallStatus =
-    tc?.status ?? (message.status === 'FAILED' ? 'FAILED' : 'RUNNING');
+  // A TOOL_RESULT bubble has no toolCall summary of its own (the toolCall is
+  // linked to the TOOL_CALL bubble via toolCallId). Its authoritative lifecycle
+  // is its OWN message.status, which the server finalizes to COMPLETE (success)
+  // or FAILED via a message.updated event. tc is only a secondary signal.
+  const failed = message.status === 'FAILED' || tc?.status === 'FAILED';
+  const running =
+    !failed &&
+    (message.status === 'PENDING' || message.status === 'STREAMING') &&
+    tc?.status !== 'SUCCEEDED';
+  const succeeded = !running && !failed;
   const output = tc?.result ?? message.body ?? '';
   const exitCode = tc?.exitCode ?? null;
 
-  const running = toolStatus === 'RUNNING';
-  const failed = toolStatus === 'FAILED';
-
-  // Status badge: [exit N] machine label (raw) + a glyph/word.
+  // Status badge: glyph + word (+ raw machine [exit N] label when present).
   let badge: string;
   if (running) {
     badge = t('thread.toolRunning');
   } else if (failed) {
-    badge = `[exit ${exitCode ?? '?'}]`;
+    badge =
+      exitCode != null
+        ? `✗ ${t('thread.toolFailed')} [exit ${exitCode}]`
+        : `✗ ${t('thread.toolFailed')}`;
   } else {
-    // success
-    badge = `[exit ${exitCode ?? 0}] ✓`;
+    badge =
+      exitCode != null
+        ? `✓ ${t('thread.toolDone')} [exit ${exitCode}]`
+        : `✓ ${t('thread.toolDone')}`;
   }
 
   const shellClass = failed
@@ -49,7 +57,9 @@ export default function ToolResultBubble({ message }: ToolResultBubbleProps) {
     ? 'text-term-red'
     : running
       ? 'text-term-dim'
-      : 'text-term-fg';
+      : succeeded
+        ? 'text-term-fg'
+        : 'text-term-fg';
 
   return (
     <div className="flex justify-start">

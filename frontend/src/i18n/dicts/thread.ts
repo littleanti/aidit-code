@@ -10,6 +10,8 @@ export const thread = {
     sandboxReady: '준비됨',
     sandboxError: '오류',
     toolRunning: '실행 중…',
+    toolDone: '실행 완료.',
+    toolFailed: '실행 실패',
     // M5 tool/terminal bubble — kind chip labels (TRD §3 ToolKind)
     'toolKind.SHELL': '셸',
     'toolKind.FILE_WRITE': '파일 쓰기',
@@ -18,7 +20,7 @@ export const thread = {
     'toolKind.PACKAGE': '패키지',
     'toolKind.OTHER': '도구',
     // M4 additions
-    agentLabel: 'pi agent [AGENT]',
+    agentLabel: 'Aidit Agent [AGENT]',
     send: '보내기',
     sending: '보내는 중…',
     interrupt: '중단',
@@ -44,6 +46,8 @@ export const thread = {
     sandboxReady: 'Ready',
     sandboxError: 'Error',
     toolRunning: 'Running…',
+    toolDone: 'Done.',
+    toolFailed: 'Failed',
     // M5 tool/terminal bubble — kind chip labels (TRD §3 ToolKind)
     'toolKind.SHELL': 'shell',
     'toolKind.FILE_WRITE': 'write',
@@ -52,7 +56,7 @@ export const thread = {
     'toolKind.PACKAGE': 'package',
     'toolKind.OTHER': 'tool',
     // M4 additions
-    agentLabel: 'pi agent [AGENT]',
+    agentLabel: 'Aidit Agent [AGENT]',
     send: 'Send',
     sending: 'Sending…',
     interrupt: 'Interrupt',

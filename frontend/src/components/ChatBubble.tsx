@@ -5,7 +5,7 @@
 //   HUMAN (self)  → right; bg-term-cta + border-term-active + text #c8ffe0
 //   HUMAN (peer)  → left;  bg-term-panel + border-term-border + text-term-fg, author label term-dim
 //   AGENT_REPLY   → left;  amber tint + border-term-amber-line + text-term-fg-bright,
-//                          '[AGENT] pi agent' label term-amber; STREAMING → blinking .term-cursor
+//                          '[AGENT] Aidit Agent' label term-amber; STREAMING → blinking .term-cursor
 //   SYSTEM        → centered, text-term-dim-3
 //   TOOL_CALL    → ToolCallBubble ('$ <cmd>' prompt-style, M5)
 //   TOOL_RESULT  → ToolResultBubble (fixed-width terminal pane, M5)
