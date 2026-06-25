@@ -125,9 +125,27 @@ export function getPosts(sort: PostSort, cursor?: string): Promise<PostsPage> {
   return request<PostsPage>(`/posts?${qs.toString()}`);
 }
 
-/** GET /posts/:id — post + meta (sandbox/session/voted/bookmarked). */
-export function getPost(id: string): Promise<Post> {
-  return request<Post>(`/posts/${encodeURIComponent(id)}`);
+/**
+ * GET /posts/:id — the backend returns an ENVELOPE
+ * `{ post, sandbox, voted, bookmarked, activeSession }`, so unwrap it into a
+ * single Post (merging the meta) for callers. Reading the envelope as a Post
+ * directly leaves id/title/body undefined.
+ */
+export async function getPost(id: string): Promise<Post> {
+  const env = await request<{
+    post: Post;
+    sandbox?: Sandbox | null;
+    voted?: boolean;
+    bookmarked?: boolean;
+    activeSession?: AgentSession | null;
+  }>(`/posts/${encodeURIComponent(id)}`);
+  return {
+    ...env.post,
+    sandbox: env.sandbox ?? env.post.sandbox ?? null,
+    session: env.activeSession ?? null,
+    voted: env.voted,
+    bookmarked: env.bookmarked,
+  };
 }
 
 /** POST /posts — create post (title, body) → { post, sandbox }. Requires Bearer. */
@@ -257,13 +275,15 @@ export function sendMessage(
  * GET /posts/:id/files?path= — directory entries (root-relative).
  * Omitting path lists the sandbox root. Path escape ('..'/absolute/symlink) → 400.
  */
-export function getFiles(postId: string, path?: string): Promise<FileEntry[]> {
+export async function getFiles(postId: string, path?: string): Promise<FileEntry[]> {
   const qs = new URLSearchParams();
   if (path) qs.set('path', path);
   const tail = qs.toString();
-  return request<FileEntry[]>(
+  // Backend returns an envelope { path, entries }, not a bare array — unwrap it.
+  const res = await request<{ path: string; entries: FileEntry[] }>(
     `/posts/${encodeURIComponent(postId)}/files${tail ? `?${tail}` : ''}`
   );
+  return res.entries ?? [];
 }
 
 /**

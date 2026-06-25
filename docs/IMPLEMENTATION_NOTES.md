@@ -96,4 +96,16 @@
 - 검증: 프론트 build + 프록시 경유 게스트→글 작성 E2E 재확인.
 - 변경 파일: `frontend/src/api/rest.ts`.
 
+### 2026-06-25 · [fix] · 완료 · Vite 프록시가 SPA 라우트(/posts/:id) 가로채 JSON 노출
+- 증상: 스레드 URL 직접 로드/새로고침 시 React 앱 대신 백엔드 `GET /posts/:id` 원시 JSON이 떠 까만 화면처럼 보임(인앱 네비게이션은 정상). 원인: vite proxy의 `/posts`·`/users` prefix가 SPA 클라이언트 라우트 `/posts/:id`와 충돌 — 문서 네비게이션(Accept: text/html)까지 백엔드로 포워딩.
+- 수정: `frontend/vite.config.ts` 각 프록시 엔트리에 `bypass` 추가 — `Accept: text/html` 문서 네비게이션이면 `/index.html`(SPA) 서빙, fetch/EventSource(API)만 프록시. SSE(text/event-stream)·feed·getPost fetch는 영향 없음.
+- 검증: Chrome MCP로 스레드 URL 직접 로드 → SPA 렌더 확인 + 전체 동작(글 작성→세션→메시지→도구→파일) 테스트.
+- 변경 파일: `frontend/vite.config.ts`.
+
+### 2026-06-25 · [fix] · 완료 · getPost 봉투 언래핑 누락 → 스레드 postId undefined / 본문 빈칸
+- 증상: 스레드에서 메시지 전송이 `POST /posts/undefined/messages`(404)로 감 + 원본 게시글 제목/본문이 빈칸. 원인: `GET /posts/:id`는 봉투 `{post, sandbox, voted, bookmarked, activeSession}`를 반환하는데 `rest.getPost`가 이를 `Post`로 잘못 단언 → Thread가 `post.id`/`post.title`/`post.body`를 envelope 최상위에서 읽어 undefined. (`<Composer postId={post.id}>`가 undefined 전달)
+- 수정: `rest.getPost`가 봉투를 언래핑해 `{...env.post, sandbox, session: env.activeSession, voted, bookmarked}` 병합 Post 반환. 같은 클래스 버그로 `rest.getFiles`도 `{path, entries}` 봉투에서 `.entries` 언래핑(이전엔 객체를 배열로 취급해 파일 트리 빈칸).
+- 검증: Chrome MCP 전체 동작 — 세션 시작→메시지 전송→도구(!write) 실행(실 파일 생성)→TOOL_CALL/TOOL_RESULT 버블→파일 패널에 hello.py 표시.
+- 변경 파일: `frontend/src/api/rest.ts`.
+
 <!-- 새 항목은 이 줄 위에 추가 -->
