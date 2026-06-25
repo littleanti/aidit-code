@@ -49,6 +49,9 @@ export const thread = {
     reasoningEffortLow: '낮음',
     reasoningEffortMedium: '중간',
     reasoningEffortHigh: '높음',
+    // Composer 레이아웃(Aidit 구조) — AI 팝오버 / 전송 버튼 접근성
+    aiMenuAria: 'AI 설정',
+    sendAria: '보내기',
   },
   en: {
     composerPlaceholder: 'Type a message…',
@@ -98,5 +101,8 @@ export const thread = {
     reasoningEffortLow: 'low',
     reasoningEffortMedium: 'medium',
     reasoningEffortHigh: 'high',
+    // Composer layout (Aidit structure) — AI popover / send button a11y
+    aiMenuAria: 'AI settings',
+    sendAria: 'Send',
   },
 } as const;

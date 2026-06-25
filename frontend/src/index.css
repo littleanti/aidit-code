@@ -14,41 +14,56 @@
   }
 
   body {
-    /* App background gradient (bg-term-screen) + global mono stack + faint phosphor glow */
-    background:
-      radial-gradient(125% 80% at 50% -5%, #0c2a18 0%, #04130b 58%, #020a06 100%);
-    background-color: #04130b;
-    color: #36c46f; /* term-fg */
+    /* Aidit CRT screen wash + global mono stack + faint phosphor glow.
+       Background is raw CSS (not bg-term-screen) so it never depends on a
+       backgroundImage-derived utility resolving at build time. */
+    background-color: #04130b; /* term-nav / Aidit screen base */
+    background-image: radial-gradient(
+      120% 80% at 50% 0%,
+      #06190e 0%,
+      #04130b 55%,
+      #020a05 100%
+    );
+    background-attachment: fixed;
+    color: #4fbf72; /* term-fg / Aidit dim */
     font-family:
       'JetBrains Mono', 'D2Coding', ui-monospace, SFMono-Regular, 'SF Mono',
       Menlo, Consolas, 'Liberation Mono', 'Noto Sans KR', monospace;
-    text-shadow: 0 0 1px rgba(54, 196, 111, 0.35);
+    text-shadow: 0 0 1px rgba(125, 255, 160, 0.35);
     -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
     min-height: 100vh;
   }
 
-  /* placeholder color = term-faint, full opacity */
+  /* placeholder color = term-faint (Aidit faint), full opacity */
   ::placeholder {
-    color: #176a3b;
+    color: #2f8a52;
     opacity: 1;
   }
 
-  /* Webkit scrollbar — applies to page and terminal-output containers alike */
+  /* Phosphor scrollbar (Aidit values). */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #1d4a30 #04130b;
+  }
   ::-webkit-scrollbar {
     width: 7px;
     height: 7px;
   }
   ::-webkit-scrollbar-thumb {
-    background: #185c33; /* term-border-dim */
+    background: #1d4a30; /* term-border / Aidit border */
     border-radius: 0;
   }
   ::-webkit-scrollbar-track {
-    background: #04130b; /* term-bg */
+    background: #04130b; /* term-nav / Aidit screen */
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3fa564; /* term-active / Aidit cta */
   }
 
-  /* focus-visible ring = term-active */
+  /* focus-visible ring = term-active (Aidit cta) */
   :focus-visible {
-    outline: 2px solid #2bd46f;
+    outline: 2px solid #3fa564;
     outline-offset: 1px;
   }
 }
@@ -62,7 +77,7 @@
   background: repeating-linear-gradient(
     to bottom,
     rgba(0, 0, 0, 0) 0 2px,
-    rgba(0, 0, 0, 0.16) 2px 3px
+    rgba(0, 0, 0, 0.18) 2px 3px
   );
 }
 
@@ -73,8 +88,8 @@
   z-index: 29;
   pointer-events: none;
   background: radial-gradient(
-    125% 100% at 50% 50%,
-    rgba(0, 0, 0, 0) 52%,
+    120% 100% at 50% 50%,
+    rgba(0, 0, 0, 0) 55%,
     rgba(0, 0, 0, 0.55) 100%
   );
 }
@@ -93,8 +108,8 @@
 .term-cursor {
   display: inline-block;
   width: 8px;
-  background: #5cff9a;
-  box-shadow: 0 0 6px rgba(92, 255, 154, 0.7);
+  background: #7dffa0; /* term-glow / Aidit title */
+  box-shadow: 0 0 6px rgba(125, 255, 160, 0.7);
   animation: termBlink 1s step-end infinite;
 }
 

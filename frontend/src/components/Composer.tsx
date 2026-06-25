@@ -1,11 +1,17 @@
 // src/components/Composer.tsx
-// FE-COMPOSER (M4): textarea + send (bg-term-cta), AI on/off toggle (on = term-amber),
-// optimistic HUMAN insert, and an Interrupt control while an agent turn is STREAMING.
-// All labels via i18n t(). Uses ONLY term-* tokens.
+// FE-COMPOSER (M4): Aidit-structured composer.
+//   Layout (top→bottom): [error] · [image preview row] · [interrupt/steer row while
+//   STREAMING] · [MAIN ROW]. MAIN ROW = attach button (outside) + input wrapper
+//   ('>' prefix + auto-grow textarea + AI chip opening a popover ABOVE) + send button
+//   (outside, term-cta gradient). The AI popover holds the aiMode ON/OFF toggle and
+//   the 3 reasoning_effort options (낮음/중간/높음 · low/medium/high, default medium);
+//   effort options are disabled when aiMode is off.
+//
+// All user-facing labels via i18n t(). Uses ONLY term-* tokens.
 //
 // HARD RULE: no key fields anywhere. Sends only { body, aiMode, clientId, lang,
 // imageUrl?, reasoningEffort? } — never an LLM key.
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useT } from '../i18n/useT';
 import { useLangStore } from '../stores/langStore';
 import { useAuthStore } from '../stores/authStore';
@@ -29,6 +35,26 @@ const REASONING_EFFORTS: ReasoningEffort[] = ['low', 'medium', 'high'];
 
 interface ComposerProps {
   postId: string;
+}
+
+/** Robot "AI" glyph shared by the trailing chip + the popover toggle. */
+function RobotIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      <rect x="5" y="8" width="14" height="11" rx="1" />
+      <path d="M12 8V4M9 4h6" />
+      <circle cx="9" cy="13" r="1" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="13" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
 }
 
 export default function Composer({ postId }: ComposerProps) {
@@ -60,6 +86,38 @@ export default function Composer({ postId }: ComposerProps) {
 
   // Feature B: per-message reasoning_effort. 기본 medium. aiMode 켜졌을 때만 활성.
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('medium');
+
+  // Aidit layout: AI options live in a popover ABOVE the trailing AI chip.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Auto-grow the textarea up to its max (max-h-28 ≈ 7rem) — Aidit affordance.
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [body]);
+
+  // Close the AI popover on outside click or Escape (Aidit dismiss behavior).
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onPointerDown(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMenuOpen(false);
+    }
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menuOpen]);
 
   function clearImage() {
     // objectURL 메모리 해제(누수 방지) 후 상태/인풋 초기화.
@@ -183,134 +241,232 @@ export default function Composer({ postId }: ComposerProps) {
     }
   }
 
+  const canSend = (body.trim().length > 0 || imageFile != null) && !sending;
+
   return (
-    <div className="border-t border-term-line bg-term-nav p-2">
+    <div className="shrink-0 border-t border-term-border bg-term-bg font-mono">
       {error && (
-        <p className="mb-2 font-mono text-xs text-term-red" role="alert">
+        <p className="mx-3 mb-1 mt-2 font-mono text-xs text-term-red" role="alert">
           {error}
         </p>
       )}
 
-      {/* 첨부 이미지 미리보기 — 작은 썸네일 + 제거 버튼(term-*) */}
+      {/* 첨부 이미지 미리보기 — h-16 w-16 썸네일 + × 제거(절대 위치) */}
       {imagePreview && (
-        <div className="mb-2 inline-flex items-start gap-2">
-          <img
-            src={imagePreview}
-            alt={t('thread.attachPreviewAlt')}
-            className="rounded-[3px] border border-term-border"
-            style={{ maxHeight: '4rem', maxWidth: '8rem' }}
-          />
-          <button
-            type="button"
-            onClick={clearImage}
-            aria-label={t('thread.removeImageAria')}
-            className="min-h-[44px] min-w-[44px] rounded-[3px] border border-term-border-dim px-2 font-mono text-sm text-term-dim"
-          >
-            ×
-          </button>
-        </div>
-      )}
-
-      {/* reasoning_effort 선택기 — aiMode 켜졌을 때만 활성(기본 medium) */}
-      {aiMode && (
-        <div
-          role="group"
-          aria-label={t('thread.reasoningEffortAria')}
-          className="mb-2 inline-flex overflow-hidden rounded-[3px] border border-term-amber-line"
-        >
-          {REASONING_EFFORTS.map((eff) => {
-            const labelKey =
-              eff === 'low'
-                ? 'thread.reasoningEffortLow'
-                : eff === 'medium'
-                  ? 'thread.reasoningEffortMedium'
-                  : 'thread.reasoningEffortHigh';
-            const active = reasoningEffort === eff;
-            return (
-              <button
-                key={eff}
-                type="button"
-                aria-pressed={active}
-                onClick={() => setReasoningEffort(eff)}
-                className={`min-h-[44px] px-3 font-mono text-xs tracking-wider ${
-                  active ? 'bg-term-amber-bg text-term-amber' : 'text-term-dim'
-                }`}
+        <div className="flex items-center gap-2 px-3 pt-2">
+          <div className="relative inline-block">
+            <img
+              src={imagePreview}
+              alt={t('thread.attachPreviewAlt')}
+              className="h-16 w-16 rounded-[2px] border border-term-border object-cover"
+            />
+            <button
+              type="button"
+              onClick={clearImage}
+              aria-label={t('thread.removeImageAria')}
+              className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-[2px] border border-term-border bg-term-bg text-xs font-bold text-term-fg-bright active:scale-95"
+            >
+              <svg
+                aria-hidden
+                viewBox="0 0 24 24"
+                className="h-3 w-3"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="square"
               >
-                {t(labelKey)}
-              </button>
-            );
-          })}
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Interrupt / steer row — only while an agent turn is streaming */}
+      {/* Interrupt / steer row — only while an agent turn is streaming (기존 동작 보존) */}
       {agentStreaming && (
-        <div className="mb-2 flex items-center gap-2">
+        <div className="flex items-center gap-2 px-3 pt-2">
           <input
             type="text"
             value={steer}
             onChange={(e) => setSteer(e.target.value)}
             placeholder={t('thread.steerPlaceholder')}
-            className="min-h-[44px] flex-1 rounded-[3px] border border-term-amber-line bg-term-sunken px-3 font-mono text-sm text-term-fg-bright outline-none"
+            className="min-h-[44px] flex-1 rounded-[2px] border border-term-amber-line bg-term-sunken px-3 font-mono text-sm text-term-fg-bright outline-none"
           />
           <button
             type="button"
             onClick={handleInterrupt}
-            className="min-h-[44px] rounded-[3px] border border-term-amber-line px-3 font-mono text-sm text-term-amber"
+            className="min-h-[44px] rounded-[2px] border border-term-amber-line px-3 font-mono text-sm text-term-amber"
           >
             ■ {t('thread.interrupt')}
           </button>
         </div>
       )}
 
-      <div className="flex items-end gap-2">
-        {/* AI on/off toggle — on = term-amber per wireframe */}
-        <button
-          type="button"
-          aria-pressed={aiMode}
-          onClick={() => setAiMode((v) => !v)}
-          className={`min-h-[44px] shrink-0 rounded-[3px] border px-3 font-mono text-xs tracking-wider ${
-            aiMode
-              ? 'border-term-amber-line text-term-amber'
-              : 'border-term-border-dim text-term-dim'
-          }`}
-        >
-          {aiMode ? t('thread.aiToggleOn') : t('thread.aiToggleOff')}
-        </button>
-
-        {/* 이미지 첨부 — 숨김 file input + 버튼(≥44px, i18n aria) */}
+      {/* MAIN ROW */}
+      <div className="flex items-end gap-2 px-3 py-2">
+        {/* (a) attach button OUTSIDE the input — opens the native image picker */}
         <input
           ref={fileInputRef}
           type="file"
           accept="image/png,image/jpeg,image/webp,image/gif"
-          onChange={onPickImage}
           className="hidden"
+          onChange={onPickImage}
         />
         <button
           type="button"
-          onClick={() => fileInputRef.current?.click()}
           aria-label={t('thread.attachImageAria')}
-          className="min-h-[44px] min-w-[44px] shrink-0 rounded-[3px] border border-term-border px-3 font-mono text-sm text-term-dim"
+          onClick={() => fileInputRef.current?.click()}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[2px] border border-term-border text-term-fg-bright hover:bg-term-border active:scale-95"
         >
-          🖼
+          <svg
+            aria-hidden
+            viewBox="0 0 24 24"
+            className="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="square"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
         </button>
 
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          onKeyDown={onKeyDown}
-          rows={1}
-          placeholder={t('thread.composerPlaceholder')}
-          className="min-h-[44px] max-h-40 flex-1 resize-y rounded-[3px] border border-term-border bg-term-sunken px-3 py-2 font-mono text-sm text-term-fg outline-none"
-        />
+        {/* (b) input wrapper — '>' prefix + auto-grow textarea + AI chip (popover ABOVE) */}
+        <div
+          className={`flex max-h-32 min-h-[44px] flex-1 items-end gap-2 rounded-[2px] border bg-term-bg px-3 py-1 ${
+            aiMode
+              ? 'border-term-amber focus-within:border-term-amber'
+              : 'border-term-border focus-within:border-term-active'
+          }`}
+        >
+          {/* terminal prompt prefix (decorative) */}
+          <span aria-hidden className="select-none self-center text-sm text-term-faint">
+            &gt;
+          </span>
+          <textarea
+            ref={taRef}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            onKeyDown={onKeyDown}
+            rows={1}
+            placeholder={t('thread.composerPlaceholder')}
+            aria-label={t('thread.composerPlaceholder')}
+            className="max-h-28 flex-1 resize-none bg-transparent py-1.5 font-mono text-sm leading-relaxed text-term-fg-bright outline-none placeholder:text-term-faint"
+          />
+          {/* trailing AI chip — opens the popover (aiMode toggle + reasoning_effort). */}
+          <div ref={menuRef} className="relative shrink-0 self-center">
+            <button
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={menuOpen}
+              aria-label={t('thread.aiMenuAria')}
+              onClick={() => setMenuOpen((v) => !v)}
+              className={`flex h-9 items-center gap-1 rounded-[2px] border px-2 text-xs font-bold transition ${
+                aiMode
+                  ? 'border-term-amber text-term-amber'
+                  : 'border-term-border text-term-dim hover:text-term-fg-bright'
+              }`}
+            >
+              <RobotIcon />
+              <span>AI</span>
+              <svg
+                aria-hidden
+                viewBox="0 0 24 24"
+                className="h-2.5 w-2.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="square"
+              >
+                <path d={menuOpen ? 'M6 9l6 6 6-6' : 'M6 15l6-6 6 6'} />
+              </svg>
+            </button>
+            {menuOpen && (
+              <div
+                role="dialog"
+                aria-label={t('thread.aiMenuAria')}
+                className={`absolute bottom-full right-0 z-30 mb-2 flex w-[19rem] max-w-[calc(100vw-2.5rem)] flex-col gap-2 rounded-[2px] border bg-term-panel p-2 ${
+                  aiMode ? 'border-term-amber' : 'border-term-border'
+                }`}
+              >
+                {/* one row: [AI] toggle | divider | reasoning_effort segments */}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={aiMode}
+                    aria-label={aiMode ? t('thread.aiToggleOn') : t('thread.aiToggleOff')}
+                    onClick={() => setAiMode((v) => !v)}
+                    className={`flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-[2px] border px-2.5 text-xs font-bold transition ${
+                      aiMode
+                        ? 'border-term-amber text-term-amber'
+                        : 'border-term-border text-term-dim hover:text-term-fg-bright'
+                    }`}
+                  >
+                    <RobotIcon />
+                    <span>AI</span>
+                  </button>
+                  <div
+                    role="radiogroup"
+                    aria-label={t('thread.reasoningEffortAria')}
+                    className={`flex flex-1 items-center gap-1.5 border-l border-term-border pl-2 ${
+                      aiMode ? '' : 'opacity-40'
+                    }`}
+                  >
+                    {REASONING_EFFORTS.map((eff) => {
+                      const labelKey =
+                        eff === 'low'
+                          ? 'thread.reasoningEffortLow'
+                          : eff === 'medium'
+                            ? 'thread.reasoningEffortMedium'
+                            : 'thread.reasoningEffortHigh';
+                      const label = t(labelKey);
+                      const active = aiMode && reasoningEffort === eff;
+                      return (
+                        <button
+                          key={eff}
+                          type="button"
+                          role="radio"
+                          aria-checked={active}
+                          disabled={!aiMode}
+                          onClick={() => setReasoningEffort(eff)}
+                          className={`flex min-h-[44px] flex-1 select-none items-center justify-center rounded-[2px] border px-1 text-xs font-bold transition ${
+                            active
+                              ? 'border-term-amber text-term-amber'
+                              : 'border-term-border text-term-dim'
+                          } ${aiMode ? 'hover:text-term-fg-bright' : 'cursor-not-allowed'}`}
+                        >
+                          {active ? `[${label}]` : label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
 
+        {/* (c) send button OUTSIDE — term-cta gradient, up-arrow icon */}
         <button
           type="button"
-          onClick={handleSend}
-          disabled={sending || (!body.trim() && !imageFile)}
-          className="min-h-[44px] shrink-0 rounded-[3px] border border-term-active bg-term-cta px-4 font-mono text-sm text-term-fg-bright disabled:opacity-50"
+          onClick={() => void handleSend()}
+          disabled={!canSend}
+          aria-label={t('thread.sendAria')}
+          title={sending ? t('thread.sending') : t('thread.send')}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[2px] border border-term-active bg-term-cta text-lg font-bold text-term-fg-bright transition active:scale-95 disabled:opacity-40"
         >
-          {sending ? t('thread.sending') : t('thread.send')}
+          <svg
+            aria-hidden
+            viewBox="0 0 24 24"
+            className="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="square"
+          >
+            <path d="M12 19V5M5 12l7-7 7 7" />
+          </svg>
         </button>
       </div>
     </div>

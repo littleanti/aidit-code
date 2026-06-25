@@ -1,45 +1,46 @@
 // src/layout/AppShell.tsx
-// App frame: CRT overlays + header (wordmark, LangToggle, Login/⚙) + bottom TabBar.
-// NO GEMINI badge. Mobile-first; touch targets >=44px. Only term-* tokens.
+// App frame: CRT overlays + header (Logo + LLM status + LangToggle + account)
+// + bottom TabBar (inline-SVG icons). Mobile-first; touch targets >=44px.
+// NO settings gear. NO LLM key ever surfaced. Only term-* tokens.
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useT } from '../i18n/useT';
 import { useAuthStore } from '../stores/authStore';
 import { useUiStore } from '../stores/uiStore';
+import Logo from '../components/Logo';
 import LangToggle from '../components/LangToggle';
+import LlmStatusBadge from '../components/LlmStatusBadge';
 import OfflineBanner from '../components/states/OfflineBanner';
 
 function Header() {
   const t = useT();
   const token = useAuthStore((s) => s.token);
+  const username = useAuthStore((s) => s.username);
   const openLogin = useUiStore((s) => s.openLogin);
 
   return (
     <header className="sticky top-0 z-20 border-b border-term-line bg-term-nav/95 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-2xl items-center justify-between px-4">
-        <Link
-          to="/"
-          className="font-mono text-sm font-bold tracking-[0.2em] text-term-glow"
-        >
-          {t('common.appName')}
+        <Link to="/" aria-label={t('common.appName')}>
+          <Logo size="sm" />
         </Link>
 
         <div className="flex items-center gap-3">
+          <LlmStatusBadge />
           <LangToggle variant="header" />
           {token ? (
             <Link
-              to="/me/settings"
-              aria-label={t('common.settings')}
-              className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center font-mono text-term-dim hover:text-term-fg-bright"
+              to="/me"
+              className="inline-flex min-h-[44px] items-center px-1 font-mono text-sm text-term-dim hover:text-term-fg-bright"
             >
-              ⚙
+              {`[ ${username ?? ''} ]`}
             </Link>
           ) : (
             <button
               type="button"
               onClick={openLogin}
-              className="inline-flex min-h-[44px] items-center px-2 font-mono text-sm text-term-amber"
+              className="inline-flex min-h-[44px] items-center px-1 font-mono text-sm text-term-amber"
             >
-              {t('common.login')}
+              {`[ ${t('common.login')} ]`}
             </button>
           )}
         </div>
@@ -48,21 +49,85 @@ function Header() {
   );
 }
 
+// ── Tab icons — inline SVG ported from parent Aidit (22x22, stroke=currentColor,
+// strokeWidth 1.6). Color follows the active/inactive text token via currentColor.
+function IconHome() {
+  return (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M3 11 12 3l9 8" />
+      <path d="M5 9.5V20h14V9.5" />
+      <path d="M10 20v-5h4v5" />
+    </svg>
+  );
+}
+
+function IconWrite() {
+  return (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M4 20l1-4L16 5l3 3L8 19z" />
+      <path d="M14 7l3 3" />
+    </svg>
+  );
+}
+
+function IconProfile() {
+  return (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="8" r="3.4" />
+      <path d="M5.5 20c0-3.6 2.9-5.5 6.5-5.5s6.5 1.9 6.5 5.5" />
+    </svg>
+  );
+}
+
 function TabBar() {
   const t = useT();
   const { pathname } = useLocation();
 
   const tabs = [
-    { to: '/', glyph: '🏠', label: t('common.tabHome'), match: (p: string) => p === '/' },
+    {
+      to: '/',
+      Icon: IconHome,
+      label: t('common.tabHome'),
+      match: (p: string) => p === '/',
+    },
     {
       to: '/create',
-      glyph: '＋',
+      Icon: IconWrite,
       label: t('common.tabCreate'),
       match: (p: string) => p.startsWith('/create'),
     },
     {
       to: '/me',
-      glyph: '👤',
+      Icon: IconProfile,
       label: t('common.tabProfile'),
       match: (p: string) => p.startsWith('/me'),
     },
@@ -73,6 +138,7 @@ function TabBar() {
       <div className="mx-auto flex max-w-2xl items-stretch justify-around">
         {tabs.map((tab) => {
           const active = tab.match(pathname);
+          const Icon = tab.Icon;
           return (
             <NavLink
               key={tab.to}
@@ -83,8 +149,11 @@ function TabBar() {
                 active ? 'text-term-amber' : 'text-term-dim hover:text-term-fg-bright',
               ].join(' ')}
             >
-              <span className="text-base leading-none" aria-hidden="true">
-                {tab.glyph}
+              <span
+                className="flex h-6 items-center justify-center leading-none"
+                aria-hidden="true"
+              >
+                <Icon />
               </span>
               <span>{tab.label}</span>
             </NavLink>

@@ -11,6 +11,61 @@
 
 ## Changelog
 
+### 2026-06-26 · [feat] · 완료 · Composer 레이아웃을 Aidit 구조로 재구성(기능 전부 보존) — 프런트엔드
+- **요청(사용자)**: `frontend/src/components/Composer.tsx` 의 **레이아웃/구조만** 부모 Aidit 와 동일하게 재구성. 기존 Audit-Code 기능은 전부 보존: 이미지 업로드+미리보기+이미지 단독 전송, `reasoning_effort`(low/medium/high · 낮음/중간/높음, 기본 medium), aiMode 토글, 스트리밍 중 interrupt/steer, 낙관적 삽입, i18n.
+- **변경 내용(레이아웃)**:
+  1. **루트**: `shrink-0 border-t border-term-border bg-term-bg font-mono`. 행 순서(위→아래): [error/toast] → [이미지 미리보기 행(h-16 w-16 썸네일 + × 제거)] → [스트리밍 중 interrupt/steer 행(기존 유지)] → [메인 행].
+  2. **메인 행**(`flex items-end gap-2 px-3 py-2`): (a) **첨부 버튼**을 입력 박스 **바깥**(h-11 w-11, 보더, + 아이콘, 숨김 file input 트리거); (b) **입력 래퍼**(`flex items-end gap-2 flex-1 min-h-[44px] max-h-32 border rounded bg`, aiMode 시 `border-term-amber` else `border-term-border`/focus-within) 안에 `>` 프리픽스(text-term-faint) + **오토그로우 textarea**(rows=1, resize-none, bg-transparent, Enter=전송/Shift+Enter=개행) + **AI 칩 버튼**(h-9, 로봇 글리프 + AI + 셰브론, aiMode 시 amber); (c) **전송 버튼**을 바깥(h-11 w-11, border-term-active, `bg-term-cta` 그라데이션, 위 화살표 아이콘, 텍스트·이미지 모두 없으면 disabled).
+  3. **AI 팝오버**(기존 인라인 reasoning_effort 행을 대체): 칩 위(`absolute bottom-full`)에 앵커되는 컴팩트 패널 = aiMode ON/OFF 토글 + 3단계 effort 라디오(낮음/중간/높음, 기본 medium). aiMode OFF 시 effort 비활성. 바깥 클릭/Escape 로 닫힘. 선택한 effort 는 기존과 동일하게 `sendMessage({ reasoningEffort })` 로 흐름. 이미지도 기존과 동일하게 먼저 업로드 후 imageUrl 동봉 전송.
+- **토큰 주의**: Aidit 의 `shadow-glow-*`/`term-card`/`term-info` 토큰은 Audit-Code 에 없음 → 기존 토큰으로 매핑(card→`term-panel`, 그라데이션→기존 `bg-term-cta`, glow 그림자 생략). 신규 토큰 도입 없음.
+- **i18n**: `thread.aiMenuAria`/`thread.sendAria` 키 추가(ko/en). 나머지는 기존 키 재사용(composerPlaceholder, send, attachImageAria, removeImageAria, attachPreviewAlt, aiToggleOn/Off, reasoningEffort*). 하드코딩 없음.
+- **보안(TRD §8)**: 컴포저는 LLM 키를 다루지 않음(전송 페이로드 불변: { body, aiMode, clientId, lang, imageUrl?, reasoningEffort? }).
+- **불변 보장**: Thread 의 StrictMode 안전성·진입 시 자동 첨부 동작에는 영향 없음(Composer props 시그니처 `{ postId }` 유지).
+- **변경 파일**: `frontend/src/components/Composer.tsx`(재구성), `frontend/src/i18n/dicts/thread.ts`(키 2개 추가).
+- **검증(통과)**: `cd frontend && npx tsc --noEmit` → 에러 0(TSC_OK). `npx vite build` → `✓ 90 modules transformed`, `✓ built in 2.02s` (exit 0). 전송 페이로드·낙관 삽입·interrupt/steer·이미지 업로드+미리보기+이미지 단독 전송·reasoning_effort·i18n 동작 불변. Thread props 시그니처 `{ postId }` 유지(자동 첨부/StrictMode 안전성 불변).
+
+### 2026-06-26 · [feat] · 완료 · 앱 셸: 헤더(로고+상태+언어+계정) + 바텀 탭바(인라인 SVG) + LLM 연결 상태 배지 — 프런트엔드
+- **요청(사용자)**: 부모 Aidit 의 앱 셸을 Audit-Code 에 이식.
+  1. **헤더**(`frontend/src/layout/AppShell.tsx`): 좌측 = `<Logo size="sm"/>`(삼각형 마크 + `AIDIT-CODE` 워드마크), `/` 로 링크. 우측(Aidit 순서) = LLM 연결 상태 배지 → `LangToggle(KO|EN)` → 로그인 시 `[ username ]`(/me 링크, text-term-dim hover bright) / 비로그인 시 `[ login ]` 버튼(openLogin, text-term-amber). **기어/⚙ 설정 아이콘 완전 제거**. 헤더 bg = `term-nav`(Aidit screen).
+  2. **LLM 상태**: `rest.getRuntime()` 는 이미 존재(GET /runtime → {model, baseURLHost}). 신규 `frontend/src/components/LlmStatusBadge.tsx`(Aidit GeminiStatusBadge 미러): `●` connected(model 해석 성공 → text-term-fg-bright + glow) / `○` offline(fetch 에러 → text-term-red animate-pulse) / `○` unknown(로딩 중 → text-term-faint). mount + window focus 시 fetch. 라벨 `LLM`(작은 대문자), title = `model@baseURLHost`. **키는 절대 노출 안 함**(응답에 키 없음).
+  3. **바텀 탭바**(AppShell.tsx 내): emoji 글리프(🏠/＋/👤) → Aidit 인라인 SVG(22x22, stroke=currentColor, strokeWidth 1.6) Home/Write/Profile 로 교체. 기존 3 라우트(/, /create, /me) 유지. active text-term-amber, inactive text-term-dim, bg term-nav.
+- **i18n**: `common.llmConnected` / `common.llmOffline` / `common.llmUnknown`(aria/title) 키 추가(ko/en). 사용자 노출 문자열 하드코딩 없음.
+- **보안(TRD §8)**: apiKey 절대 노출 금지. 상태 배지는 model 명 + baseURLHost 만 title 로 표기.
+- **변경 파일**: `frontend/src/layout/AppShell.tsx`(수정), `frontend/src/components/LlmStatusBadge.tsx`(신규), `frontend/src/i18n/dicts/common.ts`(키 추가).
+- **검증(통과)**: `cd frontend && npx tsc --noEmit` → 에러 0. `npx vite build` → `✓ 90 modules transformed`, `✓ built in 1.88s` (exit 0). 기존 라우트(/, /create, /me)·동작 불변.
+
+### 2026-06-26 · [feat] · 완료 · Aidit 팔레트 채택(term-* 토큰 재평가) + favicon 에셋 + Logo 컴포넌트 포팅 — 프런트엔드
+- **요청(사용자)**: 부모 Aidit 의 비주얼을 Audit-Code 에 이식. (1) `term-*` 토큰 **이름은 유지**하고 값만 Aidit 팔레트로 역할(role) 기준 재평가. index.css 의 배경 그라데이션·CRT 스캔라인/비네트/placeholder/스크롤바를 Aidit 값으로 교체. (2) `frontend/public/` 생성 후 Aidit favicon 에셋 복사 + index.html `<link rel=icon>` 추가(title/theme-color 유지). (3) Aidit Logo 컴포넌트(인라인 SVG 삼각형 'A', stroke #5cff9a, glow)를 `frontend/src/components/Logo.tsx` 로 포팅. 헤더 와이어링은 다음 단계.
+- **(1) tailwind.config.js 역할→값 매핑(이름 유지, 값만 Aidit 로)**:
+  - `term-bg` (앱 backdrop): `#04130b` → `#020a05` (Aidit bg)
+  - `term-panel` (카드/패널): `#08220f` → `#04130b` (Aidit card)
+  - `term-sunken` (입력/sunken): `#04130b` → `#03100a` (Aidit input)
+  - `term-nav` (헤더/탭바 bg): `#061a0d` → `#04130b` (Aidit screen)
+  - `term-modal` (모달): `#06160c` → `#06190e` (Aidit info)
+  - `term-chart` (차트): `#06140a` → `#06190e` (Aidit info, 최근접)
+  - `term-line` (디바이더): `#114e2b` → `#1d4a30` (Aidit border)
+  - `term-border` (기본 보더): `#1c7a42` → `#1d4a30` (Aidit border)
+  - `term-border-dim` (dim 보더): `#185c33` → `#1d4a30` (Aidit 단일 border)
+  - `term-active` (active/focus): `#2bd46f` → `#3fa564` (Aidit cta)
+  - `term-fg-bright` (최고 명도 텍스트): `#9affc4` → `#aaffc0` (Aidit bright)
+  - `term-glow` (글로우/헤딩): `#5cff9a` → `#7dffa0` (Aidit title)
+  - `term-fg` (본문 텍스트): `#36c46f` → `#4fbf72` (Aidit dim)
+  - `term-dim` (2차 텍스트): `#1f9d56` → `#4fbf72` (Aidit dim)
+  - `term-dim-2`: `#1c8f4d` → `#2f8a52` (Aidit faint)
+  - `term-dim-3`: `#157a3f` → `#2f8a52` (Aidit faint)
+  - `term-faint` (placeholder/hint): `#176a3b` → `#2f8a52` (Aidit faint)
+  - `term-amber`: `#ffcf4a` → `#ffcf6b` (Aidit amber)
+  - `term-red`: `#ff7a7a` → `#ff6b6b` (Aidit danger)
+  - 유지: `term-amber-line` `#6e5a1e`, `term-amber-bg`, `term-red-line`, `term-red-bg` (Aidit 에 직접 대응 없음 — 역할 보존).
+  - `backgroundImage.term-screen` 그라데이션: `radial(125% 80% at 50% -5%, #0c2a18 0%, #04130b 58%, #020a06 100%)` → Aidit `radial(120% 80% at 50% 0%, #06190e 0%, #04130b 55%, #020a05 100%)`. `term-cta` 그라데이션은 양쪽 동일(`linear 180deg #155230→#0c3a20`) — 불변.
+- **(1) index.css**: body 배경을 Aidit 그라데이션으로 교체 + `background-attachment: fixed`. body text color `#36c46f`→`#4fbf72`(term-fg/dim). text-shadow phosphor glow rgba(125,255,160,..) 계열로 정렬. placeholder `#176a3b`→`#2f8a52`. 스크롤바 thumb `#185c33`→`#1d4a30`, track `#04130b` 유지, hover `#3fa564` 추가, `scrollbar-color: #1d4a30 #04130b`. 스캔라인 alpha 0.16→0.18(~3px). 비네트 55% falloff. focus-visible ring `#2bd46f`→`#3fa564`. term-cursor `#5cff9a`→glow 정렬.
+- **(2) favicon**: `frontend/public/` 신규 생성 후 Aidit `frontend/public/` 에서 favicon.svg, favicon-32.png, favicon-16.png, apple-touch-icon.png, icon-192.png, icon-512.png, maskable-512.png 복사. index.html `<head>` 에 `<link rel=icon svg>` + png 32/16 + apple-touch-icon 추가. `<title>AIDIT-CODE</title>` 와 `theme-color #04130b` 유지.
+- **(3) Logo.tsx**: Aidit Logo 포팅(`frontend/src/components/Logo.tsx` 신규). 인라인 SVG 삼각형 'A' 마크(stroke #5cff9a, drop-shadow glow), `size?: 'sm'|'lg'`, `withWordmark` prop. 워드마크 텍스트는 `AIDIT-CODE` 로, `text-term-fg-bright`(신 팔레트) 사용. 헤더는 이 단계에서 미변경.
+- **보안(TRD §8)**: 순수 정적 테마/에셋 변경 — LLM apiKey 미노출. `GET /runtime`{model,baseURLHost} 계약 불변.
+- **i18n**: Logo 워드마크는 고정 브랜드명(AIDIT-CODE)으로 사용자 가변 문자열 아님 → t() 비대상(브랜드 토큰). 기존 i18n 영향 없음.
+- **검증(③)**: frontend `npx tsc --noEmit` **클린(exit 0)**, `npx vite build` **PASS(88 모듈 transformed, built in 1.94s, exit 0)**. dist 에 favicon.svg/favicon-16·32.png/apple-touch-icon.png/icon-192·512.png/maskable-512.png 7개 전부 출력 확인, dist/index.html 에 icon link 4개(svg+png16/32+apple-touch) + `<title>AIDIT-CODE</title>` 유지 확인. 기존 라우트/동작 무변경(순수 테마/에셋/신규 컴포넌트).
+- 변경 파일: `frontend/tailwind.config.js`, `frontend/src/index.css`, `frontend/index.html`, `frontend/public/`(신규 7 에셋: favicon.svg, favicon-16.png, favicon-32.png, apple-touch-icon.png, icon-192.png, icon-512.png, maskable-512.png), `frontend/src/components/Logo.tsx`(신규), `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [fix] · 완료 · reasoning_effort 를 추론 모델일 때만 전송 — gpt-4o-mini 회귀 방지
 - **증상(잠재 회귀)**: 프런트가 aiMode 에서 항상 기본값 `medium` 을 보내므로, 워커가 매 AI 메시지에 `reasoning_effort` 를 실어 보냄. 현재 설정 모델은 `openai/gpt-4o-mini`(GitHub Models)인데, 이 필드는 reasoning 모델 전용이라 비-reasoning 모델에서 400(Unknown parameter) 위험 → **잘 동작하던 채팅을 깨뜨릴 수 있음**. 기존 가드(`값 있을 때만 포함`)는 프런트가 항상 값을 보내므로 무력.
 - **수정**: `piWorkerBody.mjs` 에 `reasoningEffortApplies(model, effort, envOverride)` 추가 — 유효 effort + 게이트 통과일 때만 적용. 게이트(`REASONING_EFFORT` env, 기본 `auto`): `off`→미전송, `on`→항상 전송, `auto`→모델명이 reasoning 패턴(o1~o9 계열, gpt-5 계열; `openai/` 프리픽스 허용)일 때만. `piWorker.mjs` 의 `runLlmAgent` 가 이 함수로 effective effort 를 계산해 전달 → gpt-4o-mini 는 `auto` 에서 미전송(기존 동작 보존), 추론 모델·`on` 에서만 전송. `buildCompletionBody` 는 불변(기존 단위테스트 유효).
