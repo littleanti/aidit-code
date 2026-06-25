@@ -289,10 +289,15 @@ export default function Thread() {
             ⟳ {t('thread.reconnecting')}
           </span>
         )}
-        {sessionActive && (
-          <span className="ml-auto font-mono text-[10px] tracking-wider text-term-amber">
-            ● {t('thread.sessionRunning')}
-          </span>
+        {!sessionActive && (
+          <button
+            type="button"
+            onClick={handleStartSession}
+            disabled={startingSession}
+            className="ml-auto inline-flex min-h-[28px] items-center rounded-[2px] border border-term-amber-line px-2 font-mono text-[11px] tracking-wider text-term-amber disabled:opacity-50"
+          >
+            {startingSession ? t('thread.startingSession') : t('thread.startSession')}
+          </button>
         )}
       </div>
 
@@ -407,20 +412,6 @@ export default function Thread() {
           {/* ── Chat tab ── */}
           {tab === 'chat' && (
             <>
-              {/* Start-session affordance when no active session */}
-              {!sessionActive && (
-                <div className="mb-3 flex justify-center">
-                  <button
-                    type="button"
-                    onClick={handleStartSession}
-                    disabled={startingSession}
-                    className="min-h-[44px] rounded-[3px] border border-term-amber-line px-4 font-mono text-sm text-term-amber disabled:opacity-50"
-                  >
-                    {startingSession ? t('thread.startingSession') : t('thread.startSession')}
-                  </button>
-                </div>
-              )}
-
               {/* Bubble list */}
               <div className="flex flex-1 flex-col gap-2 pb-2">
                 {messages.length === 0 ? (
@@ -484,6 +475,14 @@ export default function Thread() {
                     </svg>
                   </button>
                 </div>
+                {!sessionActive && !statusErrorKey && (
+                  <div
+                    role="alert"
+                    className="border-t border-term-red-line bg-term-red-bg px-3 py-1.5 font-mono text-[11px] leading-relaxed text-term-red"
+                  >
+                    {t('thread.sessionDisconnected')}
+                  </div>
+                )}
                 <Composer postId={post.id} />
               </div>
             </>

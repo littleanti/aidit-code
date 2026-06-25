@@ -11,6 +11,29 @@
 
 ## Changelog
 
+### 2026-06-26 · [feat] · 완료 · 진입 시 자동 연결(attach) 후 Thread 세션 UI 정리 — 중복 배지 제거·시작 컨트롤 우상단 이동·컴포저 위 빨간 경고
+- **요청(사용자)**: 게시글 진입이 세션을 자동 연결/attach 하게 된 지금, Thread 세션 UI 를 정리한다.
+- **배경/불변식**: `sessionActive = !!activeSession && status !== 'STOPPED' && status !== 'ERROR'`(~244). `!sessionActive` 는 **세션 끊김**뿐 아니라 **세션이 아직 시작되지 않은 새 글**(lazy auto-attach 는 *기존* 세션만 attach; 첫 메시지로 spawn)도 포함한다 → 두 상태 모두 동일한 "시작 칩 + 경고" 가 노출되는 것이 **올바른 어포던스**(시작/재연결 유도). 의도된 동작으로 허용한다.
+- **구현 단계(순서대로)**:
+  1. **상단 우측 '● 세션 실행 중' span 삭제** — Thread.tsx ~292-296 의 `{sessionActive && <span className="ml-auto … text-term-amber">● {t('thread.sessionRunning')}</span>}` 블록 제거. 상단 좌측 `<StatusBadge>`(● RUNNING)가 실행 상태를 이미 전달하므로 중복.
+  2. **챗 본문 중앙 '세션 시작' 버튼 블록 삭제** — Thread.tsx ~411-421 의 `{!sessionActive && <div className="mb-3 flex justify-center"><button …>{startingSession ? t('thread.startingSession') : t('thread.startSession')}</button></div>}` 전체 제거.
+  3. **'세션 시작' 컨트롤을 상단 STATUS ROW 우측으로 이동** — 1)에서 삭제한 '● 세션 실행 중' 배지가 차지하던 **바로 그 슬롯**(상단 행 내부, `ml-auto` 우측 정렬)에 배치한다. **`!sessionActive` 일 때만** 렌더(연결됨 → 아무것도 없음 / 끊김·미시작 → 우상단 소형 칩).
+     - **크기/모양(컴팩트 칩, 삭제된 amber 배지와 동일 계열)**: `<button type="button">`, `className="ml-auto inline-flex min-h-[28px] items-center rounded-[2px] border border-term-amber-line px-2 font-mono text-[11px] tracking-wider text-term-amber disabled:opacity-50"`. (큰 중앙 버튼의 `min-h-[44px] px-4 text-sm` 가 아니라 배지 계열 `text-[10px]/[11px]`·`px-2`·min-height ~28-32px 로 맞춘다.)
+     - **동작/라벨 재사용**: `onClick={handleStartSession}`, `disabled={startingSession}`, 라벨 `{startingSession ? t('thread.startingSession') : t('thread.startSession')}`. 새 핸들러/상태를 만들지 않고 기존 `handleStartSession`/`startingSession`/`thread.startSession`/`thread.startingSession` 그대로 사용.
+     - **슬롯 주의**: 상단 행은 `back '‹' Link → <StatusBadge> → (reconnecting indicator) → [여기 ml-auto 우측 칩]` 순. `ml-auto` 로 우측 끝에 붙인다.
+  4. **컴포저 바로 위 빨간 경고 배너 추가** — sticky 컴포저 래퍼(`<div className="sticky bottom-[var(--tabbar-h)] z-10 -mx-4">`) 안, `<Composer>` **직전 블록**으로 삽입(점프 칩 다음, Composer 위). 컴포저 상단 모서리에 붙는 풀블리드 배너.
+     - **조건**: `!sessionActive && !statusErrorKey` 일 때만 표시(하드 ERROR 배너 ~303-310 와 **중복 방지**; sessionErr/sandboxErr 가 있을 땐 빨간 ERROR 공지가 이미 뜨므로 이 경고는 숨김).
+     - **토큰/스타일(빨강 계열, Aidit 의 간결·행동지향 경고 스타일)**: `role="alert"`, full-bleed(래퍼가 이미 `-mx-4` 풀블리드이므로 내부 행 `px-3` 정렬 유지), `className` 예: `"border-t border-term-red-line bg-term-red-bg px-3 py-1.5 font-mono text-[11px] leading-relaxed text-term-red"`. small font. (Aidit 의 "A Gemini key is required … add your key in login." 같이 한 줄 행동지향 문구.)
+     - **문구**: `{t('thread.sessionDisconnected')}` (신규 키).
+  5. **i18n 신규 키 `thread.sessionDisconnected` 추가** — frontend/src/i18n/dicts/thread.ts 의 ko/en 양쪽에 추가.
+     - KO: `세션이 끊겼어요. 우측 상단 '세션 시작'을 눌러 다시 연결하세요.`
+     - EN: `Session disconnected — tap 'Start session' (top right) to reconnect.`
+     - (문구가 4)/3) 의 우상단 이동된 컨트롤을 가리키므로 위치 정합성 유지.)
+- **가시성 요약**: 연결됨(sessionActive) → 상단 우측 비움 + 컴포저 위 경고 없음. 끊김/미시작(!sessionActive) → 상단 우측 '세션 시작' 칩 + (하드 ERROR 가 아닐 때) 컴포저 위 빨간 경고. 하드 ERROR(statusErrorKey) → 기존 중앙 빨간 ERROR 공지 유지 + 컴포저 위 경고는 숨김(중복 방지).
+- **불변 유지**: `statusErrorKey` 배너(~303-310) KEEP. `handleStartSession`/자동 attach `useEffect`(~262-267) 로직 불변. 그 외 기존 동작 보존.
+- **검증(③, 결과)**: frontend `npx tsc --noEmit` 클린(오류 0), `npx vite build` PASS(90 modules transformed, built in 1.84s). 세 변경 모두 통과 → `완료` 전환.
+- 변경 파일: `frontend/src/pages/Thread.tsx`, `frontend/src/i18n/dicts/thread.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [fix] · 완료 · 게시글 최하단 공백 제거 — 컴포저를 TabBar 에 밀착
 - **요청(사용자, 스크린샷)**: 게시글 페이지 최하단(컴포저와 하단 TabBar 사이)에 공백이 남아 있음 → 제거.
 - **원인**: 컴포저는 Thread 루트의 마지막 요소인데, Thread 루트는 `<main class="… py-4">` 안에 있어 루트 아래로 main 의 `pb-4`(16px) 가 깔린다. 컴포저(sticky bottom-[var(--tabbar-h)])가 그 16px 만큼 TabBar 와 벌어져 보임. (직전 좌우 공백은 `px-4`/`-mx-4` 로 해결했고, 이번은 하단 `pb-4`.)
