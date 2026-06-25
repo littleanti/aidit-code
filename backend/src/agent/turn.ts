@@ -18,6 +18,7 @@ import type { Post, AgentSession, Message } from '@prisma/client';
 import { prisma } from '../db.js';
 import { nextSeq } from '../domain/seq.js';
 import { getAgentRuntime } from './runtime.js';
+import { runToolIntent } from './toolBridge.js';
 import { publishToPost } from '../realtime/publish.js';
 import {
   makeMessageCreatedEvent,
@@ -133,6 +134,33 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
     persistAccumulated();
   };
 
+  // ── 도구 의도 처리(AR-TOOL): worker 가 방출한 도구를 toolBridge 로 실제 실행 + tool.* 표면화. ──
+  //   샌드박스 루트(경로 가드/cwd 기준)를 조회. 없으면 도구를 건너뛴다(plain chat 만 진행).
+  const sandbox = await prisma.sandbox.findUnique({
+    where: { id: session.sandboxId },
+    select: { path: true },
+  });
+  const sandboxRoot = sandbox?.path ?? null;
+  // 도구 처리를 직렬 큐로 잇는다(여러 의도가 순차 ack 되도록). onTool 은 동기 콜백.
+  let toolChain: Promise<void> = Promise.resolve();
+  const onTool = (intent: Parameters<NonNullable<Parameters<typeof runtime.send>[4]>>[0]): void => {
+    toolChain = toolChain.then(async () => {
+      try {
+        if (sandboxRoot) {
+          await runToolIntent(
+            { postId: post.id, sessionId: session.id, sandboxRoot },
+            intent,
+          );
+        }
+      } catch {
+        /* toolBridge 내부에서 FAILED 로 흡수 — 여기서는 무해. */
+      } finally {
+        // worker 를 다음 의도/토큰으로 진행시킨다(턴 직렬화).
+        runtime.ackTool?.({ sandboxId: session.sandboxId });
+      }
+    });
+  };
+
   let finalStatus: 'COMPLETE' | 'FAILED' = 'COMPLETE';
   let errored = false;
   try {
@@ -141,7 +169,9 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
       where: { id: reply.id },
       data: { status: 'STREAMING' },
     });
-    await runtime.send(session, humanMessage.body, lang, onToken);
+    await runtime.send(session, humanMessage.body, lang, onToken, onTool);
+    // worker 의 done 이후에도 마지막 도구 체인이 남아있을 수 있으니 마저 기다린다.
+    await toolChain;
   } catch {
     errored = true;
     finalStatus = 'FAILED';

@@ -11,6 +11,9 @@ import type {
   Message,
   MessageStatus,
   SandboxStatus,
+  ToolCall,
+  ToolCallStatus,
+  ToolKind,
 } from '../api/types';
 
 /**
@@ -65,7 +68,68 @@ interface ThreadState {
   setSessionStatus: (status: AgentSessionStatus) => void;
   setSandboxStatus: (status: SandboxStatus) => void;
 
+  /**
+   * M5 tool/terminal events (TRD §7). All keyed by toolCallId, which is the
+   * @unique link from a Message to its ToolCall. tool.call/output/result events
+   * mutate the linked Message's `toolCall` summary; the bubble rows themselves
+   * arrive via message.created and keep their seq ordering untouched.
+   */
+
+  /** tool.call — initialize/locate the ToolCall on every message sharing toolCallId (status RUNNING). */
+  upsertToolCall: (tc: {
+    toolCallId: string;
+    kind: ToolKind;
+    name: string;
+    args: string;
+    startedAt: string;
+  }) => void;
+
+  /** tool.output — append a raw output chunk to the linked ToolCall's result. */
+  appendToolOutput: (toolCallId: string, chunk: string) => void;
+
+  /** tool.result — finalize the ToolCall status + exitCode + result. */
+  finalizeToolCall: (fin: {
+    toolCallId: string;
+    status: ToolCallStatus;
+    exitCode: number | null;
+    result: string;
+  }) => void;
+
   reset: () => void;
+}
+
+/**
+ * Merge a partial ToolCall onto every Message that links the given toolCallId
+ * (TOOL_CALL and TOOL_RESULT bubbles share it 1:1 per row). Seq ordering is
+ * preserved — only the `toolCall` summary changes. Existing summary fields are
+ * kept unless overridden, so out-of-order events never lose data.
+ */
+function patchToolCall(
+  byId: Record<string, Message>,
+  toolCallId: string,
+  patch: Partial<ToolCall>
+): Record<string, Message> {
+  let changed = false;
+  const next = { ...byId };
+  for (const m of Object.values(byId)) {
+    if (m.toolCallId !== toolCallId) continue;
+    const base: ToolCall =
+      m.toolCall ??
+      ({
+        id: toolCallId,
+        kind: 'OTHER',
+        name: '',
+        args: '',
+        result: null,
+        exitCode: null,
+        status: 'RUNNING',
+        startedAt: '',
+        endedAt: null,
+      } as ToolCall);
+    next[m.id] = { ...m, toolCall: { ...base, ...patch } };
+    changed = true;
+  }
+  return changed ? next : byId;
 }
 
 export const useThreadStore = create<ThreadState>((set) => ({
@@ -176,6 +240,51 @@ export const useThreadStore = create<ThreadState>((set) => ({
     ),
 
   setSandboxStatus: (status) => set({ sandboxStatus: status }),
+
+  upsertToolCall: ({ toolCallId, kind, name, args, startedAt }) =>
+    set((state) => {
+      const byId = patchToolCall(state.byId, toolCallId, {
+        id: toolCallId,
+        kind,
+        name,
+        args,
+        status: 'RUNNING',
+        startedAt,
+      });
+      if (byId === state.byId) return state; // bubble not yet created — ignore safely.
+      return { byId, messages: orderBySeq(byId) };
+    }),
+
+  appendToolOutput: (toolCallId, chunk) =>
+    set((state) => {
+      let changed = false;
+      const byId = { ...state.byId };
+      for (const m of Object.values(state.byId)) {
+        if (m.toolCallId !== toolCallId || !m.toolCall) continue;
+        byId[m.id] = {
+          ...m,
+          toolCall: {
+            ...m.toolCall,
+            // Preserve raw machine output verbatim — pure append, no transform.
+            result: (m.toolCall.result ?? '') + chunk,
+          },
+        };
+        changed = true;
+      }
+      if (!changed) return state;
+      return { byId, messages: orderBySeq(byId) };
+    }),
+
+  finalizeToolCall: ({ toolCallId, status, exitCode, result }) =>
+    set((state) => {
+      const byId = patchToolCall(state.byId, toolCallId, {
+        status,
+        exitCode,
+        result,
+      });
+      if (byId === state.byId) return state;
+      return { byId, messages: orderBySeq(byId) };
+    }),
 
   reset: () =>
     set({ messages: [], byId: {}, activeSession: null, sandboxStatus: null }),

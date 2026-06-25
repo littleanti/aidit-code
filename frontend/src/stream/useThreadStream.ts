@@ -3,9 +3,9 @@
 // the threadStore. seq is the single source of truth — replayed events (after
 // EventSource auto-reconnect sends Last-Event-ID) dedupe via seq/id in the store.
 //
-// Handles: message.created / agent.token / message.updated.
-// Tolerates (no crash) future events: session.status / sandbox.status /
-// tool.call / tool.output / tool.result / file.changed.
+// Handles: message.created / agent.token / message.updated /
+// session.status / sandbox.status / tool.call / tool.output / tool.result.
+// Tolerates (no crash) future events: file.changed.
 //
 // HARD RULE: payloads never carry LLM keys; agent.token deltas are agent text only.
 import { useEffect, useRef, useState } from 'react';
@@ -17,6 +17,9 @@ import type {
   MessageUpdatedPayload,
   SandboxStatusPayload,
   SessionStatusPayload,
+  ToolCallPayload,
+  ToolOutputPayload,
+  ToolResultPayload,
 } from '../api/types';
 
 export type StreamStatus = 'connecting' | 'open' | 'reconnecting' | 'closed';
@@ -70,6 +73,9 @@ export function useThreadStream(postId: string | undefined): UseThreadStreamResu
   const setMessageStatus = useThreadStore((s) => s.setMessageStatus);
   const setSessionStatus = useThreadStore((s) => s.setSessionStatus);
   const setSandboxStatus = useThreadStore((s) => s.setSandboxStatus);
+  const upsertToolCall = useThreadStore((s) => s.upsertToolCall);
+  const appendToolOutput = useThreadStore((s) => s.appendToolOutput);
+  const finalizeToolCall = useThreadStore((s) => s.finalizeToolCall);
 
   useEffect(() => {
     if (!postId) {
@@ -134,13 +140,39 @@ export function useThreadStream(postId: string | undefined): UseThreadStreamResu
       if (p?.status) setSandboxStatus(p.status);
     });
 
-    // tool.* and file.changed are M5 — register no-op listeners so unknown
-    // future events never bubble as errors. (EventSource ignores unregistered
-    // named events anyway, but explicit no-ops document intent.)
+    // ── tool / terminal events (M5, TRD §7) ────────────────────
+    es.addEventListener('tool.call', (ev) => {
+      const p = safeParse<ToolCallPayload>((ev as MessageEvent).data);
+      if (!p?.toolCallId) return;
+      upsertToolCall({
+        toolCallId: p.toolCallId,
+        kind: p.kind,
+        name: p.name,
+        args: p.args ?? '',
+        startedAt: p.startedAt,
+      });
+    });
+
+    es.addEventListener('tool.output', (ev) => {
+      const p = safeParse<ToolOutputPayload>((ev as MessageEvent).data);
+      if (!p?.toolCallId) return;
+      appendToolOutput(p.toolCallId, p.chunk ?? '');
+    });
+
+    es.addEventListener('tool.result', (ev) => {
+      const p = safeParse<ToolResultPayload>((ev as MessageEvent).data);
+      if (!p?.toolCallId || !p.status) return;
+      finalizeToolCall({
+        toolCallId: p.toolCallId,
+        status: p.status,
+        exitCode: p.exitCode ?? null,
+        result: p.result ?? '',
+      });
+    });
+
+    // file.changed is M5+ (file explorer) — no-op listener so the named event
+    // never bubbles as an error before that lane lands.
     const noop = () => {};
-    es.addEventListener('tool.call', noop);
-    es.addEventListener('tool.output', noop);
-    es.addEventListener('tool.result', noop);
     es.addEventListener('file.changed', noop);
 
     return () => {
@@ -155,6 +187,9 @@ export function useThreadStream(postId: string | undefined): UseThreadStreamResu
     setMessageStatus,
     setSessionStatus,
     setSandboxStatus,
+    upsertToolCall,
+    appendToolOutput,
+    finalizeToolCall,
   ]);
 
   return { status };

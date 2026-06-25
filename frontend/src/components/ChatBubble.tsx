@@ -7,10 +7,13 @@
 //   AGENT_REPLY   → left;  amber tint + border-term-amber-line + text-term-fg-bright,
 //                          '[AGENT] pi agent' label term-amber; STREAMING → blinking .term-cursor
 //   SYSTEM        → centered, text-term-dim-3
-//   TOOL_CALL / TOOL_RESULT → minimal fallback (M5); never crash.
+//   TOOL_CALL    → ToolCallBubble ('$ <cmd>' prompt-style, M5)
+//   TOOL_RESULT  → ToolResultBubble (fixed-width terminal pane, M5)
 import { useT } from '../i18n/useT';
 import { useAuthStore } from '../stores/authStore';
 import type { Message } from '../api/types';
+import ToolCallBubble from './ToolCallBubble';
+import ToolResultBubble from './ToolResultBubble';
 
 interface ChatBubbleProps {
   message: Message;
@@ -58,30 +61,12 @@ export default function ChatBubble({ message, authorName }: ChatBubbleProps) {
     );
   }
 
-  // ── TOOL_CALL / TOOL_RESULT: minimal fallback (M5) ─────────────
+  // ── TOOL_CALL / TOOL_RESULT: dedicated terminal bubbles (M5) ───
   if (type === 'TOOL_CALL') {
-    return (
-      <div className="flex justify-start">
-        <div className="w-full max-w-full overflow-x-auto rounded-[3px] border border-term-line bg-term-sunken px-3 py-2 font-mono text-xs text-term-dim">
-          <span className="text-term-faint">▌$ </span>
-          <span className="whitespace-pre break-words">{body}</span>
-        </div>
-      </div>
-    );
+    return <ToolCallBubble message={message} />;
   }
   if (type === 'TOOL_RESULT') {
-    const failed = status === 'FAILED';
-    return (
-      <div className="flex justify-start">
-        <div
-          className={`w-full max-w-full overflow-x-auto rounded-[3px] border px-3 py-2 font-mono text-xs ${
-            failed ? 'border-term-red-line bg-term-red-bg text-term-red' : 'border-term-line bg-term-sunken text-term-dim'
-          }`}
-        >
-          <pre className="whitespace-pre">{body}</pre>
-        </div>
-      </div>
-    );
+    return <ToolResultBubble message={message} />;
   }
 
   // ── HUMAN: self (right) vs peer (left) ─────────────────────────

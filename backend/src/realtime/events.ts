@@ -109,17 +109,77 @@ export interface MessageUpdatedEvent {
   status: MessageStatusValue;
 }
 
+/** TRD §3 ToolKind 와 1:1 (Prisma enum 과 동일 문자열). */
+export type ToolKindValue =
+  | 'SHELL'
+  | 'FILE_WRITE'
+  | 'FILE_DELETE'
+  | 'FILE_READ'
+  | 'PACKAGE'
+  | 'OTHER';
+
+/** TRD §3 ToolCallStatus 와 1:1 (Prisma enum 과 동일 문자열). */
+export type ToolCallStatusValue = 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+
+/**
+ * 도구 호출 시작 이벤트(TRD §7 tool.call).
+ * payload(verbatim): { toolCallId, messageId, kind, name, args, status:'RUNNING', startedAt }.
+ * messageId 는 연결된 TOOL_CALL 버블 id. args 는 JSON 직렬화 문자열(경로/명령 등) — 키 필드 금지.
+ * 보안: apiKey/baseURL 류는 args/name/result 어디에도 절대 담지 않는다(toolBridge 가 보장).
+ */
+export interface ToolCallEvent {
+  type: 'tool.call';
+  toolCallId: string;
+  messageId: string;
+  kind: ToolKindValue;
+  name: string;
+  /** JSON 직렬화된 인자 문자열(명령/경로 등). 키 절대 미포함. */
+  args: string;
+  status: 'RUNNING';
+  /** ISO8601 문자열(직렬화 안전). */
+  startedAt: string;
+}
+
+/**
+ * 도구 출력 청크 이벤트(TRD §7 tool.output).
+ * payload(verbatim): { toolCallId, messageId, chunk }.
+ * messageId 는 출력이 누적되는 TOOL_RESULT 버블 id. chunk 는 stdout/stderr 조각 — 키 절대 미포함.
+ */
+export interface ToolOutputEvent {
+  type: 'tool.output';
+  toolCallId: string;
+  messageId: string;
+  chunk: string;
+}
+
+/**
+ * 도구 호출 종료 이벤트(TRD §7 tool.result).
+ * payload(verbatim): { toolCallId, messageId, status:'SUCCEEDED'|'FAILED', exitCode, result }.
+ * messageId 는 TOOL_RESULT 버블 id. result 는 누적 출력/요약 — 키 절대 미포함.
+ */
+export interface ToolResultEvent {
+  type: 'tool.result';
+  toolCallId: string;
+  messageId: string;
+  status: 'SUCCEEDED' | 'FAILED';
+  exitCode: number | null;
+  result: string;
+}
+
 /**
  * 모든 실시간 이벤트의 discriminated union.
  * M2: sandbox.status. M3: + session.status. M4: + message.created/agent.token/message.updated.
- * tool.*(M5)/file.changed(M6) 는 후속 마일스톤에서 여기에 멤버를 추가하기만 하면 된다(기존 멤버 변경 없이).
+ * M5: + tool.call/tool.output/tool.result. file.changed(M6) 는 후속에서 멤버만 추가한다.
  */
 export type RealtimeEvent =
   | SandboxStatusEvent
   | SessionStatusEvent
   | MessageCreatedEvent
   | AgentTokenEvent
-  | MessageUpdatedEvent;
+  | MessageUpdatedEvent
+  | ToolCallEvent
+  | ToolOutputEvent
+  | ToolResultEvent;
 
 /**
  * sandbox.status 이벤트 빌더.
@@ -208,4 +268,58 @@ export function makeMessageUpdatedEvent(args: {
 }): MessageUpdatedEvent {
   const { id, body, status } = args;
   return { type: 'message.updated', id, body, status };
+}
+
+/**
+ * tool.call 이벤트 빌더(TRD §7).
+ * startedAt 은 Date | string 모두 받아 ISO 문자열로 정규화한다.
+ * 명시 필드만 받음으로써(키 필드 없음) 누출 가능성을 구조적으로 차단한다.
+ */
+export function makeToolCallEvent(args: {
+  toolCallId: string;
+  messageId: string;
+  kind: ToolKindValue;
+  name: string;
+  args: string;
+  startedAt: Date | string;
+}): ToolCallEvent {
+  const { toolCallId, messageId, kind, name, args: toolArgs, startedAt } = args;
+  return {
+    type: 'tool.call',
+    toolCallId,
+    messageId,
+    kind,
+    name,
+    args: toolArgs,
+    status: 'RUNNING',
+    startedAt: startedAt instanceof Date ? startedAt.toISOString() : startedAt,
+  };
+}
+
+/**
+ * tool.output 이벤트 빌더(TRD §7).
+ * chunk 는 stdout/stderr 조각만 — 호출부가 키를 넣지 않도록 한다.
+ */
+export function makeToolOutputEvent(args: {
+  toolCallId: string;
+  messageId: string;
+  chunk: string;
+}): ToolOutputEvent {
+  const { toolCallId, messageId, chunk } = args;
+  return { type: 'tool.output', toolCallId, messageId, chunk };
+}
+
+/**
+ * tool.result 이벤트 빌더(TRD §7).
+ * 명시 필드만 받음으로써(키 필드 없음) 누출 가능성을 구조적으로 차단한다.
+ */
+export function makeToolResultEvent(args: {
+  toolCallId: string;
+  messageId: string;
+  status: 'SUCCEEDED' | 'FAILED';
+  exitCode: number | null;
+  result: string;
+}): ToolResultEvent {
+  const { toolCallId, messageId, status, exitCode, result } = args;
+  return { type: 'tool.result', toolCallId, messageId, status, exitCode, result };
 }

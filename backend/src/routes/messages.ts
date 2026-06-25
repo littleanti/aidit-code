@@ -25,6 +25,15 @@ const ACTIVE_STATUSES: AgentSessionStatusValue[] = ['STARTING', 'IDLE', 'RUNNING
 /** 페이지 크기(TRD §4.1 권장값과 일관, 메시지 전용 50). */
 const PAGE_SIZE = 50;
 
+/** 연결된 ToolCall 의 요약(키 필드 없음 — kind/name/status/exitCode 만). */
+interface ToolCallSummary {
+  id: string;
+  kind: string;
+  name: string;
+  status: string;
+  exitCode: number | null;
+}
+
 /** 응답/이벤트용 Message 직렬화(키 필드는 애초에 행에 없음). */
 function serializeMessage(m: {
   id: string;
@@ -39,7 +48,25 @@ function serializeMessage(m: {
   seq: number;
   clientId: string | null;
   createdAt: Date;
+  toolCall?: {
+    id: string;
+    kind: string;
+    name: string;
+    status: string;
+    exitCode: number | null;
+  } | null;
 }) {
+  // M5(BE-MSGPAGE): 연결된 ToolCall 요약(kind/name/status/exitCode). 미연결이면 null.
+  //   args/result 등 본문성 필드는 버블 body 가 담으므로 요약에는 넣지 않는다(키 누출 표면 최소화).
+  const toolCall: ToolCallSummary | null = m.toolCall
+    ? {
+        id: m.toolCall.id,
+        kind: m.toolCall.kind,
+        name: m.toolCall.name,
+        status: m.toolCall.status,
+        exitCode: m.toolCall.exitCode,
+      }
+    : null;
   return {
     id: m.id,
     postId: m.postId,
@@ -53,8 +80,7 @@ function serializeMessage(m: {
     seq: m.seq,
     clientId: m.clientId,
     createdAt: m.createdAt,
-    // M5 가 채울 연결 도구 호출 요약(현재 null).
-    toolCall: null,
+    toolCall,
   };
 }
 
@@ -188,6 +214,10 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       where: { postId, seq: { gt: afterSeq } },
       orderBy: { seq: 'asc' },
       take: PAGE_SIZE + 1,
+      // BE-MSGPAGE: 연결된 ToolCall 요약(kind/name/status/exitCode)을 함께 싣는다.
+      include: {
+        toolCall: { select: { id: true, kind: true, name: true, status: true, exitCode: true } },
+      },
     });
 
     const hasMore = rows.length > PAGE_SIZE;

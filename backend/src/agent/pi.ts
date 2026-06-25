@@ -37,8 +37,19 @@ const READY_TIMEOUT_MS = Number(process.env.AGENT_READY_TIMEOUT_MS) || 5000;
  */
 interface TurnSink {
   onToken: (delta: string) => void;
+  /** worker 가 방출한 도구 의도. toolBridge 가 실제 실행 후 ackTool 로 worker 를 진행시킨다. */
+  onTool: (intent: ToolIntent) => void;
   onDone: () => void;
   onError: (message: string) => void;
+}
+
+/** worker 가 방출하는 도구 실행 의도(piWorker.mjs 의 {type:'tool', ...} 라인). */
+export interface ToolIntent {
+  kind: 'SHELL' | 'FILE_WRITE' | 'FILE_DELETE' | 'FILE_READ' | 'PACKAGE' | 'OTHER';
+  name: string;
+  command?: string;
+  relPath?: string;
+  content?: string;
 }
 
 /** in-memory 세션 레지스트리: sandboxId -> 활성 프로세스 핸들. */
@@ -65,7 +76,16 @@ function pumpTurnLines(handle: RuntimeHandle, chunk: string): void {
     const line = handle.stdoutBuf.slice(0, nl).trim();
     handle.stdoutBuf = handle.stdoutBuf.slice(nl + 1);
     if (!line) continue;
-    let msg: { type?: string; delta?: string; message?: string };
+    let msg: {
+      type?: string;
+      delta?: string;
+      message?: string;
+      kind?: string;
+      name?: string;
+      command?: string;
+      relPath?: string;
+      content?: string;
+    };
     try {
       msg = JSON.parse(line);
     } catch {
@@ -75,6 +95,14 @@ function pumpTurnLines(handle: RuntimeHandle, chunk: string): void {
     if (!sink) continue;
     if (msg.type === 'token') {
       sink.onToken(typeof msg.delta === 'string' ? msg.delta : '');
+    } else if (msg.type === 'tool') {
+      sink.onTool({
+        kind: (msg.kind as ToolIntent['kind']) ?? 'OTHER',
+        name: typeof msg.name === 'string' ? msg.name : 'tool',
+        command: typeof msg.command === 'string' ? msg.command : undefined,
+        relPath: typeof msg.relPath === 'string' ? msg.relPath : undefined,
+        content: typeof msg.content === 'string' ? msg.content : undefined,
+      });
     } else if (msg.type === 'done') {
       handle.activeTurn = null;
       sink.onDone();
@@ -244,6 +272,7 @@ class PiRuntime implements AgentRuntime {
     input: string,
     lang: string,
     onToken: (delta: string) => void,
+    onTool?: (intent: ToolIntent) => void,
   ): Promise<void> {
     const h = handles.get(session.sandboxId);
     if (!h) {
@@ -262,6 +291,7 @@ class PiRuntime implements AgentRuntime {
     return await new Promise<void>((resolve, reject) => {
       const sink: TurnSink = {
         onToken: (delta) => onToken(delta),
+        onTool: (intent) => onTool?.(intent),
         onDone: () => resolve(),
         onError: (message) => reject(new Error(message)),
       };
@@ -275,6 +305,21 @@ class PiRuntime implements AgentRuntime {
         reject(err instanceof Error ? err : new Error('failed to write input'));
       }
     });
+  }
+
+  /**
+   * 부모(toolBridge)가 직전 도구 의도의 실행을 마쳤음을 worker 에 알린다.
+   * worker 는 이 ack 를 받아 다음 도구 의도/토큰으로 진행한다(턴 직렬화).
+   * 멱등: 활성 핸들이 없으면 no-op.
+   */
+  ackTool(session: Pick<AgentSession, 'sandboxId'>): void {
+    const h = handles.get(session.sandboxId);
+    if (!h) return;
+    try {
+      h.child.stdin?.write(JSON.stringify({ type: 'tool-done' }) + '\n');
+    } catch {
+      /* noop — 이미 종료된 프로세스 */
+    }
   }
 
   /**
