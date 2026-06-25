@@ -56,8 +56,14 @@ export default function Thread() {
   const bottomRef = useRef<HTMLDivElement>(null);
   // Auto-scroll bookkeeping: stay "pinned" to the bottom unless the user
   // scrolls up to read history; the user's own new message always re-pins.
-  const pinnedRef = useRef(true);
+  // Start UNPINNED so entering a post lands at the TOP (📌 original post +
+  // start of the conversation) instead of jumping to the bottom; the scroll
+  // listener re-pins the moment the user scrolls within 120px of the bottom.
+  const pinnedRef = useRef(false);
   const prevLastIdRef = useRef<string | null>(null);
+  // One-shot guard: skip only the very first messages-driven scroll for a
+  // thread (the initial hydrate), so live-follow still works afterwards.
+  const hasAutoScrolledRef = useRef(false);
 
   // Load post + initial messages, then hydrate the store (seq-ascending).
   const load = useCallback(async () => {
@@ -72,6 +78,11 @@ export default function Thread() {
         session: p.session ?? null,
         sandboxStatus: p.sandbox?.status ?? null,
       });
+      // Seed the "last seen" id with the last hydrated message so the first
+      // genuine change after entry is correctly detected as a NEW bubble (and
+      // not as the initial render). The hasAutoScrolledRef guard below still
+      // suppresses the very first messages-driven scroll regardless.
+      prevLastIdRef.current = page.items[page.items.length - 1]?.id ?? null;
     } catch (e) {
       setError(e instanceof ApiError ? t('errors.generic') : t('errors.networkError'));
     } finally {
@@ -86,6 +97,16 @@ export default function Thread() {
       resetWorkspace();
     };
   }, [load, reset, resetWorkspace]);
+
+  // On entry / thread switch: reset the auto-scroll guards and land the window
+  // at the TOP (the route may have retained scroll from a previous page) so the
+  // reader starts at the 📌 original post, not wherever they last were.
+  useEffect(() => {
+    pinnedRef.current = false;
+    hasAutoScrolledRef.current = false;
+    prevLastIdRef.current = null;
+    window.scrollTo(0, 0);
+  }, [id]);
 
   // Selecting a file from the tree switches to the file view on mobile.
   const handleSelectFile = useCallback(
@@ -116,9 +137,18 @@ export default function Thread() {
     const isNewBubble = lastId !== prevLastIdRef.current;
     prevLastIdRef.current = lastId;
 
-    if (isNewBubble && last?.type === 'HUMAN' && last.authorId === userId) {
+    const selfSent =
+      isNewBubble && last?.type === 'HUMAN' && last.authorId === userId;
+    if (selfSent) {
       pinnedRef.current = true; // I just sent — always follow.
     }
+    // One-shot guard: skip ONLY the first messages-driven run per thread (the
+    // initial hydrate) so entry lands at the TOP — UNLESS that very first event
+    // is my own send, which must still follow (the guard never suppresses a
+    // genuine HUMAN send). Subsequent runs follow normally while pinned.
+    const firstRun = !hasAutoScrolledRef.current;
+    hasAutoScrolledRef.current = true;
+    if (firstRun && !selfSent) return;
     if (!pinnedRef.current) return;
     bottomRef.current?.scrollIntoView({
       block: 'end',

@@ -11,6 +11,17 @@
 
 ## Changelog
 
+### 2026-06-25 · [fix] · 완료 · 글 진입 시 맨 아래로 점프 → 맨 위(원문/첫 메시지) 표시, 라이브 팔로우는 보존
+- **요청(사용자)**: 게시글(Thread) 진입 시 자동으로 맨 아래(최신/composer)로 스크롤되어 원문(📌)과 대화 시작점을 못 봄. 진입 시에는 **맨 위**를 보여주고, 스트리밍 중 라이브 팔로우와 "내가 보낸 메시지 따라가기"는 그대로 유지.
+- **설계(가드형 top-on-entry)**:
+  - `pinnedRef` 초기값 `true`→`false`. window 스크롤 기준, 진입 시 맨 위는 바닥과 멀므로 pinned=false 가 실제 상태. 첫 SSE 토큰이 reader 를 끌어내리는 것 방지.
+  - `hasAutoScrolledRef`(useRef(false)) 일회성 가드 추가 — 스레드의 **첫 messages-driven 실행만** scrollIntoView 스킵 후 true.
+  - hydrate 직후 `prevLastIdRef` 를 마지막 메시지 id 로 시드 → 첫 실제 변경을 새 메시지로 정확히 감지.
+  - 자기 전송(HUMAN·authorId===userId) 재핀은 가드와 **독립**으로 먼저 적용 — 내 메시지/이어지는 에이전트 답변은 오늘처럼 팔로우.
+  - 스크롤 리스너(120px)는 그대로 — 사용자가 바닥 근처로 스크롤하면 pinned=true 로 라이브 팔로우 자연 재개.
+- **검증(③)**: frontend `tsc --noEmit` 클린, `vite build` PASS(88 모듈). 로직 검토 — ① 초기 hydrate 시 `hasAutoScrolledRef=false` → 첫 messages-driven 실행은 `firstRun && !selfSent` 로 early-return(top 유지). ② `pinnedRef` 초기 false 라 첫 스트리밍 토큰도 팔로우 안 함. ③ 자기 전송은 `selfSent` 로 가드 우회 + 재핀 → 본인/후속 에이전트 답변 팔로우. ④ `id` 변경 시 가드 refs 리셋 + `window.scrollTo(0,0)` 로 이전 라우트 스크롤 잔존 제거.
+- 변경 파일: `frontend/src/pages/Thread.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-25 · [fix] · 완료 · 입력창 placeholder 가 두 줄로 줄바꿈 → 한 줄로 단축(ko/en)
 - **증상(사용자)**: 모바일에서 composer placeholder `메시지를 입력하세요… (AI on이면 에이전트가 응답)` 가 너무 길어 두 줄로 표시 → UX 불편.
 - **수정**: `(AI on…)` 부가 설명 제거(바로 옆 AI 토글 칩이 같은 정보를 전달). KO `메시지를 입력하세요…`, EN `Type a message…` 로 단축. TRD §14.2 예시도 동일하게 정정.
