@@ -205,6 +205,10 @@ export default function Thread() {
     const firstRun = !hasAutoScrolledRef.current;
     hasAutoScrolledRef.current = true;
     if (firstRun && !selfSent) {
+      // Clear any false-positive "pinned" (the scroll listener can set it true
+      // while the pre-hydrate content is shorter than the viewport). Without
+      // this, the first SSE token after entry would scrollIntoView to bottom.
+      pinnedRef.current = false;
       window.scrollTo(0, 0);
       return;
     }

@@ -11,6 +11,13 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · 진입 시 바닥 스크롤 잔존 경로 제거 — firstRun 에서 pinnedRef 리셋 (실측 검증)
+- **증상(사용자, 실기기)**: 직전 수정 후에도 진입 시 여전히 최하단으로 스크롤됨.
+- **놓친 원인**: hydrate 전(짧은 콘텐츠) 스크롤 리스너가 `pinnedRef` 를 false-positive 로 `true` 로 만들어 둔 뒤, 진입 직후 자동 attach 된 활성 세션의 **SSE 스트리밍 토큰**이 메시지를 갱신하면 firstRun 은 이미 지났고 `pinnedRef===true` 라 `bottomRef.scrollIntoView` 로 바닥행. 직전 firstRun 분기가 `scrollTo(0,0)` 만 하고 `pinnedRef` 를 리셋하지 않음.
+- **수정**: firstRun(진입) 분기에서 `pinnedRef.current = false` 를 명시적으로 추가 → 이후 스트리밍 갱신이 바닥으로 끌지 않음(사용자가 직접 바닥 근처로 스크롤해야 pinned 재활성). selfSent 팔로우는 그대로.
+- **검증(③) — 실측**: frontend `tsc --noEmit` 클린 + `vite build` PASS. 브라우저(localhost:5173)에서 스크롤 가능한 스레드 진입(scrollHeight 2807 / viewport 992, 스크롤 여지 1815px) 후 `window.scrollY === 0`(최상단), 3초 후(SSE 정착)에도 `scrollY === 0` 유지 확인.
+- 변경 파일: `frontend/src/pages/Thread.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [fix] · 완료 · 게시글 진입 시 바닥 스크롤 제거 — 항상 최상단부터 표시
 - **요청(사용자)**: 게시글 첫 진입 시 맨 아래로 내려가는 동작 삭제. 진입은 항상 최상단(원문)부터 보여주는 게 맞는 UX.
 - **원인(취약점)**: 기존 top-on-entry 가드(`firstRun` + `pinnedRef=false`)가 있으나 ① 메시지 0건 초기 렌더가 `hasAutoScrolledRef` 가드를 먼저 소진 → 실제 hydrate 시 firstRun=false, ② 짧은/로딩 중 콘텐츠에서 스크롤 리스너가 `innerHeight+scrollY >= scrollHeight-120` 를 만족시켜 `pinnedRef` 가 false-positive 로 true → 첫 hydrate 에서 바닥으로 스크롤될 수 있음.
