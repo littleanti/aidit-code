@@ -1,8 +1,8 @@
 // src/i18n/dicts/profile.ts — profile + settings (WIREFRAME §9 / §9.1).
 export const profile = {
   ko: {
-    tabPosts: 'posts',
-    tabBookmarks: 'bookmarks',
+    tabPosts: '게시글',
+    tabBookmarks: '북마크',
     postsEmpty: '작성한 글이 없어요',
     bookmarksEmpty: '북마크한 글이 없어요',
     loginRequired: '로그인이 필요해요',

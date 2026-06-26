@@ -11,6 +11,13 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · 프로필 탭 라벨 한국어 미번역 수정 — posts/bookmarks → 게시글/북마크 (i18n ko≠en)
+- **요청(사용자)**: 한↔영 전환 시에도 언어가 바뀌지 않는 텍스트가 몇 개 있음. 점검 결과 JSX는 모두 `t()` 사용(하드코딩 없음), 영어 키 누락도 없음. 실제 원인은 사전(dict)에서 `ko`·`en` 값이 동일한 항목들.
+- **분석**: `profile.tabPosts`='posts', `profile.tabBookmarks`='bookmarks' 가 ko·en 모두 영어 → 한국어 모드에서도 영어로 표시(다른 탭 `홈`/`Home` 은 정상 번역). 사용자 선택으로 이 두 항목만 한국어화. (상태 배지 CREATING 등·placeholder 등 나머지 동일값 항목은 터미널 미학/브랜드로 보고 미수정.)
+- **방향**: `profile.ts` ko 값만 `게시글`/`북마크` 로 변경(en 은 그대로). 렌더링 로직(`Profile.tsx` `t('profile.tabPosts')`)은 변경 없음.
+- **검증(③)**: frontend `tsc --noEmit` 클린(EXIT 0). ko='게시글'/'북마크', en='posts'/'bookmarks' 로 분리되어 언어 토글 시 라벨 변경됨.
+- 변경 파일: `frontend/src/i18n/dicts/profile.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [fix] · 완료 · 홈 인기/최신 토글 행 높이를 작성 페이지 제목과 동일(24px)로 — min-h-[44px] 제거
 - **요청(사용자)**: 직전 글자 크기(text-base) 통일만으로는 부족 — 홈 인기/최신 행이 다른 상단바보다 여전히 **높이가 높다**. 작성 페이지 상단과 높이까지 동일하게.
 - **원인(실측)**: 토글 버튼 `min-h-[44px]` 때문에 행 높이=**44px**. 작성 페이지 제목 `h1`은 min-height 없이 line-height만이라 **24px**. → 20px 차이(= 홈 헤더→프롬프트 68px vs 작성 48px 차이와 동일).
