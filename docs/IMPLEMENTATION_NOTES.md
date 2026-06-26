@@ -11,6 +11,16 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · 샌드박스 작업경로를 절대경로 박제 대신 런타임 재계산(레포 이동/이름변경 내성)
+- **배경(사고)**: 프로젝트 폴더명이 `Audit-Code`→`Aidit-Code`로 바뀌자, DB `Sandbox.path`에 **생성 시점 절대경로가 박제**돼 있어 세션 시작 시 `pi.ts` `spawn({cwd: sandbox.path})`가 `ENOENT`로 실패. 174개 글 중 171개가 세션 시작 불가 → (사용자 승인 후) 삭제 완료. 같은 일이 레포를 옮기거나 이름 바꾸거나 다른 머신/배포로 가면 또 재발하는 **설계 결함**.
+- **원인**: `sandbox/service.ts createSandboxForPost`가 `resolveInsideRoot(config.sandboxRoot, postId)`로 만든 **절대경로**를 DB에 저장 → 호스트 경로에 종속. 소비처(spawn cwd, 도구 실행 root, 파일 트리, 디렉토리 삭제)가 모두 그 절대경로를 그대로 신뢰.
+- **방향**: 저장된 `path`는 "힌트"로만 쓰고, 진짜 작업 디렉토리는 **(현재 `sandboxRoot`, `postId`)에서 매번 재계산**하는 단일 리졸버 `resolveSandboxDir({postId, path})` 도입. ① 저장 path가 현재 루트 안이면 그대로 사용 ② 루트 밖 + `basename === postId`(=createSandboxForPost 레이아웃 → 옛 루트 박제 케이스)면 표준 위치 `root/postId`가 **실제 존재할 때만** 자가복구 ③ 그 외(루트 밖 + basename≠postId = 의도적 외부 디렉토리/테스트 mkdtemp)는 저장 path 유지. → 레포 이동/이름변경에도 세션이 안 깨지고, out-of-root 테스트 디렉토리도 그대로 동작.
+  - **basename 판별 추가 이유(검증 중 발견)**: 초기엔 "루트 밖 + canonical 존재 → 무조건 self-heal"이었으나, `redaction.test.ts`가 **API로 글 생성(→ `root/postId` 디렉토리 실재) 후 path를 외부 mkdtemp로 교정**하는 패턴이라 잘못 self-heal돼 도구가 외부 dir 대신 canonical에 파일을 써 실패. basename 판별로 의도적 외부 지정과 박제를 구분해 해결.
+- **구현**: `sandbox/service.ts`(리졸버 `resolveSandboxDir` 추가), `agent/sessionStart.ts`(spawn 전 리졸브), `agent/turn.ts`(도구 root 리졸브, sandbox select에 `postId` 추가), `routes/files.ts`(파일 트리·내용 root 2곳 리졸브), `routes/posts.ts`(삭제 디렉토리 리졸브 — 박제 경로가 루트밖이라 기존엔 가드에 막혀 정리 실패하던 것도 해결), `config.ts`(주석의 옛 이름 `Audit-Code`→`Aidit-Code` 정정). 신규 단위테스트 `test/sandboxDir.test.ts`.
+- **검증(③) — 실측**: backend `tsc --noEmit` 클린(EXIT 0). 백엔드 테스트 **85/85 통과(23 파일)** — 신규 `sandboxDir`(in-root 신뢰 / 박제 self-heal / 외부 보존 3케이스) + 기존 `redaction`·`sessionStart`·`toolCall`·`files`·`agentTurn` 그린.
+- 변경 파일: `backend/src/sandbox/service.ts`·`agent/sessionStart.ts`·`agent/turn.ts`·`routes/files.ts`·`routes/posts.ts`·`config.ts`, `backend/test/sandboxDir.test.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+- **참고(데이터 사고 정리)**: 이 수정 전, 박제 경로로 세션 불가였던 글 171개를 사용자 승인 후 트랜잭션 삭제(메시지 94·투표 2·북마크 2·세션 33·툴콜 16·샌드박스 171 동반). 남은 글 3개. 이 수정 이후 생성되는 글은 레포 이동/이름변경에도 세션이 self-heal 된다.
+
 ### 2026-06-26 · [fix] · 완료 · 작성 페이지 체크박스 라벨에 "(답변 깊이)" 명시 (Aidit-Code 전용)
 - **요청(사용자)**: `게시 후 AI 1차 답변 받기` → `게시 후 AI 1차 답변 받기 (답변 깊이)`, 매칭 영어도 반영.
 - **범위**: Aidit-Code 의 `aiFirstReply` 만. Aidit-Code 의 낮음/중간/높음은 reasoning effort(=답변 깊이)라 라벨로 그 의미를 명확히 한다. 부모 Aidit 의 동일 라벨은 컨트롤이 "응답 길이"라 "깊이"가 맞지 않으므로 **건드리지 않음**.

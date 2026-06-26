@@ -13,7 +13,7 @@ loadDotenv();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// backend/src/ → backend/ → Audit-Code/  (repo 루트)
+// backend/src/ → backend/ → Aidit-Code/  (repo 루트)
 const repoRoot = path.resolve(__dirname, '..', '..');
 const defaultSandboxRoot = path.join(repoRoot, '.sandboxes');
 // backend/src/ → backend/ (서버 루트). 업로드 기본 디렉토리는 서버 루트의 uploads/.
