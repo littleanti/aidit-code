@@ -9,6 +9,7 @@ export const post = {
     writeFirst: '+ 첫 게시글 쓰기',
     upvote: '추천',
     comments: '댓글',
+    bookmark: '북마크',
     // status badge labels (sandbox)
     statusCreating: 'CREATING',
     statusReady: 'READY',
@@ -47,6 +48,7 @@ export const post = {
     writeFirst: '+ Write the first post',
     upvote: 'Upvote',
     comments: 'Comments',
+    bookmark: 'Bookmark',
     statusCreating: 'CREATING',
     statusReady: 'READY',
     statusRunning: 'RUNNING',

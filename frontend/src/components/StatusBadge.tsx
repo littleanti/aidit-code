@@ -7,6 +7,9 @@ import type { SandboxStatus } from '../api/types';
 
 interface StatusBadgeProps {
   status: SandboxStatus | null | undefined;
+  // `dot` 변형: 글리프만(라벨 없음) — sticky 상단바에서 세션 상태를 최소 면적으로
+  // 항상 노출하기 위함. 색/글리프 매핑은 styleFor 단일 소스를 그대로 재사용한다.
+  dot?: boolean;
 }
 
 interface BadgeStyle {
@@ -32,9 +35,21 @@ function styleFor(status: SandboxStatus | null | undefined): BadgeStyle {
   }
 }
 
-export default function StatusBadge({ status }: StatusBadgeProps) {
+export default function StatusBadge({ status, dot }: StatusBadgeProps) {
   const t = useT();
   const { glyph, color, labelKey } = styleFor(status);
+  if (dot) {
+    return (
+      <span
+        role="img"
+        aria-label={t(labelKey)}
+        title={t(labelKey)}
+        className={`font-mono text-xs leading-none ${color}`}
+      >
+        {glyph}
+      </span>
+    );
+  }
   return (
     <span
       className={`inline-flex items-center gap-1 font-mono text-xs tracking-wider ${color}`}

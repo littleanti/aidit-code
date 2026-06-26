@@ -11,6 +11,20 @@
 
 ## Changelog
 
+### 2026-06-27 · [feat] · 완료 · Thread 화면을 공통 디자인 언어(PageHeaderBar sticky bar + ShellPrompt)에 합류 + 북마크 버튼 추가 + 세션 제어 레이어 분리
+- **요청(사용자)**: 부모 Aidit 게시글 화면은 상단 sticky bar(뒤로가기·제목·북마크)가 있는데 Aidit-Code Thread엔 없어 통일성이 깨짐. 단 Aidit-Code는 Running 상태·Start/Stop Session 등 세션 제어가 있어 모든 걸 한 바에 넣으면 UX가 나쁨. 또 Thread엔 북마크 버튼·꾸미기 셸(ShellPrompt)도 없음. 통일성+기능성 둘 다 잡는 방향으로 수정.
+- **현황 비교**: `PageHeaderBar`(sticky `top-12`) + `ShellPrompt`는 이미 Home·Create·Profile·Settings에 적용된 공통 패턴인데 **Thread만 자체 비-sticky 헤더**(`mb-3 flex` — 뒤로가기 ‹ + StatusBadge + Start/Stop 칩)를 써서 합류 안 됨. 북마크는 백엔드·API(`bookmark()/unbookmark()` idempotent)·`post.bookmarked`·Profile 북마크 탭까지 전부 구현돼 있는데 **Thread(원본 글)에만 토글 버튼이 없음**(upvote는 이미 article 안에 낙관적 토글로 존재).
+- **방향(두 관심사를 레이어로 분리 — 사용자 승인안)**:
+  1. **sticky bar(PageHeaderBar)** = 항행/정체성: 뒤로가기 ‹ · 제목(truncate) · **세션 상태 점(read-only dot)** · **북마크 토글** · 작성자 ⋯ 메뉴. 부모 Aidit sticky bar와 동일 역할.
+  2. **세션 상태 점**: `StatusBadge`에 `dot` 변형 추가(glyph만, 라벨 없음 — 색/글리프 매핑은 기존 `styleFor` 단일 소스 재사용). 스크롤로 세션 행이 사라져도 "지금 켜져있나"를 sticky로 유지.
+  3. **ShellPrompt**: 바 바로 아래 `thread --attach=<id>` 꾸미기 셸(다른 페이지와 통일).
+  4. **세션 행(비-sticky)**: 전체 `StatusBadge` + 재연결 표시 + `[Start/Stop Session]` 버튼을 ShellPrompt 아래 행으로. 자주 누르는 버튼이 아니고(진입 시 자동 연결 + 끊김 시 composer 위 경고 상존) 스크롤로 사라져도 무방.
+  5. 작성자 ⋯ 메뉴를 article 액션행 → sticky bar로 이동(부모 패리티). article엔 upvote·댓글수 유지.
+- **구현(예정)**: `frontend/src/pages/Thread.tsx`(헤더 → PageHeaderBar+ShellPrompt+세션행 재구성, 북마크 상태/토글, ⋯ 메뉴 이동), `frontend/src/components/StatusBadge.tsx`(`dot` prop), `frontend/src/i18n/dicts/post.ts`(`bookmark` 라벨), `frontend/src/i18n/dicts/thread.ts`(`sessionDisconnected` 문구를 위치 비종속으로 — "우측 상단"→"상단").
+- **검증(③) — 실측**: FE `tsc --noEmit` **클린(EXIT 0)**. 브라우저(5173, KO) Thread(`/posts/cmquhmzwq…`)에서 ① sticky bar = `‹ helloworld  ● 🔖`(뒤로가기·제목·세션 점·북마크) 노출, ② 바 바로 아래 ShellPrompt `aidit@…:~$ thread --attach=cmquhmzwq…`, ③ 비-sticky 세션 행 `● RUNNING … [세션 중지]`(우측), ④ article에서 ⋯ 메뉴 제거됨(▲0·💬7만 유지) 확인. ⑤ 북마크 토글 실측: 외곽선→채워진 amber→외곽선(양방향), 롤백 없이 유지=서버 영속 성공(테스트 후 원복). ※ 작성자 ⋯ 메뉴(바 이식분)는 현재 로그인 계정 소유 글이 없어 브라우저 미노출 — `post && isAuthor` 가드 + 기존 메뉴 1:1 이식 + tsc로 검증.
+- 변경 파일(예정): `frontend/src/pages/Thread.tsx`, `frontend/src/components/StatusBadge.tsx`, `frontend/src/i18n/dicts/post.ts`, `frontend/src/i18n/dicts/thread.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
+
 ### 2026-06-27 · [fix] · 완료 · 피드/프로필 EOF 줄을 부모 Aidit 스타일로 — `─── EOF ───` → `— EOF · <문구> —` (한국어 매칭)
 - **요청(사용자)**: Aidit-Code의 EOF 표시를 부모 Aidit처럼 `— EOF · No more posts —` 형태로, 한국어도 부모 문구에 매칭.
 - **현황 비교**: Aidit-Code는 `Home.tsx`·`Profile.tsx`가 공통 `common.eof:'EOF'`를 `─── {eof} ───`(박스 대시)로 감싸 `─── EOF ───` 표시. 부모 Aidit는 페이지별 문구에 데코를 내장해 bare 렌더 — `home.eof` ko `— EOF · 마지막 게시글이에요 —`/en `— EOF · No more posts —`, `profile.eof` ko `— EOF · 마지막이에요 —`/en `— EOF · Nothing more —`.
