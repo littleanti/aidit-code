@@ -17,6 +17,7 @@ import {
   ApiError,
 } from '../api/rest';
 import { relativeTime, formatCount } from '../lib/time';
+import SafeMarkdown from '../lib/SafeMarkdown';
 import Avatar from '../components/Avatar';
 import StatusBadge from '../components/StatusBadge';
 import ChatBubble from '../components/ChatBubble';
@@ -479,9 +480,10 @@ export default function Thread() {
             </h1>
 
             {post.body && (
-              <p className="mt-2 whitespace-pre-wrap break-words font-mono text-sm leading-relaxed text-term-dim">
-                {post.body}
-              </p>
+              <SafeMarkdown
+                text={post.body}
+                className="mt-2 break-words font-mono text-sm leading-relaxed text-term-dim"
+              />
             )}
 
             <div className="mt-3 flex items-center gap-2 font-mono text-xs text-term-faint">

@@ -11,6 +11,15 @@
 
 ## Changelog
 
+### 2026-06-26 · [feat] · 완료 · 게시글 본문 마크다운 렌더링 추가 (부모 Aidit SafeMarkdown 이식)
+- **요청(사용자)**: 직전 재디자인에서 평문으로 둔 게시글 본문을 마크다운으로 렌더링.
+- **방향**: 부모 Aidit 의 살균 파이프라인(marked + DOMPurify)을 그대로 이식 — `markdown ─(normalizeLooseBold)→ marked(gfm,breaks) → DOMPurify(엄격 allowlist)` → `dangerouslySetInnerHTML`. 실패 시 escape 평문 폴백. 부모와 동일하게 게시글 본문엔 prose 클래스 미적용(text-sm/term-dim/leading-relaxed 상속) — 채팅 버블 마크다운은 이번 범위 밖(별도 요청 시).
+- **구현**: deps `marked@^18`·`dompurify@^3` 추가 → `frontend/src/lib/sanitize.ts`·`SafeMarkdown.tsx` 이식 → `Thread.tsx` 본문 `<p>{post.body}</p>` 을 `<div class="…"><SafeMarkdown text={post.body}/></div>` 로 교체.
+- **보안**: DOMPurify 엄격 allowlist(script/style/iframe/on*·style 속성 차단, URL 은 http(s)/mailto 만). 키/비밀과 무관.
+- **검증(③) — 실측**: `npm install`(marked·dompurify) exit 0, frontend `tsc --noEmit` 클린. 브라우저(5173)에서 마크다운+XSS 페이로드 본문을 PATCH 후 렌더 검사 — `<strong>/<em>/<code>/<pre>/<ul><li>/<h1>` 정상 생성, 안전 링크 `https://` 유지, XSS 전부 무력화(window.__xss 미설정, `<script>` 없음, on* 핸들러 없음, `javascript:` 스킴 없음, 악성 `<img>` 의 onerror·비http src 제거). 검사 후 테스트 글 본문 원복.
+- **참고(패리티)**: 부모와 동일하게 게시글 본문엔 prose 클래스 미적용 → 인라인 서식(굵게/기울임/인라인코드/링크)은 적용되고 블록 요소(제목/목록/코드블록)는 preflight 리셋으로 플랫하게 렌더(부모 post body 와 동일 동작). 채팅 버블 마크다운은 범위 밖.
+- 변경 파일: `frontend/package.json`·`package-lock.json`, `frontend/src/lib/sanitize.ts`(신규)·`SafeMarkdown.tsx`(신규), `frontend/src/pages/Thread.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [feat] · 완료 · Thread 게시글 섹션을 형제 앱 Aidit와 동일하게 재디자인 (작성자/Upvote/댓글수/편집·삭제 팝오버)
 - **요청(사용자)**: Thread 페이지의 게시글 자체 섹션(제목·본문·작성자·작성시간·Upvote·댓글 수·팝오버 편집/삭제)을 부모 Aidit와 동일 디자인으로. 커뮤니티 제외. 통일성 중요. (recon 워크플로 + frontend-design 으로 사전 검증 완료.)
 - **결정사항**: ① 편집은 부모처럼 `/create` 페이지 편집모드 재활용. ② 댓글 수 = HUMAN + AGENT_REPLY(AI 최종응답) 카운트, TOOL_CALL/TOOL_RESULT(쉘 출력)·SYSTEM 제외. ③ 작성자 username 조인은 게시글 상세 + 피드 PostCard 둘 다. ④ 메뉴 hover 는 부모의 `term-hover` 토큰을 1회 예외로 추가해 부모 그대로. "(수정됨)" 표시는 부모에 없어 생략(updatedAt 미도입).
