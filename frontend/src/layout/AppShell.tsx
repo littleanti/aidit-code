@@ -31,7 +31,7 @@ function Header() {
             <Link
               to="/me"
               title={username ?? ''}
-              className="inline-flex min-h-[44px] max-w-[8rem] items-center px-1 font-mono text-sm text-term-dim hover:text-term-fg-bright"
+              className="inline-flex min-h-[44px] max-w-[8rem] items-center font-mono text-sm text-term-dim hover:text-term-fg-bright"
             >
               <span aria-hidden="true" className="shrink-0">[&nbsp;</span>
               <span className="min-w-0 truncate">{username ?? ''}</span>
@@ -41,7 +41,7 @@ function Header() {
             <button
               type="button"
               onClick={openLogin}
-              className="inline-flex min-h-[44px] items-center px-1 font-mono text-sm text-term-amber"
+              className="inline-flex min-h-[44px] items-center font-mono text-sm text-term-amber"
             >
               {`[ ${t('common.login')} ]`}
             </button>

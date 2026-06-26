@@ -19,7 +19,9 @@ export default function LangToggle({ variant = 'header' }: LangToggleProps) {
   const header = variant === 'header';
   return (
     <div
-      className="inline-flex items-center whitespace-nowrap font-mono text-sm"
+      className={`inline-flex items-center whitespace-nowrap font-mono text-sm${
+        header ? ' gap-1' : ''
+      }`}
       role="group"
       aria-label="Language"
     >
@@ -32,20 +34,32 @@ export default function LangToggle({ variant = 'header' }: LangToggleProps) {
       {LANGS.map((l, i) => {
         const active = lang === l.code;
         return (
-          <span key={l.code} className="inline-flex items-center">
-            {i > 0 && <span className="px-1 text-term-dim-3" aria-hidden="true">|</span>}
+          <span
+            key={l.code}
+            className={`inline-flex items-center${header ? ' gap-1' : ''}`}
+          >
+            {i > 0 && (
+              <span
+                className={`text-term-dim-3${header ? '' : ' px-1'}`}
+                aria-hidden="true"
+              >
+                |
+              </span>
+            )}
             <button
               type="button"
               aria-pressed={active}
               onClick={() => setLang(l.code)}
               className={[
                 'inline-flex min-h-[44px] items-center',
-                header ? 'px-1.5' : 'px-2',
+                header ? '' : 'px-2',
                 variant === 'setting' ? 'min-w-[44px] justify-center' : '',
                 active
                   ? 'text-term-amber'
                   : 'text-term-dim hover:text-term-fg-bright',
-              ].join(' ')}
+              ]
+                .filter(Boolean)
+                .join(' ')}
             >
               {l.label}
             </button>
