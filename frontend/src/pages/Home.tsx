@@ -28,8 +28,8 @@ export default function Home() {
 
   return (
     <div>
-      {/* hot/new tab toggle */}
-      <div className="mb-2 flex gap-4 font-mono text-sm" role="tablist">
+      {/* hot/new tab toggle — sized to match CreatePost's h1 title row (text-base) */}
+      <div className="mb-2 flex gap-4 font-mono text-base" role="tablist">
         {(['hot', 'new'] as PostSort[]).map((s) => {
           const active = sort === s;
           return (
@@ -40,7 +40,7 @@ export default function Home() {
               aria-selected={active}
               onClick={() => setSort(s)}
               className={[
-                'min-h-[44px] px-1',
+                'px-1',
                 active
                   ? 'border-b-2 border-term-amber text-term-amber'
                   : 'text-term-dim hover:text-term-fg-bright',

@@ -11,6 +11,35 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · 홈 인기/최신 토글 행 높이를 작성 페이지 제목과 동일(24px)로 — min-h-[44px] 제거
+- **요청(사용자)**: 직전 글자 크기(text-base) 통일만으로는 부족 — 홈 인기/최신 행이 다른 상단바보다 여전히 **높이가 높다**. 작성 페이지 상단과 높이까지 동일하게.
+- **원인(실측)**: 토글 버튼 `min-h-[44px]` 때문에 행 높이=**44px**. 작성 페이지 제목 `h1`은 min-height 없이 line-height만이라 **24px**. → 20px 차이(= 홈 헤더→프롬프트 68px vs 작성 48px 차이와 동일).
+- **방향**: 토글 버튼에서 `min-h-[44px]` 제거 → 행 높이 24px 로 작성 페이지 `h1` 과 일치. **트레이드오프**: 모바일 터치 타깃이 44px→24px 로 작아짐(WIREFRAME 모바일 가이드와 상충). 시각적 높이 일치가 명시적 요청이라 우선 적용.
+- **구현**: `Home.tsx` 토글 버튼 className 에서 `min-h-[44px]` 제거(`px-1` 유지).
+- **검증(③) — 실측**: frontend `tsc --noEmit` 클린. 브라우저(localhost:5173) 토글 행 높이 44→**26px**, 헤더→프롬프트 68→**50px**(작성 페이지 24px/48px과 거의 동일). 남은 2px 는 활성 토글의 앰버 밑줄(`border-b-2`)로, 제목엔 없는 토글 고유 디자인(유지 요청).
+- 변경 파일: `frontend/src/pages/Home.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
+### 2026-06-26 · [fix] · 완료 · ShellPrompt 바로 위 요소와의 여백을 전 페이지 8px(mb-2)로 통일
+- **요청(사용자)**: `aidit@…:~$ ~~~~` 형태 ShellPrompt 와 그 위 상단 bar 사이 간격이 페이지마다 달라 통일.
+- **측정(실측, localhost:5173)** — 헤더→프롬프트 총거리 / 프롬프트 바로 위 요소와의 여백:
+  - 나(Profile): 16px / 위 요소 없음(프롬프트가 최상단, py-4만)
+  - 작성(Create): 48px / 8px(`h1.mb-2`)
+  - 홈(Home): 68px / 8px(토글 `div.mb-2`)
+  - 설정(Settings): 72px / **12px**(`div.mb-3`) ← 유일한 불일치
+  - (검색 페이지는 설계상 없음 — WIREFRAME §1.)
+- **방향(사용자 확정)**: 프롬프트 **바로 위 요소와의 여백**만 8px(`mb-2`)로 통일. 페이지별 총 거리(요소 높이 차)는 유지. 각 페이지 헤더 구조/위치는 그대로.
+- **구현**: `Settings.tsx` 상단 뒤로가기 바 `mb-3` → `mb-2`. (홈·작성은 이미 mb-2, 나는 위 요소 없음 → 변경 불필요.)
+- **검증(③) — 실측**: frontend `tsc --noEmit` 클린. 브라우저(localhost:5173/me/settings)에서 프롬프트 바로 위 바의 marginBottom=8px·gap=8px 확인 → 홈·작성과 동일.
+- 변경 파일: `frontend/src/pages/Settings.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
+### 2026-06-26 · [fix] · 완료 · 홈 인기/최신 토글을 작성 페이지 상단과 동일 크기로 — text-sm → text-base
+- **요청(사용자)**: 홈의 인기/최신 첫 줄 레이아웃을 작성 페이지(검색 페이지는 설계상 없음) 상단과 크기·디자인을 동일하게. 차이는 버튼이 2개라는 점만.
+- **분석**: 작성 페이지 상단 = 제목 `h1`(`text-base text-term-fg-bright`, `mb-2`) → ShellPrompt 줄(`text-xs text-term-dim`, `mb-3`). 홈 상단 = 인기/최신 토글(`text-sm`, `mb-2`) → 동일 ShellPrompt 줄. ShellPrompt·여백(mb-2/mb-3)은 이미 동일하고 차이는 첫 줄 글자 크기뿐(`text-sm` vs `text-base`).
+- **방향(사용자 확정)**: 토글 버튼을 제목 크기(`text-base`)로 키움. ShellPrompt 줄·여백은 공유, 토글의 앰버 밑줄/활성(active) 디자인은 유지.
+- **구현**: `Home.tsx` 토글 컨테이너 className `text-sm` → `text-base`.
+- **검증(③) — 실측**: frontend `tsc --noEmit` 클린. 브라우저(localhost:5173)에서 홈 토글 버튼 computed fontSize=16px(JetBrains Mono), 작성 페이지 `h1` computed fontSize=16px·marginBottom=8px 동일 확인.
+- 변경 파일: `frontend/src/pages/Home.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [fix] · 완료 · [Stop Session] 칩 색을 Delete 버튼과 통일 + Delete → [Delete]
 - **요청(사용자)**: `[Stop Session]` 테두리/글씨 색을 Delete 버튼과 동일하게, 그리고 Delete 라벨을 `[Delete]` 로.
 - **수정**: 세션 토글 칩 className 을 상태별로 — `sessionActive`(Stop)면 Delete 와 동일 토큰(`border-term-red-line text-term-red hover:bg-term-red-bg`), `!sessionActive`(Start)면 기존 amber 유지. Delete 트리거 버튼 라벨을 `[{deletePost}]` 로 대괄호 표기(Start/Stop 칩과 통일).

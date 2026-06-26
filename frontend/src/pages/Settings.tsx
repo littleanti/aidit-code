@@ -47,7 +47,7 @@ export default function Settings() {
 
   return (
     <div>
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-2 flex items-center justify-between">
         <button
           type="button"
           onClick={() => navigate('/me')}
