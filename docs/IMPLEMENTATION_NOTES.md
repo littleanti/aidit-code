@@ -11,6 +11,10 @@
 
 ## Changelog
 
+### 2026-06-26 · [chore] · 완료 · 미사용 i18n 키 `thread.sessionRunning` 제거
+- 직전 작업에서 '● 세션 실행 중' 배지를 삭제해 유일 소비처가 사라진 dead 키(ko/en)를 제거. 다른 참조 없음(grep 확인), 동작 무변. frontend `tsc --noEmit` 클린 + `vite build` PASS.
+- 변경 파일: `frontend/src/i18n/dicts/thread.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [feat] · 완료 · 진입 시 자동 연결(attach) 후 Thread 세션 UI 정리 — 중복 배지 제거·시작 컨트롤 우상단 이동·컴포저 위 빨간 경고
 - **요청(사용자)**: 게시글 진입이 세션을 자동 연결/attach 하게 된 지금, Thread 세션 UI 를 정리한다.
 - **배경/불변식**: `sessionActive = !!activeSession && status !== 'STOPPED' && status !== 'ERROR'`(~244). `!sessionActive` 는 **세션 끊김**뿐 아니라 **세션이 아직 시작되지 않은 새 글**(lazy auto-attach 는 *기존* 세션만 attach; 첫 메시지로 spawn)도 포함한다 → 두 상태 모두 동일한 "시작 칩 + 경고" 가 노출되는 것이 **올바른 어포던스**(시작/재연결 유도). 의도된 동작으로 허용한다.
