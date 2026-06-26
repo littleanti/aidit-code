@@ -272,6 +272,14 @@ export default function Thread() {
   const sessionErrKey = activeSession ? errorKeyForSession(activeSession.status) : null;
   const statusErrorKey = sandboxErrKey ?? sessionErrKey;
 
+  // Session-aware sandbox badge: a sandbox can linger in RUNNING after the agent
+  // session ends (stale state). Don't show "Running" top-left while the session
+  // is not active — surface it as SUSPENDED so it agrees with the disconnect
+  // warning. Other states (CREATING/READY/ERROR/SUSPENDED) pass through as-is.
+  const rawSandboxStatus = sandboxStatus ?? post?.sandbox?.status ?? null;
+  const badgeStatus =
+    !sessionActive && rawSandboxStatus === 'RUNNING' ? 'SUSPENDED' : rawSandboxStatus;
+
   return (
     <div className="-mb-4 flex flex-col" style={{ minHeight: 'calc(100vh - 7rem)' }}>
       {/* Header: back + sandbox badge + reconnect indicator */}
@@ -283,7 +291,7 @@ export default function Thread() {
         >
           ‹
         </Link>
-        <StatusBadge status={sandboxStatus ?? post?.sandbox?.status} />
+        <StatusBadge status={badgeStatus} />
         {streamStatus === 'reconnecting' && (
           <span className="font-mono text-[10px] tracking-wider text-term-dim" role="status">
             ⟳ {t('thread.reconnecting')}

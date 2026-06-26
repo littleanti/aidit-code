@@ -11,6 +11,13 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · 세션 끊김인데 좌상단 배지가 `Running` 으로 남는 모순 — 세션 인식형 표시
+- **증상(사용자)**: "세션 끊김" 빨간 경고가 떠 있는데 게시글 상단 좌측 배지는 여전히 `● Running`.
+- **원인**: 좌상단 `StatusBadge` 는 **샌드박스 상태**(`sandboxStatus`)를, 끊김 경고는 **세션 상태**(`sessionActive`)를 본다 — 서로 다른 대상. 세션이 끊겨도 샌드박스는 DB 에 `RUNNING` 으로 남을 수 있어(stale; 백엔드도 "활성 세션 없는 RUNNING 은 비정상") 둘이 어긋남.
+- **수정**: Thread.tsx 에서 배지에 넘기는 상태를 세션 인식형으로 도출 — `!sessionActive && raw === 'RUNNING'` 이면 `RUNNING` 대신 `SUSPENDED`(○ 비활성)로 표시해 경고와 일치. `sessionActive` 면 실제 샌드박스 상태 그대로. CREATING/READY/ERROR 등은 불변. `StatusBadge` 는 순수 표시 컴포넌트 유지(도출은 호출부).
+- **검증(③)**: frontend `tsc --noEmit` 클린, `vite build` PASS. 끊김(`!sessionActive`)+stale RUNNING → 배지 ○ SUSPENDED 로 표시되어 경고와 일치; 연결 시 ● RUNNING 유지.
+- 변경 파일: `frontend/src/pages/Thread.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [chore] · 완료 · 미사용 i18n 키 `thread.sessionRunning` 제거
 - 직전 작업에서 '● 세션 실행 중' 배지를 삭제해 유일 소비처가 사라진 dead 키(ko/en)를 제거. 다른 참조 없음(grep 확인), 동작 무변. frontend `tsc --noEmit` 클린 + `vite build` PASS.
 - 변경 파일: `frontend/src/i18n/dicts/thread.ts`, `docs/IMPLEMENTATION_NOTES.md`.
