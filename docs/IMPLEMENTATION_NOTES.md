@@ -11,6 +11,17 @@
 
 ## Changelog
 
+### 2026-06-26 · [feat] · 완료 · 홈·설정 화면을 부모 Aidit와 동일화 + 나 페이지 [설정] 라벨
+- **요청(사용자)**: ① 홈 — 인기/최신 탭·활성 탭·쉘 프롬프트·로딩/빈 상태를 Aidit과 동일. ② 설정 — 헤더·쉘 프롬프트·섹션 스타일·로그아웃 버튼을 Aidit과 동일. ③ 나 페이지 — 설정 진입을 Aidit 동일 폰트/크기/스타일의 `[ 설정 ]` 로.
+- **방향**:
+  - 홈: 인기/최신 탭을 `<PageHeaderBar>` 안에 바를 꽉 채우게(h-full flex-1) + 활성 탭 amber 밑줄·배경틴트(`bg-[rgba(255,207,74,0.06)]`). 인라인 프롬프트 → `<ShellPrompt command="feed --sort=…">`. 로딩 = `LoadingState`(skeleton) 신규 이식, 빈 상태 = 부모식 `EmptyState`(title + CTA `+ 첫 글 쓰기`).
+  - `EmptyState` 를 부모 API(title/hint/icon/action/className)로 교체 → 기존 `message` 호출부(Profile) 갱신. `LoadingState`(spinner|skeleton) 신규.
+  - 설정: 헤더 `<PageHeaderBar>`(제목 + `[ ← 프로필 ]` 라벨 백링크), `<ShellPrompt command="cat ~/.config">`, 섹션을 `border-t` → **카드형**(`rounded-[2px] border bg-term-panel p-4`, 코너 태그), 로그아웃을 카드 안 full-width term-red 버튼으로. (API 키 BYOK 섹션은 서버키 정책상 계속 제외; Runtime 읽기전용 행 유지.)
+  - 나 페이지: `profile.settingsLabel` `설정` → `[ 설정 ]`(부모 브래킷 스타일), 기존 bordered 버튼 스타일 유지.
+  - 토큰 매핑: term-title→term-glow, term-border→term-line, term-card→term-panel, term-bright→term-fg-bright, term-danger→term-red, `.glow`→인라인 text-shadow.
+- **검증(③) — 실측**: frontend `tsc --noEmit` 클린. 브라우저(5173): 홈 = 인기/최신 탭이 PageHeaderBar 를 꽉 채움(활성 amber 밑줄+틴트) + `aidit@…:~$ feed --sort=popular`. 설정 = PageHeaderBar(`설정` + `[ ← 프로필 ]`) + `cat ~/.config` + 카드형 섹션(런타임 코너태그·언어·로그아웃 full-width term-red). 나 페이지 설정 진입 = 테두리 버튼 `[ 설정 ]`. (LoadingState skeleton·EmptyState CTA 는 부모 직역 이식분, tsc 검증.)
+- 변경 파일(예정): `frontend/src/components/states/LoadingState.tsx`(신규)·`EmptyState.tsx`, `frontend/src/pages/Home.tsx`·`Settings.tsx`·`Profile.tsx`, `frontend/src/i18n/dicts/post.ts`·`profile.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [feat] · 완료 · 작성·나 페이지 헤더/쉘프롬프트를 부모 Aidit와 구조 동일화 (PageHeaderBar·ShellPrompt 이식)
 - **요청(사용자)**: 작성 페이지·나 페이지의 **헤더와 쉘 프롬프트**를 부모 Aidit와 완전 동일 구조로(내용만 다르게).
 - **방향**: 부모의 `PageHeaderBar`(앱바 h-12 바로 아래 sticky, `-mt-4 -mx-4` 풀블리드)·`ShellPrompt`(`aidit@user:~$ command` + term-cursor, aria-hidden)·`formatPromptArg`(프롬프트 인자 정규화/이스케이프/32자 트렁케이트)를 그대로 이식. 토큰만 Aidit-Code 매핑(term-title→term-glow, term-border→term-line, term-screen 솔리드→term-nav, glow 클래스→인라인 text-shadow). 커뮤니티 관련 `desktop:` 변형은 제외(Aidit-Code 단일 컬럼).

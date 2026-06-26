@@ -1,14 +1,16 @@
 // src/pages/Settings.tsx
-// /me/settings — LangToggle (variant setting, active term-amber) + read-only runtime info row
-// (GET /runtime → 'model @ host') + an explicit term-dim note that LLM keys are server-managed +
-// Logout (border/text term-red) that clears the token and routes to '/'.
-// ABSOLUTELY NO API Key input/section. Only term-* tokens; copy via i18n; touch targets >=44px.
+// /me/settings — 부모 Aidit 동일 구조: PageHeaderBar(제목 + [ ← 프로필 ] 백링크) +
+// ShellPrompt("cat ~/.config") + 카드형 섹션(Runtime 읽기전용 / Language / Logout).
+// 보안: API 키 입력 섹션 없음 — LLM 키는 서버 .env 에서만 관리. 읽기전용 runtime 행
+// (GET /runtime → 'model @ host') + 서버 관리 안내만 노출. Only term-* tokens; copy via i18n.
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useT } from '../i18n/useT';
 import { useAuthStore } from '../stores/authStore';
 import { getRuntime } from '../api/rest';
 import LangToggle from '../components/LangToggle';
+import PageHeaderBar from '../components/PageHeaderBar';
+import ShellPrompt from '../components/ShellPrompt';
 import type { RuntimeInfo } from '../api/types';
 
 export default function Settings() {
@@ -46,53 +48,59 @@ export default function Settings() {
     : null;
 
   return (
-    <div>
-      <div className="mb-2 flex items-center justify-between">
-        <button
-          type="button"
-          onClick={() => navigate('/me')}
-          className="inline-flex min-h-[44px] items-center font-mono text-sm text-term-dim hover:text-term-fg-bright"
+    <div className="pb-6 font-mono">
+      {/* 고정 상단바: 제목 + [ ← 프로필 ] 백링크(부모 동일) */}
+      <PageHeaderBar>
+        <h1 className="min-w-0 flex-1 truncate text-base font-semibold text-term-glow [text-shadow:0_0_4px_rgba(125,255,160,0.45)]">
+          {t('profile.settings.title')}
+        </h1>
+        <Link
+          to="/me"
+          className="inline-flex h-8 shrink-0 items-center rounded-[2px] border border-term-line px-3 text-sm font-semibold text-term-dim transition hover:border-term-fg-bright hover:text-term-fg-bright"
         >
           {t('profile.settings.back')}
-        </button>
-        <span className="font-mono text-xs text-term-dim">{t('profile.settings.title')}</span>
-      </div>
+        </Link>
+      </PageHeaderBar>
 
-      <div className="mb-3 font-mono text-xs text-term-dim">aidit@web:~$ cat ~/.config</div>
+      <ShellPrompt command="cat ~/.config" className="mt-4 mb-3" />
 
-      {/* Runtime (read-only) — NO API key section. */}
-      <section className="mb-6 border-t border-term-line pt-4">
-        <h2 className="mb-2 font-mono text-xs uppercase tracking-wider text-term-dim">
-          {t('profile.settings.runtime.label')}
-        </h2>
-        {runtimeLine && (
-          <p className="mb-1 font-mono text-sm text-term-fg" aria-live="polite">
-            {runtimeLine}
+      <div className="space-y-8">
+        {/* Runtime (읽기전용) — 카드 + 코너 태그. API 키 입력 섹션은 정책상 없음. */}
+        <section className="relative rounded-[2px] border border-term-line bg-term-panel p-4">
+          <span className="absolute -top-2 left-3 select-none bg-term-panel px-1.5 text-[11px] font-bold uppercase tracking-wider text-term-faint">
+            {t('profile.settings.runtime.label')}
+          </span>
+          {runtimeLine && (
+            <p className="mb-1 text-sm text-term-fg" aria-live="polite">
+              {runtimeLine}
+            </p>
+          )}
+          <p className="text-xs leading-relaxed text-term-dim">
+            ⚠ {t('profile.settings.runtime.serverManaged')}
           </p>
-        )}
-        <p className="font-mono text-xs text-term-dim">
-          ⚠ {t('profile.settings.runtime.serverManaged')}
-        </p>
-      </section>
+        </section>
 
-      {/* Language */}
-      <section className="mb-6 border-t border-term-line pt-4">
-        <h2 className="mb-2 font-mono text-xs uppercase tracking-wider text-term-dim">
-          {t('profile.settings.language.label')}
-        </h2>
-        <LangToggle variant="setting" />
-      </section>
+        {/* Language (LangToggle variant="setting") */}
+        <section className="rounded-[2px] border border-term-line bg-term-panel p-4">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-semibold text-term-fg-bright">
+              {t('profile.settings.language.label')}
+            </span>
+            <LangToggle variant="setting" />
+          </div>
+        </section>
 
-      {/* Account */}
-      <section className="border-t border-term-line pt-4">
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="min-h-[44px] w-full rounded-[2px] border border-term-red px-4 font-mono text-sm text-term-red hover:bg-term-red/10"
-        >
-          {t('profile.settings.logout')}
-        </button>
-      </section>
+        {/* Logout */}
+        <section className="rounded-[2px] border border-term-line bg-term-panel p-4">
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="inline-flex min-h-[44px] w-full items-center justify-center rounded-[2px] border border-term-red px-4 text-sm font-semibold text-term-red transition hover:bg-term-hover"
+          >
+            {t('profile.settings.logout')}
+          </button>
+        </section>
+      </div>
     </div>
   );
 }

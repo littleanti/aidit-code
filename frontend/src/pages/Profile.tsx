@@ -62,7 +62,7 @@ function TabList({ userId, tab }: { userId: string; tab: ProfileTab }) {
         />
       )}
 
-      {!loading && !error && done && items.length === 0 && <EmptyState message={emptyMsg} />}
+      {!loading && !error && done && items.length === 0 && <EmptyState title={emptyMsg} />}
 
       {loading && (
         <p className="py-4 text-center font-mono text-xs text-term-dim">
