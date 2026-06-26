@@ -183,6 +183,10 @@ export default function Thread() {
   // freshly-sent message always re-pins and follows; streaming tokens follow
   // only while pinned (instant), brand-new bubbles ease in (smooth).
   useEffect(() => {
+    // Don't consume the one-shot guard on the empty pre-hydrate render — wait
+    // until there are real messages so `firstRun` maps to the actual hydrate.
+    if (messages.length === 0) return;
+
     const last = messages[messages.length - 1];
     const lastId = last?.id ?? null;
     const isNewBubble = lastId !== prevLastIdRef.current;
@@ -193,13 +197,17 @@ export default function Thread() {
     if (selfSent) {
       pinnedRef.current = true; // I just sent — always follow.
     }
-    // One-shot guard: skip ONLY the first messages-driven run per thread (the
-    // initial hydrate) so entry lands at the TOP — UNLESS that very first event
-    // is my own send, which must still follow (the guard never suppresses a
-    // genuine HUMAN send). Subsequent runs follow normally while pinned.
+    // One-shot guard: the FIRST real (post-hydrate) run per thread always lands
+    // at the TOP (show the original post first) — UNLESS that very first event
+    // is my own send, which must still follow. Explicitly scrollTo(0,0) here so
+    // browser scroll-restoration or a false-positive "pinned" can't drag entry
+    // to the bottom. Subsequent runs follow normally while pinned.
     const firstRun = !hasAutoScrolledRef.current;
     hasAutoScrolledRef.current = true;
-    if (firstRun && !selfSent) return;
+    if (firstRun && !selfSent) {
+      window.scrollTo(0, 0);
+      return;
+    }
     if (!pinnedRef.current) return;
     bottomRef.current?.scrollIntoView({
       block: 'end',

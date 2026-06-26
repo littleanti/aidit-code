@@ -11,6 +11,13 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · 게시글 진입 시 바닥 스크롤 제거 — 항상 최상단부터 표시
+- **요청(사용자)**: 게시글 첫 진입 시 맨 아래로 내려가는 동작 삭제. 진입은 항상 최상단(원문)부터 보여주는 게 맞는 UX.
+- **원인(취약점)**: 기존 top-on-entry 가드(`firstRun` + `pinnedRef=false`)가 있으나 ① 메시지 0건 초기 렌더가 `hasAutoScrolledRef` 가드를 먼저 소진 → 실제 hydrate 시 firstRun=false, ② 짧은/로딩 중 콘텐츠에서 스크롤 리스너가 `innerHeight+scrollY >= scrollHeight-120` 를 만족시켜 `pinnedRef` 가 false-positive 로 true → 첫 hydrate 에서 바닥으로 스크롤될 수 있음.
+- **수정**: 자동스크롤 effect 를 견고화 — (1) `messages.length === 0` 이면 즉시 return(가드 미소진, 빈 렌더가 firstRun 을 잡아먹지 않음). (2) 첫 실제 실행(firstRun && !selfSent)에서 단순 return 대신 `window.scrollTo(0,0)` 로 **명시적으로 최상단 고정**(브라우저 스크롤 복원/false-positive pinned 무력화). 자기 전송(selfSent) 팔로우와 사용자가 바닥 근처일 때의 스트리밍 팔로우는 그대로 보존.
+- **검증(③)**: frontend `tsc --noEmit` 클린, `vite build` PASS. 진입 firstRun 에서 `window.scrollTo(0,0)` 강제 + 빈 렌더 가드 미소진으로 항상 최상단; selfSent/pinned 팔로우 보존.
+- 변경 파일: `frontend/src/pages/Thread.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [fix] · 완료 · 세션 끊김인데 좌상단 배지가 `Running` 으로 남는 모순 — 세션 인식형 표시
 - **증상(사용자)**: "세션 끊김" 빨간 경고가 떠 있는데 게시글 상단 좌측 배지는 여전히 `● Running`.
 - **원인**: 좌상단 `StatusBadge` 는 **샌드박스 상태**(`sandboxStatus`)를, 끊김 경고는 **세션 상태**(`sessionActive`)를 본다 — 서로 다른 대상. 세션이 끊겨도 샌드박스는 DB 에 `RUNNING` 으로 남을 수 있어(stale; 백엔드도 "활성 세션 없는 RUNNING 은 비정상") 둘이 어긋남.
