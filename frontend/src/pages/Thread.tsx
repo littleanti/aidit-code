@@ -347,7 +347,11 @@ export default function Thread() {
           type="button"
           onClick={sessionActive ? handleStopSession : handleStartSession}
           disabled={startingSession || stoppingSession}
-          className="ml-auto inline-flex min-h-[28px] items-center rounded-[2px] border border-term-amber-line px-2 font-mono text-[11px] tracking-wider text-term-amber disabled:opacity-50"
+          className={`ml-auto inline-flex min-h-[28px] items-center rounded-[2px] border px-2 font-mono text-[11px] tracking-wider disabled:opacity-50 ${
+            sessionActive
+              ? 'border-term-red-line text-term-red hover:bg-term-red-bg' // [Stop Session] — match the Delete button
+              : 'border-term-amber-line text-term-amber'
+          }`}
         >
           {sessionActive
             ? `[${stoppingSession ? t('thread.stoppingSession') : t('thread.stopSession')}]`
@@ -396,7 +400,7 @@ export default function Thread() {
                       onClick={() => setConfirmDelete(true)}
                       className="min-h-[32px] rounded-[3px] border border-term-red-line px-2 font-mono text-[11px] text-term-red hover:bg-term-red-bg"
                     >
-                      {t('thread.deletePost')}
+                      {`[${t('thread.deletePost')}]`}
                     </button>
                   ) : (
                     <>

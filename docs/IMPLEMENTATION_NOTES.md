@@ -11,6 +11,12 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · [Stop Session] 칩 색을 Delete 버튼과 통일 + Delete → [Delete]
+- **요청(사용자)**: `[Stop Session]` 테두리/글씨 색을 Delete 버튼과 동일하게, 그리고 Delete 라벨을 `[Delete]` 로.
+- **수정**: 세션 토글 칩 className 을 상태별로 — `sessionActive`(Stop)면 Delete 와 동일 토큰(`border-term-red-line text-term-red hover:bg-term-red-bg`), `!sessionActive`(Start)면 기존 amber 유지. Delete 트리거 버튼 라벨을 `[{deletePost}]` 로 대괄호 표기(Start/Stop 칩과 통일).
+- **검증(③) — 실측**: frontend `tsc --noEmit` 클린 + `vite build` PASS. 브라우저에서 `[세션 중지]` 칩 computed color=term-red(rgb 255,122,122)·border=term-red-line(rgb 90,37,48) 확인 — Delete 와 동일 토큰. `[Start Session]` 은 amber 유지.
+- 변경 파일: `frontend/src/pages/Thread.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [feat] · 완료 · 진입 시 세션 자동 시작(연결) + 시작/중지 토글 버튼([Start Session]/[Stop Session])
 - **요청(사용자)**: ① 게시글 진입 시 자동으로 세션이 연결(시작)되게. ② 연결되면 'Start session' 버튼이 사라지지 말고 `[Start Session]`→`[Stop Session]` 으로 토글.
 - **원인(자동 연결 안 됨)**: 기존 진입 effect 가 `!sessionActive` 면 return → **기존 활성 세션 attach 만** 하고, 세션이 없으면 시작하지 않음(lazy). 그래서 활성 세션이 없는 글은 진입해도 연결 안 됨.
