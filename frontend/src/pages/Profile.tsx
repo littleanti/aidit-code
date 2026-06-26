@@ -72,7 +72,7 @@ function TabList({ userId, tab }: { userId: string; tab: ProfileTab }) {
 
       {done && items.length > 0 && (
         <p className="py-4 text-center font-mono text-xs text-term-dim-3">
-          ─── {t('common.eof')} ───
+          {t('profile.eof')}
         </p>
       )}
 

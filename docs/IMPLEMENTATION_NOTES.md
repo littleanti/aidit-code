@@ -11,6 +11,15 @@
 
 ## Changelog
 
+### 2026-06-27 · [fix] · 완료 · 피드/프로필 EOF 줄을 부모 Aidit 스타일로 — `─── EOF ───` → `— EOF · <문구> —` (한국어 매칭)
+- **요청(사용자)**: Aidit-Code의 EOF 표시를 부모 Aidit처럼 `— EOF · No more posts —` 형태로, 한국어도 부모 문구에 매칭.
+- **현황 비교**: Aidit-Code는 `Home.tsx`·`Profile.tsx`가 공통 `common.eof:'EOF'`를 `─── {eof} ───`(박스 대시)로 감싸 `─── EOF ───` 표시. 부모 Aidit는 페이지별 문구에 데코를 내장해 bare 렌더 — `home.eof` ko `— EOF · 마지막 게시글이에요 —`/en `— EOF · No more posts —`, `profile.eof` ko `— EOF · 마지막이에요 —`/en `— EOF · Nothing more —`.
+- **방향(부모 문구 그대로 매칭)**: Aidit-Code엔 `home` 네임스페이스가 없어 **피드(Home)는 `common.eof`를 재사용**해 ko `— EOF · 마지막 게시글이에요 —`/en `— EOF · No more posts —`로, **프로필은 신규 `profile.eof`** ko `— EOF · 마지막이에요 —`/en `— EOF · Nothing more —` 추가. 렌더 사이트의 `─── … ───` 래핑 제거하고 bare `{t(...)}`로(데코는 문자열에 내장, 부모와 동일). 스타일 클래스(`text-term-dim-3 font-mono text-xs`)는 유지.
+- **구현(예정)**: `frontend/src/i18n/dicts/common.ts`(eof 문자열), `frontend/src/i18n/dicts/profile.ts`(eof 키 추가), `frontend/src/pages/Home.tsx`(L111 래핑 제거), `frontend/src/pages/Profile.tsx`(L75 → `profile.eof`).
+- **검증(③) — 실측**: FE `tsc --noEmit` **클린(EXIT 0)**. 브라우저(5173, KO) 홈 피드 하단 `<p>` = **`— EOF · 마지막 게시글이에요 —`** 노출 확인(기존 `─── EOF ───` 대체). 프로필(`/me`)은 현재 로그인 계정에 게시글이 없어 EOF 블록 미렌더이나 `t('profile.eof')` **원시 키 노출 없음**(key leak=false) + tsc로 키 존재 확인.
+- 변경 파일: `frontend/src/i18n/dicts/common.ts`, `frontend/src/i18n/dicts/profile.ts`, `frontend/src/pages/Home.tsx`, `frontend/src/pages/Profile.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
+
 ### 2026-06-27 · [fix] · 완료 · 헤더 LLM 상태 배지 표기 `LLM`→`AI` (부모 Aidit와 용어 통일)
 - **요청(사용자)**: Aidit-Code 헤더 연결 배지의 `LLM` 표기도 `AI`로 변경. (부모 Aidit는 앞서 `● AI` 라벨 + 툴팁 `AI`로 통일됨 — 형제 앱 용어 일치.)
 - **방향(텍스트만)**: 반응형 동작(`hidden sm:inline`, 640px 기준 — 좁으면 숨김/넓으면 표시)은 **그대로 유지**하고 **표시 문구만** 변경. ① `LlmStatusBadge`의 가시 라벨 `LLM`→`AI`(클래스 불변), ② i18n `common.llmConnected/Offline/Unknown`의 `LLM`→`AI`(ko·en, aria-label·title용). 상태 로직·LED 색상 불변.
