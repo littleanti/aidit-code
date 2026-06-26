@@ -167,14 +167,25 @@ export async function getPost(id: string): Promise<Post> {
   };
 }
 
-/** POST /posts — create post (title, body) → { post, sandbox }. Requires Bearer. */
+/**
+ * POST /posts — create post (title, body) → { post, sandbox }. Requires Bearer.
+ * opts(부모 Aidit 패리티, 동작은 Aidit-Code 매핑):
+ *   - autoReply: "게시 후 AI 1차 답변 받기"(기본 ON). false 면 게시만 하고 자동 에이전트 턴 생략.
+ *   - reasoningEffort: 자동 첫 턴의 작업 강도(낮음/중간/높음). autoReply ON 일 때만 의미.
+ */
 export function createPost(
   title: string,
-  body: string
+  body: string,
+  opts?: { autoReply?: boolean; reasoningEffort?: ReasoningEffort }
 ): Promise<{ post: Post; sandbox: Sandbox }> {
   return request<{ post: Post; sandbox: Sandbox }>('/posts', {
     method: 'POST',
-    body: { title, body },
+    body: {
+      title,
+      body,
+      ...(opts?.autoReply !== undefined ? { autoReply: opts.autoReply } : {}),
+      ...(opts?.reasoningEffort ? { reasoningEffort: opts.reasoningEffort } : {}),
+    },
   });
 }
 

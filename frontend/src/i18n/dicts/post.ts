@@ -26,6 +26,7 @@ export const post = {
       '게시하면 이 게시글 전용 샌드박스가 자동 생성되고 코드 에이전트가 붙습니다.',
     publish: '게시하기',
     publishing: '게시 중…',
+    aiFirstReply: '게시 후 AI 1차 답변 받기',
     loginToPost: '게시글을 작성하려면 로그인이 필요해요',
     // 편집 모드(CreatePost 재활용 — 부모 Aidit 패리티)
     editTitle: '게시글 수정',
@@ -61,6 +62,7 @@ export const post = {
       'Publishing auto-creates a dedicated sandbox for this post and attaches a code agent.',
     publish: 'Publish',
     publishing: 'Publishing…',
+    aiFirstReply: 'Get first AI reply after posting',
     loginToPost: 'Login is required to create a post',
     // Edit mode (CreatePost reuse — Aidit parity)
     editTitle: 'Edit post',

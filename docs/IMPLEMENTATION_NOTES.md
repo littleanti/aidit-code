@@ -11,6 +11,16 @@
 
 ## Changelog
 
+### 2026-06-26 · [feat] · 완료 · 작성 페이지에 "게시 후 AI 1차 답변 받기" 체크박스 + 낮음/중간/높음(reasoning effort) — 외형은 부모, 동작은 Aidit-Code 매핑
+- **요청(사용자)**: 부모 Aidit 작성 페이지의 "게시 후 AI 1차 답변 받기" 체크박스 + (짧게/보통/길게) 컨트롤을 Aidit-Code에도. 외형은 부모와 동일하게, 동작은 Aidit-Code식으로 매핑(옵션 4).
+- **동작 매핑(부모와 다른 점)**:
+  - 부모: AI=대화형 페르소나, 1차 답변 opt-in, "길이"=산문 분량. Aidit-Code: AI=코드 에이전트 세션, 게시 시 본문으로 자동 1턴(`maybeAutoReply`)이 **무조건** 실행됨.
+  - **체크박스 "게시 후 AI 1차 답변 받기"**(기본 ON) → `autoReply` 플래그로 `maybeAutoReply` 실행 여부 제어. OFF면 게시만 하고 에이전트는 Thread의 [세션 시작]/메시지로 수동 실행.
+  - **낮음/중간/높음** → 부모의 "응답 길이"는 코드 에이전트에 의미 없음 → 기존 **reasoning effort(low/medium/high)** 로 매핑. Aidit-Code엔 이미 Composer가 동일 3분할 셀렉터+i18n(`thread.reasoningEffort*`)+백엔드 배선(`runAgentTurn.reasoningEffort`→worker→`reasoning_effort`, reasoning 모델만 적용 게이트)을 보유 → 그대로 재사용. 작성 시 선택값이 자동 첫 턴의 effort가 됨(이후 메시지는 Composer가 따로 제어). 기본 medium.
+- **구현(예정)**: FE `rest.ts createPost(title, body, { autoReply?, reasoningEffort? })`, `CreatePost.tsx`(체크박스+effort 세그먼트, 편집 모드 숨김, 체크 ON일 때만 세그먼트), `i18n/post.ts`(`ai_first_reply` 추가, effort 라벨/aria는 `thread.*` 재사용). BE `routes/posts.ts`(`autoReply`/`reasoningEffort` 파싱·검증, `maybeAutoReply(postId, reasoningEffort)` 게이트) + `maybeAutoReply`가 `runAgentTurn`에 effort 전달.
+- **검증(③) — 실측**: FE `tsc` + BE `tsc` 클린(EXIT 0). 백엔드 테스트 19/19 통과(`reasoningEffort`·`deletePost`·`userPosts`). 브라우저(5173) 작성 페이지: 체크박스 기본 ON("게시 후 AI 1차 답변 받기") + 세그먼트 낮음/[중간]/높음(aria "추론 강도", 기본 medium), 체크 해제 시 세그먼트 숨김(radio 0)·재체크 시 복원(radio 3) 확인.
+- 변경 파일(예정): `frontend/src/pages/CreatePost.tsx`·`api/rest.ts`·`i18n/dicts/post.ts`, `backend/src/routes/posts.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [fix] · 완료 · 나 페이지 탭(게시글/북마크)을 부모 공통 세그먼트 탭 스타일로 통일
 - **요청(사용자)**: 부모 Aidit 홈 인기/최신·부모 나 페이지 커뮤니티/게시글/북마크·Aidit-Code 홈 인기/최신은 공통 탭 디자인을 공유하는데, Aidit-Code 나 페이지의 게시글/북마크 탭만 다르다 → 동일 디자인으로 통일.
 - **현재(Aidit-Code 나 탭)**: `flex gap-4 ... px-1`(좌측 정렬, 폭 안 채움), 활성에만 `border-b-2`(틴트 없음), `font-semibold` 없음.

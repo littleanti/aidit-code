@@ -37,12 +37,32 @@ export async function postRoutes(app: FastifyInstance): Promise<void> {
   // ── 글 작성 ───────────────────────────────────────────
   app.post('/posts', { preHandler: app.requireAuth }, async (req, reply) => {
     const authUser = req.authUser!;
-    const body = (req.body ?? {}) as { title?: unknown; body?: unknown };
+    const body = (req.body ?? {}) as {
+      title?: unknown;
+      body?: unknown;
+      autoReply?: unknown;
+      reasoningEffort?: unknown;
+    };
     const title = typeof body.title === 'string' ? body.title.trim() : '';
     const text = typeof body.body === 'string' ? body.body : '';
 
     if (!title) {
       return reply.code(400).send({ error: 'title is required' });
+    }
+
+    // "게시 후 AI 1차 답변 받기"(기본 ON). false 일 때만 자동 응답 턴을 건너뛴다.
+    const autoReply = body.autoReply !== false;
+    // reasoningEffort(Feature B): 주어지면 low/medium/high 만 허용(그 외 400).
+    //   autoReply ON 인데 미지정이면 medium(메시지 라우트와 동일 기본).
+    let reasoningEffort: string | undefined;
+    if (body.reasoningEffort !== undefined && body.reasoningEffort !== null) {
+      if (typeof body.reasoningEffort !== 'string' || !REASONING_EFFORTS.has(body.reasoningEffort)) {
+        return reply.code(400).send({ error: 'invalid reasoningEffort' });
+      }
+      reasoningEffort = body.reasoningEffort;
+    }
+    if (autoReply && reasoningEffort === undefined) {
+      reasoningEffort = 'medium';
     }
 
     // 동시 프로비저닝 상한(TRD §8). PoC 정책: 용량 초과 시 글을 만들지 않고 429(429-on-overflow).
@@ -67,7 +87,9 @@ export async function postRoutes(app: FastifyInstance): Promise<void> {
 
     // 응답을 막지 않고(fire-and-forget) CREATING → READY 프로비저닝을 비동기로 시작한다.
     // provisionSandbox 가 슬롯 release 를 책임진다(releaseSlot 기본 true, acquireSlot=false).
-    void provisionSandbox(sandbox).then(() => maybeAutoReply(post.id));
+    void provisionSandbox(sandbox).then(() => {
+      if (autoReply) void maybeAutoReply(post.id, reasoningEffort);
+    });
 
     // 응답은 즉시 status=CREATING 으로 반환되고, 이후 sandbox.status 이벤트로 READY 전이가 따른다.
     return reply.code(201).send({ post, sandbox });
@@ -302,6 +324,9 @@ export async function postRoutes(app: FastifyInstance): Promise<void> {
   });
 }
 
+/** reasoningEffort(Feature B) 화이트리스트 — 메시지 라우트와 동일. */
+const REASONING_EFFORTS = new Set(['low', 'medium', 'high']);
+
 /** Hangul 감지로 응답 언어 힌트. */
 function detectLang(text: string): 'ko' | 'en' {
   return /[가-힣]/.test(text) ? 'ko' : 'en';
@@ -311,7 +336,7 @@ function detectLang(text: string): 'ko' | 'en' {
  * 글 생성 후(샌드박스 READY) 게시글 내용으로 에이전트 자동 응답을 1회 띄운다.
  * fire-and-forget — 예외는 삼켜 글 생성 흐름에 영향 주지 않는다.
  */
-async function maybeAutoReply(postId: string): Promise<void> {
+async function maybeAutoReply(postId: string, reasoningEffort?: string): Promise<void> {
   // 결정적 테스트 보호: 테스트 환경(vitest)에서는 글 생성의 부수효과(자동 응답 턴)를 띄우지 않는다.
   //   기존 스위트(e2e/redaction)는 글 생성 후 특정 agent 프레임 시퀀스를 단정하므로, 비요청 턴이
   //   끼어들면 오염된다. 운영/개발 구동에는 영향 없음. (필요 시 POST_AUTO_REPLY=1 로 강제 가능.)
@@ -334,6 +359,7 @@ async function maybeAutoReply(postId: string): Promise<void> {
       session: { id: session.id, sandboxId: post.sandbox.id },
       prompt: promptText,
       lang: detectLang(promptText),
+      reasoningEffort, // 작성 시 선택한 작업 강도(낮음/중간/높음). 없으면 worker 가 생략.
     });
   } catch {
     /* 자동 응답 실패는 무해 — 글은 이미 생성됨. */

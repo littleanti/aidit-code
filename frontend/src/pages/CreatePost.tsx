@@ -9,10 +9,13 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useT } from '../i18n/useT';
 import { useAuthStore } from '../stores/authStore';
 import { useUiStore } from '../stores/uiStore';
-import { createPost, getPost, patchPost, ApiError } from '../api/rest';
+import { createPost, getPost, patchPost, ApiError, type ReasoningEffort } from '../api/rest';
 import PageHeaderBar from '../components/PageHeaderBar';
 import ShellPrompt from '../components/ShellPrompt';
 import { formatPromptArg } from '../lib/shellArg';
+
+// 작업 강도(낮음/중간/높음) = reasoning effort. Composer(Feature B)와 동일 어휘/순서.
+const REASONING_EFFORTS: ReasoningEffort[] = ['low', 'medium', 'high'];
 
 export default function CreatePost() {
   const t = useT();
@@ -31,6 +34,9 @@ export default function CreatePost() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadingPost, setLoadingPost] = useState(isEdit);
+  // "게시 후 AI 1차 답변 받기"(기본 ON) + 자동 첫 턴의 작업 강도(reasoning effort, 기본 medium).
+  const [firstAgent, setFirstAgent] = useState(true);
+  const [effort, setEffort] = useState<ReasoningEffort>('medium');
 
   // 편집 진입 시 기존 글을 불러와 제목/본문을 prefill.
   useEffect(() => {
@@ -72,7 +78,10 @@ export default function CreatePost() {
         await patchPost(editPostId, { title: title.trim(), body });
         navigate(`/posts/${editPostId}`);
       } else {
-        const { post } = await createPost(title.trim(), body);
+        const { post } = await createPost(title.trim(), body, {
+          autoReply: firstAgent,
+          reasoningEffort: firstAgent ? effort : undefined,
+        });
         navigate(`/posts/${post.id}`);
       }
     } catch (err) {
@@ -136,9 +145,61 @@ export default function CreatePost() {
           />
         </div>
 
-        {/* 새 글에만 샌드박스 안내(편집은 기존 샌드박스 유지). */}
+        {/* 새 글에만: 샌드박스 안내 + "게시 후 AI 1차 답변 받기"(기본 ON) + 작업 강도(낮음/중간/높음).
+            동작 매핑(부모 외형 / Aidit-Code 동작): 체크 OFF → 자동 에이전트 턴 생략(Thread 에서 수동 시작),
+            강도 = reasoningEffort(Composer Feature B 와 동일 어휘). 편집 모드에선 숨김(재실행 방지). */}
         {!isEdit && (
-          <p className="font-mono text-xs text-term-dim">! {t('post.sandboxNotice')}</p>
+          <div className="space-y-2">
+            <p className="font-mono text-xs text-term-dim">! {t('post.sandboxNotice')}</p>
+
+            <label className="flex items-center gap-2 font-mono text-sm text-term-dim">
+              <input
+                type="checkbox"
+                checked={firstAgent}
+                onChange={(e) => setFirstAgent(e.target.checked)}
+                disabled={busy}
+                className="h-4 w-4 rounded-[2px] accent-[#3fa564]"
+              />
+              <span>{t('post.aiFirstReply')}</span>
+            </label>
+
+            {/* 작업 강도 — 체크 ON 일 때만. ACTIVE = amber 브래킷(Composer 동일 스타일). */}
+            {firstAgent && (
+              <div
+                role="radiogroup"
+                aria-label={t('thread.reasoningEffortAria')}
+                className="ml-6 flex items-center gap-1.5 border-l border-term-border pl-3"
+              >
+                {REASONING_EFFORTS.map((eff) => {
+                  const label = t(
+                    eff === 'low'
+                      ? 'thread.reasoningEffortLow'
+                      : eff === 'medium'
+                        ? 'thread.reasoningEffortMedium'
+                        : 'thread.reasoningEffortHigh'
+                  );
+                  const active = effort === eff;
+                  return (
+                    <button
+                      key={eff}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setEffort(eff)}
+                      disabled={busy}
+                      className={`flex min-h-[44px] select-none items-center rounded-[2px] border px-2 font-mono text-xs font-bold transition disabled:opacity-50 ${
+                        active
+                          ? 'border-term-amber text-term-amber'
+                          : 'border-term-border text-term-dim hover:text-term-fg-bright'
+                      }`}
+                    >
+                      {active ? `[${label}]` : label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
 
         {error && (
