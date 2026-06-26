@@ -137,32 +137,35 @@ export default function Profile() {
       {/* 탭별 셸 프롬프트 — 활성 탭에 따라 ls ~/posts | ~/bookmarks */}
       <ShellPrompt command={TAB_COMMAND[tab]} className="mt-4 mb-3" />
 
-      {/* Tabs [ posts | bookmarks ] — active underline term-amber */}
-      <div className="flex gap-4 border-b border-term-line font-mono text-sm" role="tablist">
-        {TABS.map((tb) => {
-          const active = tab === tb;
-          return (
-            <button
-              key={tb}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => selectTab(tb)}
-              className={[
-                'min-h-[44px] px-1',
-                active
-                  ? 'border-b-2 border-term-amber text-term-amber'
-                  : 'text-term-dim hover:text-term-fg-bright',
-              ].join(' ')}
-            >
-              {tb === 'posts' ? t('profile.tabPosts') : t('profile.tabBookmarks')}
-            </button>
-          );
-        })}
+      {/* Tabs [ 게시글 | 북마크 ] — 부모 공통 세그먼트 탭 스타일(홈 인기/최신·부모 나 탭과 동일):
+          고정 상단바(앱바 h-12 + PageHeaderBar h-12) 아래 sticky(top-24), 풀블리드(-mx-4 px-4),
+          각 탭 flex-1 로 폭 균등 분할 + border-b-2, 활성 = amber 밑줄 + 옅은 틴트. */}
+      <div className="sticky top-24 z-10 -mx-4 mb-3 border-b border-term-line bg-term-nav px-4">
+        <div className="flex" role="tablist">
+          {TABS.map((tb) => {
+            const active = tab === tb;
+            return (
+              <button
+                key={tb}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => selectTab(tb)}
+                className={`min-h-[44px] flex-1 border-b-2 text-sm font-semibold transition ${
+                  active
+                    ? 'border-term-amber bg-[rgba(255,207,74,0.06)] text-term-amber'
+                    : 'border-transparent text-term-dim hover:text-term-fg-bright'
+                }`}
+              >
+                {tb === 'posts' ? t('profile.tabPosts') : t('profile.tabBookmarks')}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Tab panels: keep each activated tab mounted (independent cursor) but hide inactive. */}
-      <div className="mt-3">
+      <div>
         {TABS.map((tb) =>
           activated[tb] ? (
             <div key={tb} hidden={tab !== tb}>

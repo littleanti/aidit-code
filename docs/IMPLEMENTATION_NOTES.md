@@ -11,6 +11,14 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · 나 페이지 탭(게시글/북마크)을 부모 공통 세그먼트 탭 스타일로 통일
+- **요청(사용자)**: 부모 Aidit 홈 인기/최신·부모 나 페이지 커뮤니티/게시글/북마크·Aidit-Code 홈 인기/최신은 공통 탭 디자인을 공유하는데, Aidit-Code 나 페이지의 게시글/북마크 탭만 다르다 → 동일 디자인으로 통일.
+- **현재(Aidit-Code 나 탭)**: `flex gap-4 ... px-1`(좌측 정렬, 폭 안 채움), 활성에만 `border-b-2`(틴트 없음), `font-semibold` 없음.
+- **부모 공통 스타일(나 탭 = 직접 대응)**: 고정 상단바 아래 `sticky top-24 z-10 -mx-4 px-4 border-b`(풀블리드) + 내부 `flex`, 각 버튼 `min-h-[44px] flex-1 border-b-2 text-sm font-semibold transition`, 활성 `border-term-amber bg-[rgba(255,207,74,0.06)] text-term-amber` / 비활성 `border-transparent text-term-dim hover:text-term-fg-bright`.
+- **방향**: Aidit-Code 나 탭을 위 스타일로 교체(토큰 매핑 term-border→term-line, term-screen 솔리드→term-nav, term-bright→term-fg-bright). 탭이 고정바(앱바 h-12 + PageHeaderBar h-12) 아래 `top-24`에 sticky. 패널 wrapper `mt-3` 제거(탭 컨테이너 `mb-3`로 간격 일원화).
+- **검증(③) — 실측**: frontend `tsc --noEmit` 클린(EXIT 0). 브라우저(5173) 나 탭 computed — flex-grow 1(균등 320px), fontWeight 600, 활성 border-bottom 1.6px amber(255,207,107) + bg rgba(255,207,74,0.06) + color amber, 비활성 투명 밑줄 + term-dim(79,191,114), 컨테이너 position:sticky top:96px(=top-24). 부모 나 탭과 버튼 스타일 수치 동일.
+- 변경 파일(예정): `frontend/src/pages/Profile.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [fix] · 완료 · UI 카피 용어 통일 — 게시물을 뜻하는 "글" → "게시글" (부모 Aidit 동시 적용)
 - **요청(사용자)**: 나(프로필) 페이지에서 Aidit-Code는 "게시글", 부모 Aidit은 "글"로 불일치. 두 앱 모두 **게시물을 뜻하는 "글"을 "게시글"로 전부 통일**.
 - **방향**: i18n 사전(KO)에서 post 의미의 `글` → `게시글`. 자연스러운 조사 유지(`글을`→`게시글을`, `글이`→`게시글이`, `글과`→`게시글과`). 일관성 위해 `인기글`→`인기 게시글`, `글쓰기`→`게시글 쓰기`도 포함. **"댓글"(comment)·코드 주석의 "글리프" 등 post와 무관한 "글"은 미변경.** EN(`post(s)`)은 이미 일관 → 미변경.
