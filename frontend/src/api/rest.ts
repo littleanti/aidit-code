@@ -380,6 +380,14 @@ export function startSession(postId: string): Promise<{ session: AgentSession }>
   });
 }
 
+/** POST /posts/:id/session/suspend — stop/suspend the agent session (session STOPPED, sandbox SUSPENDED). */
+export function suspendSession(postId: string): Promise<{ session: AgentSession }> {
+  return request<{ session: AgentSession }>(
+    `/posts/${encodeURIComponent(postId)}/session/suspend`,
+    { method: 'POST' }
+  );
+}
+
 /**
  * POST /posts/:id/interrupt — interrupt/steer the current agent turn.
  * Optional `steer` text is sent as the body when provided.

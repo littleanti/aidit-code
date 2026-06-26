@@ -6,7 +6,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useT } from '../i18n/useT';
-import { getPost, getMessages, startSession, deletePost, ApiError } from '../api/rest';
+import {
+  getPost,
+  getMessages,
+  startSession,
+  suspendSession,
+  deletePost,
+  ApiError,
+} from '../api/rest';
 import { relativeTime } from '../lib/time';
 import StatusBadge from '../components/StatusBadge';
 import ChatBubble from '../components/ChatBubble';
@@ -36,6 +43,7 @@ export default function Thread() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [startingSession, setStartingSession] = useState(false);
+  const [stoppingSession, setStoppingSession] = useState(false);
   const [tab, setTab] = useState<WorkspaceTab>('chat');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -237,6 +245,24 @@ export default function Thread() {
     }
   }, [id, token, openLogin, setActiveSession, t]);
 
+  // Stop/suspend the running session (session → STOPPED, sandbox → SUSPENDED).
+  // After this sessionActive becomes false → the chip flips back to Start and
+  // the composer disconnect warning reappears. We do NOT auto-restart (the user
+  // chose to stop; autoAttachedRef is already consumed for this thread).
+  const handleStopSession = useCallback(async () => {
+    if (!id || !token) return;
+    setStoppingSession(true);
+    setError(null);
+    try {
+      const { session } = await suspendSession(id);
+      setActiveSession(session);
+    } catch (e) {
+      setError(e instanceof ApiError ? t('errors.sessionFailed') : t('errors.networkError'));
+    } finally {
+      setStoppingSession(false);
+    }
+  }, [id, token, setActiveSession, t]);
+
   const isAuthor = !!post && !!userId && post.authorId === userId;
 
   const handleDelete = useCallback(async () => {
@@ -258,25 +284,31 @@ export default function Thread() {
     activeSession.status !== 'STOPPED' &&
     activeSession.status !== 'ERROR';
 
-  // Lazy auto-attach on entry: when an authenticated user opens a post that
-  // ALREADY has an active session, silently attach (the backend treats this
-  // as a cheap attach/no-op fan-out — it does NOT spawn a new process) so the
-  // running badge appears without a manual click. Gates:
+  // Auto-connect on entry: when an authenticated user opens a post, connect the
+  // agent session automatically (start it if none is active, or attach to an
+  // existing one — the backend startOrAttach does the right thing incl. stale
+  // RUNNING normalization). Gates:
   //  ① auth: token present (guests never auto-trigger; openLogin() is NEVER
   //     called on entry — they keep read-only browsing + the click→login flow);
-  //  ② active session: only when getPost returned one (sessionActive) — if
-  //     there is NO active session we do NOT auto-spawn / do NOT call
-  //     startSession; the manual button stays, and the first aiMode message
-  //     spawns via the existing backend path (no-spawn-on-entry invariant);
-  //  ③ StrictMode/re-render dedupe: autoAttachedRef fires this at most ONCE
+  //  ② sandbox readiness: only fire when the sandbox is READY/SUSPENDED/RUNNING.
+  //     While CREATING (provisioning) we DON'T consume the guard, so the effect
+  //     retries once sandbox.status updates; ERROR never auto-starts;
+  //  ③ already active → just consume the guard (the badge already shows);
+  //  ④ StrictMode/re-render dedupe: autoAttachedRef fires this at most ONCE
   //     per thread (reset on id change above). loading/startingSession guards
   //     avoid racing the initial load and the manual button.
   useEffect(() => {
     if (autoAttachedRef.current) return;
-    if (loading || !token || !sessionActive || startingSession) return;
+    if (loading || !token || startingSession) return;
+    if (sessionActive) {
+      autoAttachedRef.current = true; // already connected — nothing to start
+      return;
+    }
+    const sb = sandboxStatus ?? post?.sandbox?.status ?? null;
+    if (sb !== 'READY' && sb !== 'SUSPENDED' && sb !== 'RUNNING') return; // wait (CREATING) / skip (ERROR)
     autoAttachedRef.current = true;
     void handleStartSession();
-  }, [loading, token, sessionActive, startingSession, handleStartSession]);
+  }, [loading, token, sessionActive, startingSession, sandboxStatus, post, handleStartSession]);
 
   // Surface terminal session/sandbox ERROR as a user-facing SYSTEM-style notice (TRD §11).
   // Sandbox error takes precedence (it blocks any session work).
@@ -309,16 +341,18 @@ export default function Thread() {
             ⟳ {t('thread.reconnecting')}
           </span>
         )}
-        {!sessionActive && (
-          <button
-            type="button"
-            onClick={handleStartSession}
-            disabled={startingSession}
-            className="ml-auto inline-flex min-h-[28px] items-center rounded-[2px] border border-term-amber-line px-2 font-mono text-[11px] tracking-wider text-term-amber disabled:opacity-50"
-          >
-            {startingSession ? t('thread.startingSession') : t('thread.startSession')}
-          </button>
-        )}
+        {/* Session toggle chip (top-right): [Start Session] when not connected,
+            [Stop Session] when running. Stays visible in both states. */}
+        <button
+          type="button"
+          onClick={sessionActive ? handleStopSession : handleStartSession}
+          disabled={startingSession || stoppingSession}
+          className="ml-auto inline-flex min-h-[28px] items-center rounded-[2px] border border-term-amber-line px-2 font-mono text-[11px] tracking-wider text-term-amber disabled:opacity-50"
+        >
+          {sessionActive
+            ? `[${stoppingSession ? t('thread.stoppingSession') : t('thread.stopSession')}]`
+            : `[${startingSession ? t('thread.startingSession') : t('thread.startSession')}]`}
+        </button>
       </div>
 
       {/* Prominent SSE reconnect banner (in addition to the compact header indicator). */}

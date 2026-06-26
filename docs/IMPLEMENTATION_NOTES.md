@@ -11,6 +11,18 @@
 
 ## Changelog
 
+### 2026-06-26 · [feat] · 완료 · 진입 시 세션 자동 시작(연결) + 시작/중지 토글 버튼([Start Session]/[Stop Session])
+- **요청(사용자)**: ① 게시글 진입 시 자동으로 세션이 연결(시작)되게. ② 연결되면 'Start session' 버튼이 사라지지 말고 `[Start Session]`→`[Stop Session]` 으로 토글.
+- **원인(자동 연결 안 됨)**: 기존 진입 effect 가 `!sessionActive` 면 return → **기존 활성 세션 attach 만** 하고, 세션이 없으면 시작하지 않음(lazy). 그래서 활성 세션이 없는 글은 진입해도 연결 안 됨.
+- **구현**:
+  1. 진입 effect 를 **자동 시작**으로 변경: 인증(token) + 로딩 완료 + 미연결일 때, 샌드박스가 `READY`/`SUSPENDED`/`RUNNING`(stale→백엔드 startOrAttach 정규화)이면 `handleStartSession()` 호출. `CREATING` 이면 가드 미소진으로 대기 후 sandbox.status 갱신 시 재시도, `ERROR` 면 시작 안 함. 이미 활성이면 호출 없이 가드만 소진. (게스트는 token 없어 자동 트리거 안 됨.)
+  2. 상단 우측 칩을 **항상 표시(토글)**: `!sessionActive`→`[Start Session]`(onClick startSession), `sessionActive`→`[Stop Session]`(onClick suspend). 진행 중엔 `[…중…]`. 라벨은 대괄호로 표기(요청).
+  3. `rest.ts` 에 `suspendSession(postId)` 추가 → `POST /posts/:id/session/suspend`(기존 라우트: 세션 STOPPED + 샌드박스 SUSPENDED, `{session}` 반환). `handleStopSession` + `stoppingSession` 상태 추가.
+  4. i18n: `startSession` en 'Start session'→'Start Session'(대문자), 신규 `stopSession`(세션 중지/Stop Session)·`stoppingSession`(세션 중지 중…/Stopping session…).
+- 중지하면 sessionActive=false → 칩이 `[Start Session]` + 컴포저 위 빨간 경고 재노출(일관). 사용자가 직접 중지한 것이므로 자동 재시작 안 함(autoAttachedRef 이미 소진).
+- **검증(③) — 실측**: frontend `tsc --noEmit` 클린 + `vite build` PASS. 브라우저(localhost:5173, 로그인 상태)에서 게시글 진입 시 칩이 `[세션 중지]`(=자동 연결됨)로 표시 확인. 칩 클릭 → `[세션 시작]` 전환 + 컴포저 위 빨간 경고 노출 → 다시 클릭 → `[세션 중지]` 재연결까지 라운드트립 확인.
+- 변경 파일: `frontend/src/pages/Thread.tsx`, `frontend/src/api/rest.ts`, `frontend/src/i18n/dicts/thread.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [fix] · 완료 · 진입 시 바닥 스크롤 잔존 경로 제거 — firstRun 에서 pinnedRef 리셋 (실측 검증)
 - **증상(사용자, 실기기)**: 직전 수정 후에도 진입 시 여전히 최하단으로 스크롤됨.
 - **놓친 원인**: hydrate 전(짧은 콘텐츠) 스크롤 리스너가 `pinnedRef` 를 false-positive 로 `true` 로 만들어 둔 뒤, 진입 직후 자동 attach 된 활성 세션의 **SSE 스트리밍 토큰**이 메시지를 갱신하면 firstRun 은 이미 지났고 `pinnedRef===true` 라 `bottomRef.scrollIntoView` 로 바닥행. 직전 firstRun 분기가 `scrollTo(0,0)` 만 하고 `pinnedRef` 를 리셋하지 않음.
