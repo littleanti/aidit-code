@@ -11,6 +11,14 @@
 
 ## Changelog
 
+### 2026-06-27 · [fix] · 완료 · 헤더 LLM 상태 배지 표기 `LLM`→`AI` (부모 Aidit와 용어 통일)
+- **요청(사용자)**: Aidit-Code 헤더 연결 배지의 `LLM` 표기도 `AI`로 변경. (부모 Aidit는 앞서 `● AI` 라벨 + 툴팁 `AI`로 통일됨 — 형제 앱 용어 일치.)
+- **방향(텍스트만)**: 반응형 동작(`hidden sm:inline`, 640px 기준 — 좁으면 숨김/넓으면 표시)은 **그대로 유지**하고 **표시 문구만** 변경. ① `LlmStatusBadge`의 가시 라벨 `LLM`→`AI`(클래스 불변), ② i18n `common.llmConnected/Offline/Unknown`의 `LLM`→`AI`(ko·en, aria-label·title용). 상태 로직·LED 색상 불변.
+- **구현(예정)**: `frontend/src/components/LlmStatusBadge.tsx`(라벨 텍스트만), `frontend/src/i18n/dicts/common.ts`(llm* 문자열).
+- **검증(③) — 실측**: FE `tsc --noEmit` **클린(EXIT 0)**. 브라우저(5173, 폭 1245px) 헤더 span 텍스트 = `AIDIT-CODE`·`● AI`·`KO|EN`·`[ wdyoon#e1eb ]` — `● AI` 노출, **`LLM` 잔존 없음**(`anyLLMleft=false`), `AI` 라벨 클래스 `hidden … sm:inline` 그대로 가시(반응형 동작 보존).
+- 변경 파일: `frontend/src/components/LlmStatusBadge.tsx`, `frontend/src/i18n/dicts/common.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
+
 
 ### 2026-06-26 · [fix] · 완료 · 작성 페이지 게시 버튼 + 하단 탭바 글씨를 부모 Aidit 디자인과 통일 (+ 버튼/메뉴 대괄호·안내 섹션박스·⋯팝오버 여백)
 - **요청(사용자)**: ① Aidit-Code 작성 페이지의 "게시하기" 버튼을 부모 Aidit 작성 페이지 게시 버튼과 **동일 디자인**으로. ② Aidit-Code 하단 메뉴바의 **글씨 크기·글씨 폰트·글씨 위치**를 부모 Aidit 하단 메뉴바와 통일.

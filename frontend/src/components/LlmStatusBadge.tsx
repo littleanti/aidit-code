@@ -92,7 +92,7 @@ export default function LlmStatusBadge() {
         aria-hidden
         className="hidden text-[10px] uppercase tracking-wider text-term-faint sm:inline"
       >
-        LLM
+        AI
       </span>
     </span>
   );
