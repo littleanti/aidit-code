@@ -26,9 +26,10 @@
     );
     background-attachment: fixed;
     color: #4fbf72; /* term-fg / Aidit dim */
+    /* 부모 Aidit 실제 코드와 글자단위 동일한 순수 시스템 모노 스택(웹폰트 없음). */
     font-family:
-      'JetBrains Mono', 'D2Coding', ui-monospace, SFMono-Regular, 'SF Mono',
-      Menlo, Consolas, 'Liberation Mono', 'Noto Sans KR', monospace;
+      ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+      'Liberation Mono', monospace;
     text-shadow: 0 0 1px rgba(125, 255, 160, 0.35);
     -webkit-font-smoothing: antialiased;
     -webkit-tap-highlight-color: transparent;

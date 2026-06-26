@@ -540,11 +540,11 @@ Login(모달) ─▶ Home ──┬──▶ Thread (게시글 직접 진입 = �
 라벨 색: 에이전트 = `term-amber`(`pi agent [AGENT] >`), 타인 = `term-dim`(`minji >`). 본인 메타 읽음 `✓ {time}` = `term-dim-3`.
 
 ### 12.2 타이포그래피 — 시스템 모노스페이스 (NO 웹폰트 CDN, 부모 계승)
-- **본문/UI 스택**(`font-mono` = 전역 기본):
-  `'JetBrains Mono', 'D2Coding', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'Noto Sans KR', monospace`
+- **본문/UI 스택**(`font-mono` = 전역 기본) — 부모 Aidit 실제 코드와 글자단위 동일(웹폰트·CJK 전용 폰트 미포함):
+  `ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace`
 - 개성은 글꼴 다운로드가 아니라 자간·굵기·터미널 관용구로. 워드마크 `AIDIT-CODE`: `font-bold`, `tracking-[0.18em~0.3em]`, `text-term-glow` + 글로우. 키커/배지: 대문자 + `tracking-[0.1em~0.15em]`, `term-faint`/`term-dim-2`. 수치·시간·ID는 고정폭 `tabular`.
 - 스케일(px): 헤딩 22~24 / 화면 제목 18~20 / 카드 제목 15~17 / 본문 13~14 / 메타 11~12 / 배지 9~10.
-- **i18n 주의**: 대문자 + 넓은 자간 관용구는 **라틴 라벨에만**. 한글 키커/배지는 `tracking-normal` 이하. 지원 로케일 KO + EN, 폰트 스택 끝 `'Noto Sans KR'`이 KO 폴백. **터미널 출력 버블(TOOL_RESULT)은 항상 고정폭 그대로**(번역·자간 가공 없음 — 기계 출력 원문 보존).
+- **i18n 주의**: 대문자 + 넓은 자간 관용구는 **라틴 라벨에만**. 한글 키커/배지는 `tracking-normal` 이하. 지원 로케일 KO + EN, 한글은 부모 Aidit과 동일하게 **OS 기본 고정폭/CJK 폴백**(Windows=Malgun Gothic 등)으로 렌더 — 스택에 웹폰트·`Noto Sans KR`는 두지 않는다. **터미널 출력 버블(TOOL_RESULT)은 항상 고정폭 그대로**(번역·자간 가공 없음 — 기계 출력 원문 보존).
 
 ### 12.3 CRT 트리트먼트 (스캔라인·비네팅·글로우·커서, 부모 계승)
 - **스캔라인**(`z-index:30`, `pointer-events:none`): `repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0 2px, rgba(0,0,0,0.16) 2px 3px)`.

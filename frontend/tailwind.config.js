@@ -42,16 +42,15 @@ export default {
       },
       fontFamily: {
         // §12.2 system monospace stack — NO web font CDN.
+        // 부모 Aidit 실제 코드와 글자단위 동일(JetBrains Mono·D2Coding·Noto Sans KR 미포함):
+        // 둘 다 OS 기본 고정폭으로 렌더(Windows=Consolas, 한글=Malgun Gothic 등 시스템 폴백).
         mono: [
-          'JetBrains Mono',
-          'D2Coding',
           'ui-monospace',
           'SFMono-Regular',
           'SF Mono',
           'Menlo',
           'Consolas',
           'Liberation Mono',
-          'Noto Sans KR',
           'monospace',
         ],
       },

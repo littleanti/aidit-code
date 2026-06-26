@@ -11,6 +11,13 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · 폰트 스택을 부모 Aidit 실제 코드와 동일하게 통일 (JetBrains Mono·D2Coding·Noto Sans KR 제거)
+- **요청(사용자)**: Aidit과 Aidit-Code의 폰트체를 "Aidit이 쓰는 폰트체"로 전부 통일.
+- **결정(사용자 확인)**: 부모 Aidit은 코드(`tailwind.config.js`)와 문서(DESIGN-SYSTEM.md)가 불일치 — 코드는 순수 시스템 모노 스택(JetBrains Mono 없음 → Windows 에서 Consolas 렌더), 문서는 풀 스택. 사용자가 **순수 시스템 스택**을 선택 → Aidit-Code 를 부모의 **실제 코드 스택**에 맞춤(부모는 변경 없음).
+- **방향**: Aidit-Code 의 `font-mono` 스택에서 선두 `'JetBrains Mono', 'D2Coding'` 와 한글 폴백 `'Noto Sans KR'` 제거 → 부모와 글자단위 동일한 `ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace`. 두 곳 동기화: `tailwind.config.js`(`fontFamily.mono`) + `index.css`(body `font-family` 하드코딩 문자열). 한글은 부모와 동일하게 OS 기본 고정폭(Windows=Malgun Gothic 등)으로 폴백.
+- **검증(③) — 실측**: frontend `tsc --noEmit` 클린(EXIT 0). 브라우저 computed `font-family` 비교 — Aidit-Code(5173) body·h1 = `ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace`(JetBrains/Noto 없음), 부모 Aidit(5174) body = **동일 문자열**. 두 앱 폰트 통일 확인.
+- 변경 파일: `frontend/tailwind.config.js`, `frontend/src/index.css`, `docs/WIREFRAME.md`(§12.2), `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [feat] · 완료 · 홈·설정 화면을 부모 Aidit와 동일화 + 나 페이지 [설정] 라벨
 - **요청(사용자)**: ① 홈 — 인기/최신 탭·활성 탭·쉘 프롬프트·로딩/빈 상태를 Aidit과 동일. ② 설정 — 헤더·쉘 프롬프트·섹션 스타일·로그아웃 버튼을 Aidit과 동일. ③ 나 페이지 — 설정 진입을 Aidit 동일 폰트/크기/스타일의 `[ 설정 ]` 로.
 - **방향**:
