@@ -11,6 +11,14 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · 스레드 자동 스크롤이 최하단보다 살짝 위에서 멈추는 문제 — scrollIntoView+7rem → window.scrollTo(scrollHeight)
+- **요청(사용자)**: 게시글에서 새 메시지를 보내 AI 응답이 올 때 자동 스크롤이 "최하단보다 살짝 위"에서 멈춤.
+- **원인(브라우저 실측, 5173)**: 자동 추종은 `bottomRef.scrollIntoView({block:'end'})` + `scrollMarginBottom:'7rem'` 사용. 그런데 컴포저가 `sticky bottom-[var(--tabbar-h)]` 로 뷰포트 하단 ~150px 를 **덮고 있음**. `scrollIntoView` 는 (스티키 오버레이를 모른 채) 앵커를 **뷰포트 하단**에 맞추려 해서 항상 일찍 멈춤 → 실측: 자동 추종 `scrollY=1995`(최대 2040 대비 **45px 부족**), 마지막 메시지 끝이 컴포저 top 보다 36px 아래(=컴포저 뒤에 가림). 반면 점프 칩(↓)은 `window.scrollTo({top:scrollHeight})` 라 `scrollY=2040` 까지 가고 마지막 메시지가 컴포저보다 8px 위에 **온전히 노출**. (margin=0 으로 바꾸면 오히려 1883 까지만 — 더 나빠짐.)
+- **부모 Aidit 와의 차이**: 부모는 컴포저 **바깥**의 내부 스크롤 컨테이너(`el.scrollHeight`)를 써서 `scrollIntoView` 가 정상 동작. Aidit-Code 는 **window 스크롤 + 스티키 컴포저 오버레이** 모델이라 같은 코드가 안 맞음.
+- **방향**: 자동 추종을 점프 칩과 동일하게 `window.scrollTo({top: document.documentElement.scrollHeight})` 로 변경(토큰=instant, 새 버블=smooth 유지 + `prefers-reduced-motion` 존중). 의미를 잃은 `bottomRef`/`scrollMarginBottom:'7rem'` 제거. 스트리밍 추종과 ↓ 칩이 동일 위치로 일관.
+- **검증(③) — 실측**: frontend `tsc --noEmit` 클린(EXIT 0, 잔여 `bottomRef` 참조 없음). 브라우저(5173) 재실측 — 자동 추종이 `scrollY=2032`(=maxScroll, 최하단 도달), 마지막 메시지 bottom 636 이 컴포저 top 644 보다 **8px 위**로 온전히 노출(이전엔 45px 부족·36px 가려짐). scrollMarginBottom 앵커 완전 제거 확인.
+- 변경 파일: `frontend/src/pages/Thread.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [fix] · 완료 · 글로벌바 `[ KO | EN ]`·`[ username ]` 의 괄호 내부 공백을 형제 앱 Aidit와 동일하게
 - **요청(사용자)**: 글로벌바의 `[ KO | EN ]` 언어 토글과 `[ username ]` 계정 링크의 "글자 내 공백"이 형제 앱 Aidit와 아직도 미묘하게 안 맞음.
 - **원인(브라우저 실측)**:

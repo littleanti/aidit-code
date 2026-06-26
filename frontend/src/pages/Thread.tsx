@@ -61,7 +61,6 @@ export default function Thread() {
 
   const { status: streamStatus } = useThreadStream(id);
 
-  const bottomRef = useRef<HTMLDivElement>(null);
   // Auto-scroll bookkeeping: stay "pinned" to the bottom unless the user
   // scrolls up to read history; the user's own new message always re-pins.
   // Start UNPINNED so entering a post lands at the TOP (📌 original post +
@@ -221,9 +220,17 @@ export default function Thread() {
       return;
     }
     if (!pinnedRef.current) return;
-    bottomRef.current?.scrollIntoView({
-      block: 'end',
-      behavior: isNewBubble ? 'smooth' : 'auto',
+    // Scroll to the TRUE document bottom (not the anchor's viewport-bottom).
+    // The composer is `sticky bottom-[var(--tabbar-h)]` and overlays the lower
+    // ~150px of the viewport, so scrollIntoView({block:'end'}) stops short and
+    // tucks the last bubble behind the composer. scrollTo(scrollHeight) reveals
+    // the composer's in-flow height and lands the last bubble just above it —
+    // identical to the ↓ jump chip. New bubbles ease in (smooth); streaming
+    // tokens snap (auto); reduced-motion always snaps.
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    window.scrollTo({
+      top: document.documentElement.scrollHeight,
+      behavior: reduce || !isNewBubble ? 'auto' : 'smooth',
     });
   }, [messages, userId]);
 
@@ -491,7 +498,6 @@ export default function Thread() {
                     />
                   ))
                 )}
-                <div ref={bottomRef} style={{ scrollMarginBottom: '7rem' }} />
               </div>
 
               {/* Composer pinned ABOVE the bottom TabBar (both were sticky
