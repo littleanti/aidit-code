@@ -12,9 +12,12 @@ import {
   startSession,
   suspendSession,
   deletePost,
+  upvote as apiUpvote,
+  unupvote as apiUnupvote,
   ApiError,
 } from '../api/rest';
-import { relativeTime } from '../lib/time';
+import { relativeTime, formatCount } from '../lib/time';
+import Avatar from '../components/Avatar';
 import StatusBadge from '../components/StatusBadge';
 import ChatBubble from '../components/ChatBubble';
 import Composer from '../components/Composer';
@@ -45,8 +48,15 @@ export default function Thread() {
   const [startingSession, setStartingSession] = useState(false);
   const [stoppingSession, setStoppingSession] = useState(false);
   const [tab, setTab] = useState<WorkspaceTab>('chat');
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Owner-only ⋯ popover menu (edit / 2-step delete confirm) — parent Aidit parity.
+  const [ownerMenuOpen, setOwnerMenuOpen] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const ownerMenuRef = useRef<HTMLDivElement>(null);
+  // Optimistic upvote on the original post (seeded from the loaded post below).
+  const [voted, setVoted] = useState(false);
+  const [postScore, setPostScore] = useState(0);
+  const [votePending, setVotePending] = useState(false);
 
   const hydrate = useThreadStore((s) => s.hydrate);
   const reset = useThreadStore((s) => s.reset);
@@ -272,6 +282,65 @@ export default function Thread() {
 
   const isAuthor = !!post && !!userId && post.authorId === userId;
 
+  // Seed the upvote state from the loaded post; re-seed only when the post id
+  // changes (an optimistic toggle updates local state without a refetch).
+  useEffect(() => {
+    if (post) {
+      setVoted(Boolean(post.voted));
+      setPostScore(post.score);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [post?.id]);
+
+  // Owner menu: close on outside click / Escape; reset the delete confirm when closed.
+  useEffect(() => {
+    if (!ownerMenuOpen) {
+      setConfirmingDelete(false);
+      return;
+    }
+    const onDown = (e: MouseEvent) => {
+      if (ownerMenuRef.current && !ownerMenuRef.current.contains(e.target as Node)) {
+        setOwnerMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOwnerMenuOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [ownerMenuOpen]);
+
+  // Optimistic upvote toggle on the original post (mirrors PostCard). Write
+  // action → opens the login modal when unauthenticated; rolls back on failure.
+  const handleToggleVote = useCallback(async () => {
+    if (!post) return;
+    if (!token) {
+      openLogin();
+      return;
+    }
+    if (votePending) return;
+    const nextVoted = !voted;
+    const prevVoted = voted;
+    const prevScore = postScore;
+    setVoted(nextVoted);
+    setPostScore((s) => s + (nextVoted ? 1 : -1));
+    setVotePending(true);
+    try {
+      const res = nextVoted ? await apiUpvote(post.id) : await apiUnupvote(post.id);
+      setVoted(res.voted);
+      setPostScore(res.score);
+    } catch {
+      setVoted(prevVoted);
+      setPostScore(prevScore);
+    } finally {
+      setVotePending(false);
+    }
+  }, [post, token, openLogin, votePending, voted, postScore]);
+
   const handleDelete = useCallback(async () => {
     if (!id) return;
     setDeleting(true);
@@ -282,7 +351,8 @@ export default function Thread() {
     } catch (e) {
       setError(e instanceof ApiError ? t('errors.generic') : t('errors.networkError'));
       setDeleting(false);
-      setConfirmDelete(false);
+      setOwnerMenuOpen(false);
+      setConfirmingDelete(false);
     }
   }, [id, navigate, t]);
 
@@ -393,55 +463,125 @@ export default function Thread() {
 
       {post && (
         <>
-          {/* Original post */}
-          <article className="mb-3 rounded-[3px] border border-term-line bg-term-panel p-4">
-            <div className="mb-1 flex items-center gap-2">
-              <span className="font-mono text-[10px] uppercase tracking-wider text-term-faint">
-                📌 {t('post.originalPost')}
+          {/* Original post — 부모 Aidit 패리티(커뮤니티 제외). 코너 태그 + 제목 +
+              본문 + (아바타 · 작성자 · 작성시간) + Upvote · 댓글수 · ⋯ 작성자 메뉴. */}
+          <article className="relative mb-3 rounded-[3px] border border-term-line bg-term-panel px-4 py-3">
+            {/* 코너 태그 — 상단 보더 위로 살짝 겹쳐 라벨처럼 */}
+            <span
+              aria-hidden="true"
+              className="absolute -top-1 left-[13px] bg-term-panel px-1 font-mono text-[9px] tracking-wider text-term-amber"
+            >
+              {t('post.originalPostTag')}
+            </span>
+
+            <h1 className="mt-1.5 font-mono text-base font-bold leading-snug text-term-glow [text-shadow:0_0_4px_rgba(125,255,160,0.45)]">
+              {post.title}
+            </h1>
+
+            {post.body && (
+              <p className="mt-2 whitespace-pre-wrap break-words font-mono text-sm leading-relaxed text-term-dim">
+                {post.body}
+              </p>
+            )}
+
+            <div className="mt-3 flex items-center gap-2 font-mono text-xs text-term-faint">
+              <Avatar kind="user" seed={post.author?.username ?? ''} size="sm" />
+              <span className="truncate">
+                u/{post.author?.username ?? t('thread.anonymous')} ·{' '}
+                {relativeTime(post.createdAt)}
               </span>
-              {isAuthor && (
-                <span className="ml-auto flex items-center gap-1">
-                  {!confirmDelete ? (
+              <span className="ml-auto flex items-center gap-2">
+                {/* Upvote — 낙관적 토글, 활성 시 amber */}
+                <button
+                  type="button"
+                  aria-pressed={voted}
+                  aria-label={t('post.upvote')}
+                  onClick={handleToggleVote}
+                  className={`inline-flex items-center gap-0.5 rounded-[2px] transition hover:text-term-amber ${
+                    voted ? 'text-term-amber' : ''
+                  }`}
+                >
+                  <span aria-hidden="true">▲</span>
+                  <span>{formatCount(postScore)}</span>
+                </button>
+                {/* 댓글 수(HUMAN + AGENT_REPLY) */}
+                <span className="inline-flex items-center gap-0.5">
+                  <span aria-hidden="true">💬</span>
+                  <span>{formatCount(post.commentCount)}</span>
+                </span>
+                {/* 작성자 전용 ⋯ 팝오버(편집 / 2단계 삭제 확인) */}
+                {isAuthor && (
+                  <div ref={ownerMenuRef} className="relative">
                     <button
                       type="button"
-                      onClick={() => setConfirmDelete(true)}
-                      className="min-h-[32px] rounded-[3px] border border-term-red-line px-2 font-mono text-[11px] text-term-red hover:bg-term-red-bg"
+                      aria-haspopup="menu"
+                      aria-expanded={ownerMenuOpen}
+                      aria-label={t('thread.moreActionsAria')}
+                      title={t('thread.moreActionsAria')}
+                      onClick={() => setOwnerMenuOpen((v) => !v)}
+                      className={`flex h-7 w-7 items-center justify-center rounded-[2px] text-base leading-none transition hover:bg-term-hover hover:text-term-fg-bright ${
+                        ownerMenuOpen ? 'text-term-fg-bright' : 'text-term-dim'
+                      }`}
                     >
-                      {`[${t('thread.deletePost')}]`}
+                      ⋯
                     </button>
-                  ) : (
-                    <>
-                      <span className="font-mono text-[11px] text-term-red">
-                        {t('thread.deleteConfirm')}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleDelete}
-                        disabled={deleting}
-                        className="min-h-[32px] rounded-[3px] border border-term-red-line bg-term-red-bg px-2 font-mono text-[11px] text-term-red disabled:opacity-50"
+                    {ownerMenuOpen && (
+                      <div
+                        role="menu"
+                        aria-label={t('thread.ownerMenuAria')}
+                        className="absolute right-0 top-full z-30 mt-1 flex w-36 flex-col rounded-[2px] border border-term-border bg-term-panel py-1 shadow-glow-soft"
                       >
-                        {deleting ? t('thread.deleting') : t('thread.deleteYes')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDelete(false)}
-                        disabled={deleting}
-                        className="min-h-[32px] rounded-[3px] border border-term-border-dim px-2 font-mono text-[11px] text-term-dim"
-                      >
-                        {t('thread.deleteNo')}
-                      </button>
-                    </>
-                  )}
-                </span>
-              )}
+                        {confirmingDelete ? (
+                          <>
+                            <span className="px-3 py-1 font-mono text-xs text-term-red">
+                              {t('thread.deleteConfirm')}
+                            </span>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              disabled={deleting}
+                              onClick={handleDelete}
+                              className="flex min-h-[44px] items-center gap-2 px-3 font-mono text-xs text-term-red transition hover:bg-term-hover disabled:opacity-50"
+                            >
+                              {deleting ? t('thread.deleting') : t('thread.deleteYes')}
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              disabled={deleting}
+                              onClick={() => setConfirmingDelete(false)}
+                              className="flex min-h-[44px] items-center gap-2 px-3 font-mono text-xs text-term-dim transition hover:bg-term-hover hover:text-term-fg-bright disabled:opacity-50"
+                            >
+                              {t('thread.deleteNo')}
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <Link
+                              to="/create"
+                              state={{ editPostId: post.id }}
+                              role="menuitem"
+                              onClick={() => setOwnerMenuOpen(false)}
+                              className="flex min-h-[44px] items-center gap-2 px-3 font-mono text-xs text-term-dim transition hover:bg-term-hover hover:text-term-fg-bright"
+                            >
+                              {t('thread.editPost')}
+                            </Link>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => setConfirmingDelete(true)}
+                              className="flex min-h-[44px] items-center gap-2 px-3 font-mono text-xs text-term-red transition hover:bg-term-hover"
+                            >
+                              {t('thread.deletePost')}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </span>
             </div>
-            <h1 className="mb-2 font-mono text-lg text-term-fg-bright">{post.title}</h1>
-            <div className="mb-3 font-mono text-xs text-term-dim">
-              {post.author?.username ?? ''} · {relativeTime(post.createdAt)}
-            </div>
-            <p className="whitespace-pre-wrap font-mono text-sm leading-relaxed text-term-fg">
-              {post.body}
-            </p>
           </article>
 
           {/* Workspace tabs (mobile-first): Chat | Files */}

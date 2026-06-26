@@ -22,6 +22,7 @@ function serializePostCard(p: {
   commentCount: number;
   hotScore: number;
   createdAt: Date;
+  author: { id: string; username: string };
   sandbox: { status: string } | null;
 }) {
   return {
@@ -33,6 +34,8 @@ function serializePostCard(p: {
     commentCount: p.commentCount,
     hotScore: p.hotScore,
     createdAt: p.createdAt,
+    // 작성자 표시(부모 Aidit 패리티) — 프로필 작성글 카드에도 username 동봉.
+    author: { id: p.author.id, username: p.author.username },
     sandbox: { status: p.sandbox?.status ?? null },
   };
 }
@@ -71,7 +74,10 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
       where,
       orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
       take: PAGE_SIZE + 1,
-      include: { sandbox: { select: { status: true } } },
+      include: {
+        sandbox: { select: { status: true } },
+        author: { select: { id: true, username: true } },
+      },
     });
 
     const hasMore = rows.length > PAGE_SIZE;

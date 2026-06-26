@@ -178,9 +178,16 @@ export function createPost(
   });
 }
 
-/** PATCH /posts/:id — edit post (author only). */
-export function patchPost(id: string, body: { title?: string; body?: string }): Promise<Post> {
-  return request<Post>(`/posts/${encodeURIComponent(id)}`, { method: 'PATCH', body });
+/** PATCH /posts/:id — edit post (author only). Server returns `{ post }`; unwrap. */
+export async function patchPost(
+  id: string,
+  body: { title?: string; body?: string }
+): Promise<Post> {
+  const env = await request<{ post: Post }>(`/posts/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body,
+  });
+  return env.post;
 }
 
 /** DELETE /posts/:id — delete post + sandbox dir (author only). */

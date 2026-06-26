@@ -38,6 +38,11 @@ export const thread = {
     deleteYes: '확인',
     deleteNo: '취소',
     deleting: '삭제 중…',
+    // 게시글 작성자 전용 ⋯ 팝오버 메뉴(부모 Aidit 패리티)
+    editPost: '편집',
+    moreActionsAria: '더보기',
+    ownerMenuAria: '게시글 작업',
+    anonymous: '익명',
     // Feature A: 이미지 첨부(컴포저) — 검증 오류/접근성/대체텍스트
     unsupportedImageFormat: '지원하지 않는 이미지 형식이에요 (PNG·JPEG·WebP·GIF).',
     imageTooLarge: '이미지가 너무 커요 (최대 5MB).',
@@ -95,6 +100,11 @@ export const thread = {
     deleteYes: 'Confirm',
     deleteNo: 'Cancel',
     deleting: 'Deleting…',
+    // Post author-only ⋯ popover menu (Aidit parity)
+    editPost: 'Edit',
+    moreActionsAria: 'More actions',
+    ownerMenuAria: 'Post actions',
+    anonymous: 'anonymous',
     // Feature A: image attachment (composer) — validation / a11y / alt text
     unsupportedImageFormat: 'Unsupported image format (PNG, JPEG, WebP, GIF).',
     imageTooLarge: 'Image is too large (max 5MB).',

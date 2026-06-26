@@ -24,8 +24,14 @@ export const post = {
     publish: '게시하기',
     publishing: '게시 중…',
     loginToPost: '글을 작성하려면 로그인이 필요해요',
+    // 편집 모드(CreatePost 재활용 — 부모 Aidit 패리티)
+    editTitle: '글 수정',
+    save: '저장',
+    saving: '저장 중…',
+    editLoadError: '글을 불러오지 못했어요.',
     // thread placeholder
     originalPost: '원본 게시글',
+    originalPostTag: '★ 원본 게시글',
     threadComingSoon: '에이전트 세션 채팅은 다음 단계(M4)에서 제공됩니다.',
   },
   en: {
@@ -50,7 +56,13 @@ export const post = {
     publish: 'Publish',
     publishing: 'Publishing…',
     loginToPost: 'Login is required to create a post',
+    // Edit mode (CreatePost reuse — Aidit parity)
+    editTitle: 'Edit post',
+    save: 'Save',
+    saving: 'Saving…',
+    editLoadError: 'Could not load the post.',
     originalPost: 'Original post',
+    originalPostTag: '★ Original Post',
     threadComingSoon: 'Agent session chat arrives in the next stage (M4).',
   },
 } as const;

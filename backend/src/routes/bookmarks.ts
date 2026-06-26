@@ -25,6 +25,7 @@ function serializePostCard(p: {
   commentCount: number;
   hotScore: number;
   createdAt: Date;
+  author: { id: string; username: string };
   sandbox: { status: string } | null;
 }) {
   return {
@@ -36,6 +37,8 @@ function serializePostCard(p: {
     commentCount: p.commentCount,
     hotScore: p.hotScore,
     createdAt: p.createdAt,
+    // 작성자 표시(부모 Aidit 패리티) — 프로필/북마크 카드에도 username 동봉.
+    author: { id: p.author.id, username: p.author.username },
     sandbox: { status: p.sandbox?.status ?? null },
   };
 }
@@ -107,7 +110,12 @@ export async function bookmarkRoutes(app: FastifyInstance): Promise<void> {
       orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
       take: PAGE_SIZE + 1,
       include: {
-        post: { include: { sandbox: { select: { status: true } } } },
+        post: {
+          include: {
+            sandbox: { select: { status: true } },
+            author: { select: { id: true, username: true } },
+          },
+        },
       },
     });
 

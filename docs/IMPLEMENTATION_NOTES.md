@@ -11,6 +11,24 @@
 
 ## Changelog
 
+### 2026-06-26 · [feat] · 완료 · Thread 게시글 섹션을 형제 앱 Aidit와 동일하게 재디자인 (작성자/Upvote/댓글수/편집·삭제 팝오버)
+- **요청(사용자)**: Thread 페이지의 게시글 자체 섹션(제목·본문·작성자·작성시간·Upvote·댓글 수·팝오버 편집/삭제)을 부모 Aidit와 동일 디자인으로. 커뮤니티 제외. 통일성 중요. (recon 워크플로 + frontend-design 으로 사전 검증 완료.)
+- **결정사항**: ① 편집은 부모처럼 `/create` 페이지 편집모드 재활용. ② 댓글 수 = HUMAN + AGENT_REPLY(AI 최종응답) 카운트, TOOL_CALL/TOOL_RESULT(쉘 출력)·SYSTEM 제외. ③ 작성자 username 조인은 게시글 상세 + 피드 PostCard 둘 다. ④ 메뉴 hover 는 부모의 `term-hover` 토큰을 1회 예외로 추가해 부모 그대로. "(수정됨)" 표시는 부모에 없어 생략(updatedAt 미도입).
+- **백엔드**:
+  - `GET /posts/:id`·피드 `GET /posts`·북마크 카드에 `author { id, username }` 조인 추가(현재 authorId 만 반환 → 작성자 이름 미표시 버그 동반 수정).
+  - `commentCount` 증가 규칙 변경: 기존 HUMAN 생성 시 +1 에 더해, **AGENT_REPLY 가 COMPLETE 로 확정될 때 +1**(`agent/turn.ts`), hotScore 재계산. 실패/PENDING 제외.
+  - 기존 게시글 `commentCount` 백필(= HUMAN + AGENT_REPLY COMPLETE 재계산).
+  - (이미 존재: Upvote POST/DELETE, voted, PATCH 편집, DELETE 삭제 — 변경 없음.)
+- **프론트엔드**:
+  - `Avatar` 컴포넌트 이식(부모, username 시드 결정적 실루엣).
+  - `Thread.tsx` 게시글 article 재구성: 컨테이너/코너태그/제목(text-base bold term-glow+glow)/본문(SafeMarkdown 동등)/메타행(Avatar + u/이름 · relativeTime(createdAt)) + Upvote(▲score, 낙관적) + 댓글수(💬count) + 작성자 전용 `⋯` 팝오버(편집/2단계 삭제 확인).
+  - `Create` 페이지 편집모드 추가(editPostId state → prefill → patchPost).
+  - `PostCard` 작성자 표시 연결.
+  - i18n 편집/메뉴 키 추가, tailwind 에 `term-hover`(#072115, 1회 예외)·`shadow-glow-soft` 추가.
+- **본문 렌더 결정**: 부모는 SafeMarkdown(마크다운)이지만 Aidit-Code 엔 마크다운 렌더러가 없고 채팅 버블도 평문이라, 일관성·의존성 최소화를 위해 본문은 평문 `whitespace-pre-wrap` 유지(타이포만 부모와 동일하게 정렬). PostCard 는 이미 `post.author?.username` 을 렌더해 백엔드 조인만으로 작성자가 표시됨(FE 변경 불필요).
+- **검증(③) — 실측**: backend `npm test` PASS(exit 0) + backend `tsc --noEmit` 클린 + frontend `tsc --noEmit` 클린. 브라우저(5173) 실측: 게시글에 `★ 원본 게시글`·제목(glow)·본문·Avatar+`u/wdyoon#f693 · 17시간 전`·`▲1`·`💬4` 렌더. 작성자 글에서 `⋯` 팝오버 열림 → [편집/삭제], 삭제 클릭 시 2단계 확인(`이 글과 샌드박스를 삭제할까요?`+확인/취소)→취소 복귀(미삭제 확인). 편집 클릭 → `/create` 편집모드(h1 `글 수정`, 제목/본문 prefill, 버튼 `저장`). 피드 API 응답에 `author{id,username}` 동봉 확인. 백필 22/174 게시글 재계산 완료.
+- 변경 파일: `backend/src/routes/posts.ts`·`bookmarks.ts`·`users.ts`, `backend/src/agent/turn.ts`, `backend/scripts/backfill-comment-count.ts`(신규)·`backend/package.json`, `frontend/src/pages/Thread.tsx`·`CreatePost.tsx`, `frontend/src/components/Avatar.tsx`(신규), `frontend/src/api/rest.ts`(patchPost 언랩), `frontend/src/i18n/dicts/thread.ts`·`post.ts`, `frontend/tailwind.config.js`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [fix] · 완료 · 스레드 자동 스크롤이 최하단보다 살짝 위에서 멈추는 문제 — scrollIntoView+7rem → window.scrollTo(scrollHeight)
 - **요청(사용자)**: 게시글에서 새 메시지를 보내 AI 응답이 올 때 자동 스크롤이 "최하단보다 살짝 위"에서 멈춤.
 - **원인(브라우저 실측, 5173)**: 자동 추종은 `bottomRef.scrollIntoView({block:'end'})` + `scrollMarginBottom:'7rem'` 사용. 그런데 컴포저가 `sticky bottom-[var(--tabbar-h)]` 로 뷰포트 하단 ~150px 를 **덮고 있음**. `scrollIntoView` 는 (스티키 오버레이를 모른 채) 앵커를 **뷰포트 하단**에 맞추려 해서 항상 일찍 멈춤 → 실측: 자동 추종 `scrollY=1995`(최대 2040 대비 **45px 부족**), 마지막 메시지 끝이 컴포저 top 보다 36px 아래(=컴포저 뒤에 가림). 반면 점프 칩(↓)은 `window.scrollTo({top:scrollHeight})` 라 `scrollY=2040` 까지 가고 마지막 메시지가 컴포저보다 8px 위에 **온전히 노출**. (margin=0 으로 바꾸면 오히려 1883 까지만 — 더 나빠짐.)

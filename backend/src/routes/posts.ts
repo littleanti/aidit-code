@@ -111,7 +111,10 @@ export async function postRoutes(app: FastifyInstance): Promise<void> {
       where,
       orderBy,
       take: PAGE_SIZE + 1,
-      include: { sandbox: { select: { status: true } } },
+      include: {
+        sandbox: { select: { status: true } },
+        author: { select: { id: true, username: true } },
+      },
     });
 
     const hasMore = rows.length > PAGE_SIZE;
@@ -126,6 +129,8 @@ export async function postRoutes(app: FastifyInstance): Promise<void> {
       commentCount: p.commentCount,
       hotScore: p.hotScore,
       createdAt: p.createdAt,
+      // 작성자 표시(부모 Aidit 패리티) — 피드 카드에도 username 동봉.
+      author: { id: p.author.id, username: p.author.username },
       sandbox: { status: p.sandbox?.status ?? null },
     }));
 
@@ -140,7 +145,11 @@ export async function postRoutes(app: FastifyInstance): Promise<void> {
     const { id } = req.params as { id: string };
     const post = await prisma.post.findUnique({
       where: { id },
-      include: { sandbox: { select: { status: true, runtime: true } } },
+      include: {
+        sandbox: { select: { status: true, runtime: true } },
+        // 작성자 표시(부모 Aidit 패리티): username 조인. 키/비밀 필드 없음.
+        author: { select: { id: true, username: true } },
+      },
     });
     if (!post) {
       return reply.code(404).send({ error: 'post not found' });

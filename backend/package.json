@@ -12,7 +12,8 @@
     "prisma:generate": "prisma generate",
     "db:push": "prisma db push",
     "test": "vitest run",
-    "keygate": "node scripts/key-grep-gate.mjs"
+    "keygate": "node scripts/key-grep-gate.mjs",
+    "backfill:comment-count": "tsx scripts/backfill-comment-count.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

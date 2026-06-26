@@ -215,6 +215,17 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
     }),
   );
 
+  // AGENT_REPLY(AI 최종응답)가 COMPLETE 로 확정되면 댓글 수(commentCount)에 +1.
+  // 정의(사용자 확정): 댓글 수 = HUMAN + AGENT_REPLY. 쉘/도구 출력(TOOL_CALL/
+  // TOOL_RESULT)·SYSTEM·실패(FAILED) 는 카운트하지 않는다. HUMAN 경로(messages.ts)
+  // 의 증가 패턴과 동일하게 hotScore 는 다음 vote 시 재계산된다.
+  if (finalStatus === 'COMPLETE') {
+    await prisma.post.update({
+      where: { id: post.id },
+      data: { commentCount: { increment: 1 } },
+    });
+  }
+
   // 에러 시 SYSTEM 버블(TRD §11) — 일반 문구만, 키/원문 미노출.
   if (errored) {
     await postSystemBubble(post.id, '에이전트 응답 실패 — 잠시 후 다시 시도하세요.', session.id);

@@ -29,6 +29,9 @@ export default {
         'term-border': '#1d4a30', // Aidit border
         'term-border-dim': '#1d4a30', // Aidit border (single border value)
         'term-active': '#3fa564', // Aidit cta
+        // ── Hover surface → Aidit `term-hover`. 부모 메뉴/아바타 패리티를 위해
+        //    1회 예외로 추가(사용자 승인, 2026-06-26). 게시글 ⋯ 팝오버 메뉴 hover·Avatar 타일.
+        'term-hover': '#072115', // Aidit hover
         // ── Accent / semantic → Aidit amber/danger ──
         'term-amber': '#ffcf6b', // Aidit amber
         'term-amber-line': '#6e5a1e', // kept (no direct Aidit equiv)
@@ -51,6 +54,10 @@ export default {
           'Noto Sans KR',
           'monospace',
         ],
+      },
+      boxShadow: {
+        // 부모 Aidit `shadow-glow-soft` 패리티 — ⋯ 팝오버 메뉴의 부드러운 인광 그림자.
+        'glow-soft': '0 0 4px rgba(125, 255, 160, 0.25)',
       },
       backgroundImage: {
         // App background gradient — Aidit CRT screen wash.
