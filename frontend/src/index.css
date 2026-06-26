@@ -26,10 +26,11 @@
     );
     background-attachment: fixed;
     color: #4fbf72; /* term-fg / Aidit dim */
-    /* 부모 Aidit 실제 코드와 글자단위 동일한 순수 시스템 모노 스택(웹폰트 없음). */
+    /* 부모 Aidit와 글자단위 동일. 라틴=시스템 고정폭, 한글=고정폭 코딩 폰트(D2Coding→NanumGothicCoding).
+       끝에 monospace generic 금지 — 있으면 Chrome이 한글을 비례폭 Malgun으로 폴백시킴(WIREFRAME §12.2). */
     font-family:
       ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
-      'Liberation Mono', monospace;
+      'Liberation Mono', 'D2Coding', 'NanumGothicCoding';
     text-shadow: 0 0 1px rgba(125, 255, 160, 0.35);
     -webkit-font-smoothing: antialiased;
     -webkit-tap-highlight-color: transparent;

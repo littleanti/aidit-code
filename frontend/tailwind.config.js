@@ -41,9 +41,10 @@ export default {
         'term-red-bg': 'rgba(60,12,16,0.35)', // kept
       },
       fontFamily: {
-        // §12.2 system monospace stack — NO web font CDN.
-        // 부모 Aidit 실제 코드와 글자단위 동일(JetBrains Mono·D2Coding·Noto Sans KR 미포함):
-        // 둘 다 OS 기본 고정폭으로 렌더(Windows=Consolas, 한글=Malgun Gothic 등 시스템 폴백).
+        // §12.2 system monospace stack — NO web font CDN. 부모 Aidit와 글자단위 동일.
+        // 라틴=시스템 고정폭(Consolas 등), 한글=고정폭 코딩 폰트(D2Coding→NanumGothicCoding, 로컬 설치 시).
+        // 끝에 `monospace` generic을 두지 않는다(의도적): generic으로 끝나면 Chrome이
+        // 한글을 비례폭 Malgun으로 폴백시켜 D2Coding(고정폭)을 건너뛴다. (docs/WIREFRAME.md §12.2)
         mono: [
           'ui-monospace',
           'SFMono-Regular',
@@ -51,7 +52,8 @@ export default {
           'Menlo',
           'Consolas',
           'Liberation Mono',
-          'monospace',
+          'D2Coding',
+          'NanumGothicCoding',
         ],
       },
       boxShadow: {

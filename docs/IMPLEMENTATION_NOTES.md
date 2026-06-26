@@ -11,6 +11,16 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · 한글까지 고정폭으로 통일 (D2Coding·NanumGothicCoding, 끝 monospace generic 제거) — 부모 Aidit 동시 적용
+- **요청(사용자)**: 직전 통일(순수 시스템 스택)에선 한글이 Malgun Gothic(**비례폭**)으로 폴백돼 라틴(고정폭 Consolas)과 어긋났다. 한글도 **고정폭**으로 두 앱 모두 통일.
+- **조사(브라우저 DOM 실측)**: Chrome 폰트 매칭 특이동작 발견 — 스택이 **`monospace` generic으로 끝나면** 앞에 명시한 한글 고정폭 폰트(D2Coding)를 건너뛰고 generic의 한글 폴백(Malgun, 288px)을 쓴다. generic을 빼고 **명시 폰트로 끝내면** D2Coding(264.96px, 고정폭)이 정상 적용된다. 또한 D2Coding을 스택에 넣어도 라틴은 그대로 Consolas(228.73px)로 유지된다(글리프 단위 매칭).
+- **결정 스택(두 앱 공통, 끝에 generic 없음)**:
+  `ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'D2Coding', 'NanumGothicCoding'`
+  → 라틴 = Consolas(직전 결정 유지), 한글 = **D2Coding 고정폭**(미설치 시 NanumGothicCoding → 브라우저 최종 폴백). **끝의 `monospace` generic은 의도적으로 제거** — 다시 넣으면 한글이 비례폭 Malgun으로 깨진다(위 특이동작).
+- **적용**: `tailwind.config.js`(`fontFamily.mono`) + `index.css`(body). Tailwind preflight가 `code/pre`에도 `fontFamily.mono`를 적용하므로 마크다운 코드/터미널 출력 한글도 동일하게 고정폭. 부모 Aidit도 같은 스택으로 동시 수정(별도 저장소).
+- **검증(③) — 실측**: 두 frontend `tsc --noEmit` 클린(EXIT 0). 브라우저 DOM에 결정 스택 주입 — Aidit-Code(5173): KO=264.96(D2Coding 고정폭)·EN=228.73(Consolas), 부모 Aidit(5174): KO 8자=117.76(14.72/자=D2Coding 고정폭). 두 앱 동일. ※ **라이브 반영엔 vite 재시작 필요** — vite가 stale tailwind.config를 require-cache에 들고 있어 `.font-mono` 유틸이 hot-reload되지 않음(편집 직후 5173/5174 `.font-mono` 모두 옛 스택 확인). 프로덕션 빌드는 config를 새로 읽으므로 정상.
+- 변경 파일(예정): `frontend/tailwind.config.js`, `frontend/src/index.css`, `docs/WIREFRAME.md`(§12.2), `docs/IMPLEMENTATION_NOTES.md` + (부모 저장소) `frontend/tailwind.config.js`, `docs/DESIGN-SYSTEM.md`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [fix] · 완료 · 폰트 스택을 부모 Aidit 실제 코드와 동일하게 통일 (JetBrains Mono·D2Coding·Noto Sans KR 제거)
 - **요청(사용자)**: Aidit과 Aidit-Code의 폰트체를 "Aidit이 쓰는 폰트체"로 전부 통일.
 - **결정(사용자 확인)**: 부모 Aidit은 코드(`tailwind.config.js`)와 문서(DESIGN-SYSTEM.md)가 불일치 — 코드는 순수 시스템 모노 스택(JetBrains Mono 없음 → Windows 에서 Consolas 렌더), 문서는 풀 스택. 사용자가 **순수 시스템 스택**을 선택 → Aidit-Code 를 부모의 **실제 코드 스택**에 맞춤(부모는 변경 없음).
