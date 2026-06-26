@@ -11,6 +11,13 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · 작성 페이지 체크박스 라벨에 "(답변 깊이)" 명시 (Aidit-Code 전용)
+- **요청(사용자)**: `게시 후 AI 1차 답변 받기` → `게시 후 AI 1차 답변 받기 (답변 깊이)`, 매칭 영어도 반영.
+- **범위**: Aidit-Code 의 `aiFirstReply` 만. Aidit-Code 의 낮음/중간/높음은 reasoning effort(=답변 깊이)라 라벨로 그 의미를 명확히 한다. 부모 Aidit 의 동일 라벨은 컨트롤이 "응답 길이"라 "깊이"가 맞지 않으므로 **건드리지 않음**.
+- **변경**: KO `게시 후 AI 1차 답변 받기 (답변 깊이)`, EN `Get first AI reply after posting (reply depth)`.
+- **검증(③) — 실측**: FE `tsc --noEmit` 클린(EXIT 0). 브라우저(5173) 작성 페이지 체크박스 라벨 = `게시 후 AI 1차 답변 받기 (답변 깊이)` 확인.
+- 변경 파일(예정): `frontend/src/i18n/dicts/post.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [feat] · 완료 · 작성 페이지에 "게시 후 AI 1차 답변 받기" 체크박스 + 낮음/중간/높음(reasoning effort) — 외형은 부모, 동작은 Aidit-Code 매핑
 - **요청(사용자)**: 부모 Aidit 작성 페이지의 "게시 후 AI 1차 답변 받기" 체크박스 + (짧게/보통/길게) 컨트롤을 Aidit-Code에도. 외형은 부모와 동일하게, 동작은 Aidit-Code식으로 매핑(옵션 4).
 - **동작 매핑(부모와 다른 점)**:
