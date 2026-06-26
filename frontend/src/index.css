@@ -120,3 +120,15 @@
     animation: none;
   }
 }
+
+/* 부모 Aidit `.glow`/`.glow-lg` 패리티 — 인광 텍스트 글로우 헬퍼(게시 버튼 등 라이즈드 CTA). */
+@layer utilities {
+  .glow {
+    text-shadow: 0 0 4px rgba(125, 255, 160, 0.45);
+  }
+  .glow-lg {
+    text-shadow:
+      0 0 6px rgba(125, 255, 160, 0.55),
+      0 0 12px rgba(125, 255, 160, 0.3);
+  }
+}

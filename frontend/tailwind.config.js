@@ -57,6 +57,9 @@ export default {
         ],
       },
       boxShadow: {
+        // 부모 Aidit `shadow-glow-cta` 패리티 — 라이즈드 CTA 버튼(게시/전송)의 인광 테두리+안쪽 발광.
+        'glow-cta':
+          '0 0 6px rgba(125, 255, 160, 0.45), inset 0 0 4px rgba(125, 255, 160, 0.15)',
         // 부모 Aidit `shadow-glow-soft` 패리티 — ⋯ 팝오버 메뉴의 부드러운 인광 그림자.
         'glow-soft': '0 0 4px rgba(125, 255, 160, 0.25)',
       },

@@ -11,6 +11,25 @@
 
 ## Changelog
 
+
+### 2026-06-26 · [fix] · 완료 · 작성 페이지 게시 버튼 + 하단 탭바 글씨를 부모 Aidit 디자인과 통일 (+ 버튼/메뉴 대괄호·안내 섹션박스·⋯팝오버 여백)
+- **요청(사용자)**: ① Aidit-Code 작성 페이지의 "게시하기" 버튼을 부모 Aidit 작성 페이지 게시 버튼과 **동일 디자인**으로. ② Aidit-Code 하단 메뉴바의 **글씨 크기·글씨 폰트·글씨 위치**를 부모 Aidit 하단 메뉴바와 통일.
+- **현황 비교**:
+  - 게시 버튼 — 부모: `border-term-cta bg-gradient-to-b from-[#155230] to-[#0c3a20] text-sm font-bold text-term-title glow-lg shadow-glow-cta transition disabled:cursor-not-allowed disabled:opacity-50`(인광 라이즈드 버튼). Aidit-Code: `border-term-border bg-term-cta text-term-fg-bright`(평면, glow 없음).
+  - 하단 탭바 라벨 — 부모: `text-xs`(12px) + 기본 mono. Aidit-Code: `text-[10px]`(10px) + `font-mono`. 폰트 스택은 두 앱 `font-mono`가 글자단위 동일.
+- **방향(토큰 매핑 — Aidit-Code엔 부모와 이름이 다른 동일 색이 이미 존재)**: `border-term-cta`→`border-term-active`(둘 다 #3fa564), `text-term-title`→`text-term-glow`(둘 다 #7dffa0), `bg-gradient…`→`bg-term-cta`(Aidit-Code 토큰이 동일 그라디언트). 누락분만 추가: boxShadow `glow-cta`(→`shadow-glow-cta`), 유틸 `.glow`/`.glow-lg`(text-shadow). 탭바는 `text-[10px]`→`text-xs`(폰트/위치는 이미 동일).
+- **추가 요청(후속, 동일 작업 중)**:
+  - ③ 게시 버튼 라벨을 부모 Aidit처럼 대괄호로: `게시하기`→`[ 게시하기 ]` 등. 편집 모드 저장 버튼도 같은 버튼이라 동일하게 대괄호 처리(부모 `btn_*` 전체가 대괄호 — `[ 게시하기 ]`/`[ 게시 중… ]`/`[ 저장 ]`/`[ 저장 중… ]`, EN 동일).
+  - ④ 샌드박스 안내문(`! 게시하면 …`)을 평면 텍스트→부모 Aidit `PersonaEditor` 힌트와 동일한 **섹션 박스**로: `rounded-[2px] border border-term-border bg-term-modal px-3 py-2 text-xs leading-relaxed text-term-dim`(부모 `bg-term-info`=#06190e → Aidit-Code `bg-term-modal`=#06190e 동일).
+  - ⑤ Thread ⋯ 메뉴의 게시글 편집/삭제 라벨을 부모 Aidit처럼 대괄호로: `편집`→`[ 편집 ]`, `삭제`→`[ 삭제 ]`(EN `[ Edit ]`/`[ Delete ]`). 두 키는 메뉴 아이템 본문 전용(확인 다이얼로그 `deleteConfirm/Yes/No`·aria 미사용)이라 부작용 없음.
+  - ⑥ ⋯ 팝오버 폭 조정(두 앱 공통). **측정(브라우저 canvas, text-xs mono + px-3)**: `[ Delete ]`=**90px**(메뉴 상태 최장 단일행), `[ Edit ]`=77px, `[ 삭제 ]`/`[ 편집 ]`=72px(한글이 더 좁음). 기존 `w-36`=144px는 `[ Delete ]` 기준 우측 ~54px(약 1/3) 빈 공간.
+    - **1차 시도(`w-fit max-w-[9rem]`) → 실패/되돌림**: `w-fit`(fit-content)이 절대배치+래핑 가능 콘텐츠에서 **min-content로 수축**, 라벨의 공백(`[ Delete ]`의 스페이스)이 줄바꿈 기회가 되어 `[`/`Delete`/`]`가 **3줄로 깨짐**(한·영 모두 과도하게 좁아짐).
+    - **확정(고정폭 `w-28`=112px)**: 사용자 요청대로 **영어 최장 라벨 기준으로 고정폭을 정하고 한·영 동일 적용**. 90px 콘텐츠 + 22px 여백으로 `[ Delete ]`가 한 줄에 들어오고(래핑 없음), 144px 대비 여백 32px 축소. 고정폭이라 언어 무관 동일 가로. 삭제 확인 긴 문구는 112px 안에서 자연 줄바꿈. **부모 Aidit도 동일 1줄 수정**(`bg-term-card`만 다르고 폭 클래스 동일).
+- **구현(예정)**: `frontend/tailwind.config.js`(boxShadow `glow-cta` 추가), `frontend/src/index.css`(`@layer utilities`에 `.glow`/`.glow-lg`), `frontend/src/pages/CreatePost.tsx`(게시 버튼 className + 안내문 섹션 박스), `frontend/src/layout/AppShell.tsx`(TabBar 라벨 `text-[10px]`→`text-xs`), `frontend/src/i18n/dicts/post.ts`(버튼 라벨 대괄호).
+- **검증(④) — 실측**: FE `tsc --noEmit` **클린(EXIT 0)** — Aidit-Code·부모 Aidit 양쪽. 브라우저(5173) 작성 페이지에서 ① 게시 버튼이 인광 그라디언트+밝은 글로우 텍스트(`text-term-glow`+`glow-lg`)+`shadow-glow-cta`로 부모 라이즈드 CTA와 동일 외형(활성 시), ② 라벨 `[ 게시하기 ]`, ③ 샌드박스 안내가 테두리+info 배경 섹션 박스, ④ 하단 탭바 글씨 `text-xs`로 확대됨을 스크린샷 확인. ⑤ ⋯팝오버 `[ 편집 ]`/`[ 삭제 ]` 대괄호 + 고정폭 `w-28`(112px)은 `tsc` 클린 + **브라우저 DOM 실측**으로 검증: 컨테이너 112px, `[ Delete ]`·`[ Edit ]` 모두 `getClientRects().length===1`(=한 줄, 래핑 없음, 텍스트 높이 14px) — 직전 `w-fit`의 3줄 깨짐 해소, `[ Delete ]`(90px) + ~20px 여백.
+- 변경 파일(예정): `frontend/tailwind.config.js`, `frontend/src/index.css`, `frontend/src/pages/CreatePost.tsx`, `frontend/src/layout/AppShell.tsx`, `frontend/src/i18n/dicts/post.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
+
 ### 2026-06-26 · [fix] · 완료 · 샌드박스 작업경로를 절대경로 박제 대신 런타임 재계산(레포 이동/이름변경 내성)
 - **배경(사고)**: 프로젝트 폴더명이 `Audit-Code`→`Aidit-Code`로 바뀌자, DB `Sandbox.path`에 **생성 시점 절대경로가 박제**돼 있어 세션 시작 시 `pi.ts` `spawn({cwd: sandbox.path})`가 `ENOENT`로 실패. 174개 글 중 171개가 세션 시작 불가 → (사용자 승인 후) 삭제 완료. 같은 일이 레포를 옮기거나 이름 바꾸거나 다른 머신/배포로 가면 또 재발하는 **설계 결함**.
 - **원인**: `sandbox/service.ts createSandboxForPost`가 `resolveInsideRoot(config.sandboxRoot, postId)`로 만든 **절대경로**를 DB에 저장 → 호스트 경로에 종속. 소비처(spawn cwd, 도구 실행 root, 파일 트리, 디렉토리 삭제)가 모두 그 절대경로를 그대로 신뢰.

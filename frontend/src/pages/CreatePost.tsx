@@ -150,7 +150,10 @@ export default function CreatePost() {
             강도 = reasoningEffort(Composer Feature B 와 동일 어휘). 편집 모드에선 숨김(재실행 방지). */}
         {!isEdit && (
           <div className="space-y-2">
-            <p className="font-mono text-xs text-term-dim">! {t('post.sandboxNotice')}</p>
+            {/* 부모 Aidit PersonaEditor 힌트와 동일한 섹션 박스(테두리+info 배경). */}
+            <p className="rounded-[2px] border border-term-border bg-term-modal px-3 py-2 font-mono text-xs leading-relaxed text-term-dim">
+              ! {t('post.sandboxNotice')}
+            </p>
 
             <label className="flex items-center gap-2 font-mono text-sm text-term-dim">
               <input
@@ -211,7 +214,7 @@ export default function CreatePost() {
         <button
           type="submit"
           disabled={!title.trim() || busy || loadingPost}
-          className="min-h-[44px] w-full rounded-[2px] border border-term-border bg-term-cta font-mono text-sm text-term-fg-bright disabled:opacity-40"
+          className="min-h-[44px] w-full rounded-[2px] border border-term-active bg-term-cta px-4 py-2.5 text-sm font-bold text-term-glow glow-lg shadow-glow-cta transition disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isEdit
             ? busy

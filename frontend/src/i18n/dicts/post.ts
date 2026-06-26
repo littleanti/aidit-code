@@ -24,14 +24,14 @@ export const post = {
     bodyPlaceholder: '/health 라우트 + pytest 추가…',
     sandboxNotice:
       '게시하면 이 게시글 전용 샌드박스가 자동 생성되고 코드 에이전트가 붙습니다.',
-    publish: '게시하기',
-    publishing: '게시 중…',
+    publish: '[ 게시하기 ]',
+    publishing: '[ 게시 중… ]',
     aiFirstReply: '게시 후 AI 1차 답변 받기 (답변 깊이)',
     loginToPost: '게시글을 작성하려면 로그인이 필요해요',
     // 편집 모드(CreatePost 재활용 — 부모 Aidit 패리티)
     editTitle: '게시글 수정',
-    save: '저장',
-    saving: '저장 중…',
+    save: '[ 저장 ]',
+    saving: '[ 저장 중… ]',
     editLoadError: '게시글을 불러오지 못했어요.',
     // thread placeholder
     originalPost: '원본 게시글',
@@ -60,14 +60,14 @@ export const post = {
     bodyPlaceholder: 'Add a /health route + pytest…',
     sandboxNotice:
       'Publishing auto-creates a dedicated sandbox for this post and attaches a code agent.',
-    publish: 'Publish',
-    publishing: 'Publishing…',
+    publish: '[ Publish ]',
+    publishing: '[ Publishing… ]',
     aiFirstReply: 'Get first AI reply after posting (reply depth)',
     loginToPost: 'Login is required to create a post',
     // Edit mode (CreatePost reuse — Aidit parity)
     editTitle: 'Edit post',
-    save: 'Save',
-    saving: 'Saving…',
+    save: '[ Save ]',
+    saving: '[ Saving… ]',
     editLoadError: 'Could not load the post.',
     originalPost: 'Original post',
     originalPostTag: '★ Original Post',
