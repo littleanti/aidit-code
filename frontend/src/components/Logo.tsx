@@ -18,7 +18,7 @@ export default function Logo({
   const wordmarkClass =
     size === 'lg'
       ? 'truncate font-mono text-3xl font-bold uppercase tracking-[3px] text-term-fg-bright [text-shadow:0_0_10px_rgba(125,255,160,0.6)]'
-      : 'truncate font-mono text-base font-bold uppercase tracking-[1px] text-term-fg-bright [text-shadow:0_0_6px_rgba(125,255,160,0.45)]';
+      : 'truncate font-mono text-lg font-bold uppercase tracking-[3px] text-term-fg-bright [text-shadow:0_0_6px_rgba(125,255,160,0.45)]';
   const gapClass = size === 'lg' ? 'gap-2.5' : 'gap-2';
 
   return (

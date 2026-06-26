@@ -11,6 +11,20 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · 글로벌바(최상단 헤더)를 형제 앱 Aidit와 동일한 크기·폰트로 통일
+- **요청(사용자)**: Aidit-Code 최상단 글로벌바의 크기/포함 텍스트의 폰트체·폰트크기·폰트내용이 형제 앱 Aidit의 글로벌바와 미묘하게 달라, Aidit의 디자인·폰트와 동일하게 맞춰달라.
+- **비교(실측)** — Aidit(부모) vs Aidit-Code(현재):
+  - 바 높이: `h-12`(48px) vs **`h-14`(56px)** — Aidit-Code 가 8px 더 높음.
+  - 워드마크 폰트 크기(sm): `text-lg` vs **`text-base`** — Aidit-Code 가 더 작음.
+  - 워드마크 자간(sm): `tracking-[3px]` vs **`tracking-[1px]`** — Aidit-Code 가 더 좁음.
+  - 폰트체: 양쪽 모두 `font-mono`(동일) — 차이 없음.
+  - 색상 토큰: 이름만 다르고(`term-fg-bright`=`term-bright`=`#aaffc0`, `term-nav`=`term-screen`=`#04130b`, `term-line`=`term-border`=`#1d4a30`) **값은 동일** → 변경 불필요.
+  - 워드마크 텍스트: `AIDIT` vs `AIDIT-CODE` — **별개 제품명이므로 'AIDIT-CODE' 유지(사용자 확정)**, 폰트 스타일만 동일하게.
+- **방향**: 시각적으로 다른 두 항목만 정정 — ① 헤더 높이 `h-14`→`h-12`, ② Logo `sm` 워드마크 `text-base tracking-[1px]`→`text-lg tracking-[3px]`. `truncate`/`shrink-0`/`min-w-0`(좁은 화면 오버플로 방지)는 Aidit-Code 고유 안전장치로 유지(일반 렌더 외형 불변). bg 불투명도(`/95`)·z-index 등은 시각차 없고 자체 TabBar 와의 일관성 때문에 미변경.
+- **구현**: `AppShell.tsx` Header `h-14`→`h-12`; `Logo.tsx` sm 워드마크 className 폰트 크기/자간 변경.
+- **검증(③) — 실측**: frontend `tsc --noEmit` 클린(EXIT 0). 브라우저 computed 비교 — Aidit-Code(5173): 헤더 행 높이 48px·워드마크 fontSize 18px·letter-spacing 3px(JetBrains Mono). 부모 Aidit(5174): 48px·18px·3px 동일. 텍스트만 `AIDIT-CODE` vs `AIDIT`(의도된 제품명 차이).
+- 변경 파일: `frontend/src/layout/AppShell.tsx`, `frontend/src/components/Logo.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [fix] · 완료 · 프로필 탭 라벨 한국어 미번역 수정 — posts/bookmarks → 게시글/북마크 (i18n ko≠en)
 - **요청(사용자)**: 한↔영 전환 시에도 언어가 바뀌지 않는 텍스트가 몇 개 있음. 점검 결과 JSX는 모두 `t()` 사용(하드코딩 없음), 영어 키 누락도 없음. 실제 원인은 사전(dict)에서 `ko`·`en` 값이 동일한 항목들.
 - **분석**: `profile.tabPosts`='posts', `profile.tabBookmarks`='bookmarks' 가 ko·en 모두 영어 → 한국어 모드에서도 영어로 표시(다른 탭 `홈`/`Home` 은 정상 번역). 사용자 선택으로 이 두 항목만 한국어화. (상태 배지 CREATING 등·placeholder 등 나머지 동일값 항목은 터미널 미학/브랜드로 보고 미수정.)

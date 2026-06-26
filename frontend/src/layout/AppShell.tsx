@@ -19,7 +19,7 @@ function Header() {
 
   return (
     <header className="sticky top-0 z-20 border-b border-term-line bg-term-nav/95 backdrop-blur">
-      <div className="mx-auto flex h-14 max-w-2xl items-center justify-between gap-2 px-4">
+      <div className="mx-auto flex h-12 max-w-2xl items-center justify-between gap-2 px-4">
         <Link to="/" aria-label={t('common.appName')} className="min-w-0">
           <Logo size="sm" />
         </Link>
