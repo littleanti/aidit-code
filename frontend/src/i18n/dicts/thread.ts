@@ -34,7 +34,7 @@ export const thread = {
     reconnecting: '재연결 중…',
     loginToChat: '메시지를 보내려면 로그인이 필요해요',
     deletePost: '삭제',
-    deleteConfirm: '이 글과 샌드박스를 삭제할까요?',
+    deleteConfirm: '이 게시글과 샌드박스를 삭제할까요?',
     deleteYes: '확인',
     deleteNo: '취소',
     deleting: '삭제 중…',

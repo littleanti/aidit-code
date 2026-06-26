@@ -11,6 +11,13 @@
 
 ## Changelog
 
+### 2026-06-26 · [fix] · 완료 · UI 카피 용어 통일 — 게시물을 뜻하는 "글" → "게시글" (부모 Aidit 동시 적용)
+- **요청(사용자)**: 나(프로필) 페이지에서 Aidit-Code는 "게시글", 부모 Aidit은 "글"로 불일치. 두 앱 모두 **게시물을 뜻하는 "글"을 "게시글"로 전부 통일**.
+- **방향**: i18n 사전(KO)에서 post 의미의 `글` → `게시글`. 자연스러운 조사 유지(`글을`→`게시글을`, `글이`→`게시글이`, `글과`→`게시글과`). 일관성 위해 `인기글`→`인기 게시글`, `글쓰기`→`게시글 쓰기`도 포함. **"댓글"(comment)·코드 주석의 "글리프" 등 post와 무관한 "글"은 미변경.** EN(`post(s)`)은 이미 일관 → 미변경.
+- **Aidit-Code 변경 키**: `post.ts`(emptyNew·writeFirst·createTitle·sandboxNotice·loginToPost·editTitle·editLoadError·emptyHot), `thread.ts`(deleteConfirm), `profile.ts`(postsEmpty·bookmarksEmpty). (이미 "게시글"인 feedEmpty·originalPost·tabPosts·ownerMenuAria 등은 그대로.)
+- **검증(③) — 실측**: 두 frontend `tsc --noEmit` 클린(EXIT 0). i18n grep — `댓글`·`게시글` 제외 시 양쪽 사전에 "글" 0건(모든 post-글 전환, 댓글 보존). 브라우저: 나 페이지 탭 Aidit-Code=["게시글","북마크"], 부모 Aidit="커뮤니티 / 게시글 / 북마크" 확인. 잔존 bare post-"글" 없음.
+- 변경 파일(예정): `frontend/src/i18n/dicts/post.ts`·`thread.ts`·`profile.ts`, `docs/IMPLEMENTATION_NOTES.md` + (부모 저장소) `frontend/src/i18n/dicts/post.ts`·`thread.ts`·`home.ts`·`profile.ts`·`community.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-26 · [fix] · 완료 · 한글까지 고정폭으로 통일 (D2Coding·NanumGothicCoding, 끝 monospace generic 제거) — 부모 Aidit 동시 적용
 - **요청(사용자)**: 직전 통일(순수 시스템 스택)에선 한글이 Malgun Gothic(**비례폭**)으로 폴백돼 라틴(고정폭 Consolas)과 어긋났다. 한글도 **고정폭**으로 두 앱 모두 통일.
 - **조사(브라우저 DOM 실측)**: Chrome 폰트 매칭 특이동작 발견 — 스택이 **`monospace` generic으로 끝나면** 앞에 명시한 한글 고정폭 폰트(D2Coding)를 건너뛰고 generic의 한글 폴백(Malgun, 288px)을 쓴다. generic을 빼고 **명시 폰트로 끝내면** D2Coding(264.96px, 고정폭)이 정상 적용된다. 또한 D2Coding을 스택에 넣어도 라틴은 그대로 Consolas(228.73px)로 유지된다(글리프 단위 매칭).

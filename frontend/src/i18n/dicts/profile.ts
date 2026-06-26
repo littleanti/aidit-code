@@ -3,8 +3,8 @@ export const profile = {
   ko: {
     tabPosts: '게시글',
     tabBookmarks: '북마크',
-    postsEmpty: '작성한 글이 없어요',
-    bookmarksEmpty: '북마크한 글이 없어요',
+    postsEmpty: '작성한 게시글이 없어요',
+    bookmarksEmpty: '북마크한 게시글이 없어요',
     loginRequired: '로그인이 필요해요',
     settingsLabel: '[ 설정 ]',
     settingsLink: '설정 열기',
