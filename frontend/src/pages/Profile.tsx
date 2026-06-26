@@ -11,11 +11,20 @@ import { useUiStore } from '../stores/uiStore';
 import { getUserPosts, getUserBookmarks } from '../api/rest';
 import { usePagedList } from '../hooks/usePagedList';
 import PostCard from '../components/PostCard';
+import Avatar from '../components/Avatar';
+import PageHeaderBar from '../components/PageHeaderBar';
+import ShellPrompt from '../components/ShellPrompt';
 import EmptyState from '../components/states/EmptyState';
 import ErrorState from '../components/states/ErrorState';
 import type { Post } from '../api/types';
 
 type ProfileTab = 'posts' | 'bookmarks';
+
+// 탭별 터미널 명령(번역 안 함 — 셸 관용구, KO/EN 동일). 부모 Aidit Profile 동일 패턴.
+const TAB_COMMAND: Record<ProfileTab, string> = {
+  posts: 'ls ~/posts',
+  bookmarks: 'ls ~/bookmarks',
+};
 
 /**
  * One profile tab's infinite list. Mounted independently per tab so each keeps its own
@@ -110,23 +119,26 @@ export default function Profile() {
 
   return (
     <div>
-      {/* Header: whoami ShellPrompt + ⚙ settings link */}
-      <div className="flex items-start justify-between">
-        <div className="font-mono text-xs text-term-dim">
-          aidit@web:~$ whoami
-          <div className="mt-1 text-base text-term-amber">&gt; {username}</div>
-        </div>
+      {/* Header (부모 Aidit 동일 구조): 고정 상단바 — Avatar + username + [설정] 링크 */}
+      <PageHeaderBar>
+        <Avatar kind="user" seed={username} size="sm" />
+        <h1 className="min-w-0 flex-1 truncate text-base font-semibold text-term-glow">
+          {username}
+        </h1>
         <Link
           to="/me/settings"
-          aria-label={t('common.settings')}
-          className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center font-mono text-term-dim hover:text-term-fg-bright"
+          aria-label={t('profile.settingsLink')}
+          className="inline-flex h-8 shrink-0 items-center rounded-[2px] border border-term-line px-3 text-sm font-semibold text-term-dim transition hover:border-term-fg-bright hover:text-term-fg-bright"
         >
-          ⚙
+          <span>{t('profile.settingsLabel')}</span>
         </Link>
-      </div>
+      </PageHeaderBar>
+
+      {/* 탭별 셸 프롬프트 — 활성 탭에 따라 ls ~/posts | ~/bookmarks */}
+      <ShellPrompt command={TAB_COMMAND[tab]} className="mt-4 mb-3" />
 
       {/* Tabs [ posts | bookmarks ] — active underline term-amber */}
-      <div className="mt-4 flex gap-4 border-b border-term-line font-mono text-sm" role="tablist">
+      <div className="flex gap-4 border-b border-term-line font-mono text-sm" role="tablist">
         {TABS.map((tb) => {
           const active = tab === tb;
           return (

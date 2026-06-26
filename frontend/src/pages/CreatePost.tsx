@@ -10,6 +10,9 @@ import { useT } from '../i18n/useT';
 import { useAuthStore } from '../stores/authStore';
 import { useUiStore } from '../stores/uiStore';
 import { createPost, getPost, patchPost, ApiError } from '../api/rest';
+import PageHeaderBar from '../components/PageHeaderBar';
+import ShellPrompt from '../components/ShellPrompt';
+import { formatPromptArg } from '../lib/shellArg';
 
 export default function CreatePost() {
   const t = useT();
@@ -51,9 +54,9 @@ export default function CreatePost() {
     };
   }, [editPostId, t]);
 
-  // Live ShellPrompt: post --new / post --edit ["<title>"]
+  // Live ShellPrompt: post --new / post --edit ["<title>"] (부모와 동일 포맷터).
   const cmd = isEdit ? 'post --edit' : 'post --new';
-  const prompt = title.trim() ? `${cmd} "${title.trim()}"` : cmd;
+  const promptCommand = title.trim() ? `${cmd} "${formatPromptArg(title)}"` : cmd;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -88,14 +91,12 @@ export default function CreatePost() {
 
   return (
     <div>
-      <h1 className="mb-2 font-mono text-base text-term-fg-bright">
-        {isEdit ? t('post.editTitle') : t('post.createTitle')}
-      </h1>
-
-      <div className="mb-3 font-mono text-xs text-term-dim">
-        aidit@web:~$ {prompt}
-        <span className="term-cursor ml-1 align-middle">&nbsp;</span>
-      </div>
+      <PageHeaderBar>
+        <h1 className="truncate text-base font-semibold text-term-glow [text-shadow:0_0_4px_rgba(125,255,160,0.45)]">
+          {isEdit ? t('post.editTitle') : t('post.createTitle')}
+        </h1>
+      </PageHeaderBar>
+      <ShellPrompt command={promptCommand} className="mt-4 mb-3" />
 
       {!token && (
         <div className="mb-3 rounded-[2px] border border-term-amber-line bg-term-amber-bg p-3 font-mono text-xs text-term-amber">
