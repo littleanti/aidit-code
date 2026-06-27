@@ -11,6 +11,15 @@
 
 ## Changelog
 
+### 2026-06-27 · [fix] · 완료 · 에이전트 세션 시작 실패(`agent worker exited before ready (code 3221225794)`) — 고아 백엔드 프로세스 + Windows 자식 spawn 하드닝
+- **증상(사용자)**: 글에서 "세션 시작" 시 `errors.sessionFailed`("Failed to start the agent session. Please retry."). 실측 재현 — `POST /posts/:id/session` → **500** `{"message":"agent worker exited before ready (code 3221225794)"}`.
+- **원인 진단(실측)**: `3221225794 = 0xC0000142 (STATUS_DLL_INIT_FAILED)` — 자식 프로세스가 init 단계에서 즉사. 격리 재현으로 **코드 경로는 정상**임을 확인: `piWorker.mjs` 존재, 샌드박스 cwd 존재(`.sandboxes/<postId>`, DB `path`도 현재 루트), API_KEY set, `pi.ts`와 동일한 spawn(injected env + stdio pipe)을 **새 node 프로세스에서 실행하면 `ready` 정상**. 잘못된 cwd는 `ENOENT`(0xC0000142 아님)·env에서 SystemRoot 제거도 정상(node24 자동 복구). → 결정적 차이는 **실행 중인 백엔드 인스턴스**: PID 71904가 `cmd.exe /d /s /c tsx watch`(다른 세션의 백그라운드 태스크)로 06-26 23:36 기동 후, 그 세션이 kill되며(이번 대화의 `killed` 알림) **런치 콘솔/윈도우 스테이션이 파괴**됨. 스테이션이 사라진 프로세스는 새 자식의 데스크톱을 할당하지 못해 **모든 spawn이 0xC0000142로 실패**(핸들 321개·워커 0개 = 누수 아님, 기동 후~지금까지 정상→실패 전환이 kill 시점과 일치).
+- **방향(2단)**: ① **즉시**: 고아 백엔드 트리(서버 71904 / tsx-watch 74356 / cmd 69784) 종료 후 살아있는 스테이션에서 재기동 → spawn 복구. ② **하드닝(영구)**: 서버가 띄우는 자식이 부모 콘솔/스테이션에 덜 의존하도록 `child_process.spawn`에 **`windowsHide: true`** 추가(콘솔 창 미할당 → 데스크톱 힙 소모↓, 반복 spawn 내성↑). 적용처: `agent/pi.ts`(worker spawn), `agent/toolExec.ts`(SHELL/PACKAGE 자식). 동작/스트리밍 불변(stdio pipe 유지).
+- **구현**: `pi.ts` worker spawn + `toolExec.ts` SHELL/PACKAGE 자식 spawn에 `windowsHide: true` 추가.
+- **검증(③) — 실측**: 고아 트리(74356 tsx-watch / 69784 cmd) 종료 → 3001 listener down 확인 → 라이브 스테이션에서 `npm run dev`(tsx watch) 재기동(health 200). **재현됐던 호출이 복구**: `POST /posts/cmqwc9jy…/session` → **201** `{session:{status:"IDLE", runtimePid:43404, model:"openai/gpt-4o-mini", …}}`(직전 500 `exited before ready` 해소). backend `tsc --noEmit` 클린(EXIT 0).
+- **운영 권고**: 백엔드는 사용자 본인 터미널(`cd backend && npm run dev`)에서 띄우면 콘솔/스테이션이 세션 종료에 영향받지 않아 가장 안정적. (이번 고아화는 다른 세션의 백그라운드 태스크 콘솔이 kill되며 발생.)
+- 변경 파일: `backend/src/agent/pi.ts`, `backend/src/agent/toolExec.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-27 · [fix] · 완료 · 세션/샌드박스 상태 표시등 색을 신호등 의미로 — RUNNING 초록 · SUSPENDED 빨강 · 그 외 무색
 - **요청(사용자)**: 상태 "불 표시"를 RUNNING이면 초록, SUSPENDED면 빨강, unknown이면 무색으로.
 - **현황**: `StatusBadge`의 `styleFor` 매핑이 RUNNING=`term-amber`(●), READY/SUSPENDED=`term-dim`(○), ERROR=`term-red`(✗), CREATING=`term-dim`(⟳), none=`term-dim-3`(·). RUNNING이 amber라 "켜짐=초록" 직관과 어긋나고 SUSPENDED가 dim이라 "정지" 강조가 약함. `StatusBadge`는 Thread(상단 sticky 점 + 세션 행)와 피드 카드(`PostCard`) 양쪽에서 쓰여 **앱 전역 일관 적용**됨.
