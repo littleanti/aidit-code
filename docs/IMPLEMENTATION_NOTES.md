@@ -11,6 +11,22 @@
 
 ## Changelog
 
+### 2026-06-28 · [fix] · 완료 · 서브 상단바(PageHeaderBar)·하단 메뉴바를 부모 Aidit처럼 CRT 그라디언트(`bg-term-screen`)로
+- **요청(사용자)**: 부모 Aidit의 글로벌 상단바 아래 서브 상단바와 하단 메뉴바의 그라디언트 디자인을 확인하고, 동일하면 Aidit-Code의 동일 바에도 적용.
+- **확인(브라우저 실측)**: 부모(5174) `PageHeaderBar`·`BottomTabBar` 모두 `bg-term-screen` → `background-image: radial-gradient(120% 80% at 50% 0%, #06190e, #04130b, #020a05)`(CRT 스크린 wash), backdrop 없음. Aidit-Code(5173)는 서브바 `bg-term-nav`(평면 #04130b), 하단바 `bg-term-nav/95 + backdrop-blur(8px)` → **그라디언트 없음**.
+- **방향**: Aidit-Code의 ① `PageHeaderBar` `bg-term-nav`→`bg-term-screen`, ② `AppShell` 하단 `TabBar` `bg-term-nav/95 backdrop-blur`→`bg-term-screen`(불투명 그라디언트·블러 제거, 부모와 동일). `term-screen` 그라디언트 토큰은 Aidit-Code `tailwind.config.js`에 부모와 동일 정의가 이미 존재. 글로벌 상단바(Header)는 범위 외 — 불변.
+- **구현(예정)**: `frontend/src/components/PageHeaderBar.tsx`, `frontend/src/layout/AppShell.tsx`.
+- **검증(③) — 실측**: FE `tsc --noEmit` 클린(EXIT 0). 브라우저(5173) `/posts/:id` 서브바·하단바 모두 `background-image = radial-gradient(120% 80% at 50% 0%, rgb(6,25,14), rgb(4,19,11), rgb(2,10,5))` = **부모(5174)와 바이트 단위 동일**, backdrop none(블러 제거). subMatches/bottomMatches=true.
+- 변경 파일: `frontend/src/components/PageHeaderBar.tsx`, `frontend/src/layout/AppShell.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
+### 2026-06-28 · [fix] · 완료 · 게시글 ShellPrompt의 attach 글 ID를 8글자로 제한(부모 Aidit 패리티)
+- **요청(사용자)**: 게시글 ShellPrompt `thread --attach=<postId>`의 전체 cuid(25자)를 8글자로 제한.
+- **현황/패리티**: 부모 Aidit Thread는 ShellPrompt에서 `postId.slice(0, 8)` 사용(`ai --ask /p/<8자>`, `tail -f /p/<8자>`). Aidit-Code(`Thread.tsx`)는 전체 `${id}` 노출.
+- **방향**: `thread --attach=${id ?? ''}` → `thread --attach=${(id ?? '').slice(0, 8)}`. 표시 문자열만 변경(세션 attach 동작은 실제 `id`로 수행 — 불변).
+- **구현(예정)**: `frontend/src/pages/Thread.tsx`.
+- **검증(③) — 실측**: FE `tsc --noEmit` 클린(EXIT 0). 브라우저(5173) `/posts/:id` ShellPrompt = `aidit@wdyoon#e1eb:~$ thread --attach=cmqwc9jy`(8자, 기존 25자 cuid 대비 축약) 확인.
+- 변경 파일: `frontend/src/pages/Thread.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-28 · [fix] · 완료 · 게시글 스티키 바 뒤로가기 버튼을 부모 Aidit Thread 버튼과 크기·모양 동일하게
 - **요청(사용자)**: Aidit-Code 게시글(Thread) 스티키 바의 `‹` 뒤로가기 버튼을 부모 Aidit 게시글 화면의 뒤로가기 버튼과 **크기·모양 동일**하게.
 - **현황 비교**: Aidit-Code(`Thread.tsx`)는 텍스트 글리프 `‹`(`font-mono text-lg`, `min-h-[44px] min-w-[32px]`, hover 텍스트 밝기). 부모 Aidit(`Thread.tsx`)는 **40×40 라운드 사각 버튼**(`h-10 w-10 shrink-0 rounded-[2px] hover:bg-term-hover`) 안에 **24×24 SVG 셰브론**(`<path d="M15 18l-6-6 6-6"/>`, strokeWidth 2.5).

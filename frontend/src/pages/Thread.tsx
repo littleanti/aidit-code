@@ -564,7 +564,7 @@ export default function Thread() {
       </PageHeaderBar>
 
       {/* 꾸미기 셸 프롬프트 — 고정바 바로 아래(다른 화면과 통일) */}
-      <ShellPrompt command={`thread --attach=${id ?? ''}`} className="mt-4 mb-3" />
+      <ShellPrompt command={`thread --attach=${(id ?? '').slice(0, 8)}`} className="mt-4 mb-3" />
 
       {/* 세션 행(비-sticky) — 전체 상태 배지 + 재연결 + Start/Stop Session.
           자주 누르는 버튼이 아니고(진입 시 자동 연결 + 끊김 시 composer 위 경고
