@@ -11,6 +11,30 @@
 
 ## Changelog
 
+### 2026-06-28 · [fix] · 완료 · 서브 상단바(PageHeaderBar)·하단 메뉴바를 부모 Aidit처럼 CRT 그라디언트(`bg-term-screen`)로
+- **요청(사용자)**: 부모 Aidit의 글로벌 상단바 아래 서브 상단바와 하단 메뉴바의 그라디언트 디자인을 확인하고, 동일하면 Aidit-Code의 동일 바에도 적용.
+- **확인(브라우저 실측)**: 부모(5174) `PageHeaderBar`·`BottomTabBar` 모두 `bg-term-screen` → `background-image: radial-gradient(120% 80% at 50% 0%, #06190e, #04130b, #020a05)`(CRT 스크린 wash), backdrop 없음. Aidit-Code(5173)는 서브바 `bg-term-nav`(평면 #04130b), 하단바 `bg-term-nav/95 + backdrop-blur(8px)` → **그라디언트 없음**.
+- **방향**: Aidit-Code의 ① `PageHeaderBar` `bg-term-nav`→`bg-term-screen`, ② `AppShell` 하단 `TabBar` `bg-term-nav/95 backdrop-blur`→`bg-term-screen`(불투명 그라디언트·블러 제거, 부모와 동일). `term-screen` 그라디언트 토큰은 Aidit-Code `tailwind.config.js`에 부모와 동일 정의가 이미 존재. 글로벌 상단바(Header)는 범위 외 — 불변.
+- **구현(예정)**: `frontend/src/components/PageHeaderBar.tsx`, `frontend/src/layout/AppShell.tsx`.
+- **검증(③) — 실측**: FE `tsc --noEmit` 클린(EXIT 0). 브라우저(5173) `/posts/:id` 서브바·하단바 모두 `background-image = radial-gradient(120% 80% at 50% 0%, rgb(6,25,14), rgb(4,19,11), rgb(2,10,5))` = **부모(5174)와 바이트 단위 동일**, backdrop none(블러 제거). subMatches/bottomMatches=true.
+- 변경 파일: `frontend/src/components/PageHeaderBar.tsx`, `frontend/src/layout/AppShell.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
+### 2026-06-28 · [fix] · 완료 · 게시글 ShellPrompt의 attach 글 ID를 8글자로 제한(부모 Aidit 패리티)
+- **요청(사용자)**: 게시글 ShellPrompt `thread --attach=<postId>`의 전체 cuid(25자)를 8글자로 제한.
+- **현황/패리티**: 부모 Aidit Thread는 ShellPrompt에서 `postId.slice(0, 8)` 사용(`ai --ask /p/<8자>`, `tail -f /p/<8자>`). Aidit-Code(`Thread.tsx`)는 전체 `${id}` 노출.
+- **방향**: `thread --attach=${id ?? ''}` → `thread --attach=${(id ?? '').slice(0, 8)}`. 표시 문자열만 변경(세션 attach 동작은 실제 `id`로 수행 — 불변).
+- **구현(예정)**: `frontend/src/pages/Thread.tsx`.
+- **검증(③) — 실측**: FE `tsc --noEmit` 클린(EXIT 0). 브라우저(5173) `/posts/:id` ShellPrompt = `aidit@wdyoon#e1eb:~$ thread --attach=cmqwc9jy`(8자, 기존 25자 cuid 대비 축약) 확인.
+- 변경 파일: `frontend/src/pages/Thread.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
+### 2026-06-28 · [fix] · 완료 · 게시글 스티키 바 뒤로가기 버튼을 부모 Aidit Thread 버튼과 크기·모양 동일하게
+- **요청(사용자)**: Aidit-Code 게시글(Thread) 스티키 바의 `‹` 뒤로가기 버튼을 부모 Aidit 게시글 화면의 뒤로가기 버튼과 **크기·모양 동일**하게.
+- **현황 비교**: Aidit-Code(`Thread.tsx`)는 텍스트 글리프 `‹`(`font-mono text-lg`, `min-h-[44px] min-w-[32px]`, hover 텍스트 밝기). 부모 Aidit(`Thread.tsx`)는 **40×40 라운드 사각 버튼**(`h-10 w-10 shrink-0 rounded-[2px] hover:bg-term-hover`) 안에 **24×24 SVG 셰브론**(`<path d="M15 18l-6-6 6-6"/>`, strokeWidth 2.5).
+- **방향(크기·모양만 일치, 동작 보존)**: Aidit-Code 버튼을 부모와 동일한 사각 버튼+SVG 셰브론으로 교체. `to="/"` 네비게이션·`aria-label={t('common.back')}`는 유지. `PageHeaderBar`가 `px-4`(부모 헤더는 `px-2`)라 아이콘 좌측 광학 정렬을 부모와 맞추기 위해 `-ml-1`→`-ml-2`. term-hover 토큰은 Aidit-Code에 이미 존재(#072115).
+- **구현(예정)**: `frontend/src/pages/Thread.tsx`.
+- **검증(③) — 실측**: FE `tsc --noEmit` 클린(EXIT 0). 브라우저(5173) `/posts/:id` 스티키 바 DOM 실측 — 버튼 박스 **40×40px**(`h-10 w-10`), SVG **24×24px**(`h-6 w-6`), `border-radius:2px`, 셰브론 path `M15 18l-6-6 6-6`, sticky 바 내부 = **부모 Aidit Thread 버튼과 동일**. 스크린샷으로 셰브론 외형 확인.
+- 변경 파일: `frontend/src/pages/Thread.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-27 · [fix] · 완료 · 에이전트 세션 시작 실패(`agent worker exited before ready (code 3221225794)`) — 고아 백엔드 프로세스 + Windows 자식 spawn 하드닝
 - **증상(사용자)**: 글에서 "세션 시작" 시 `errors.sessionFailed`("Failed to start the agent session. Please retry."). 실측 재현 — `POST /posts/:id/session` → **500** `{"message":"agent worker exited before ready (code 3221225794)"}`.
 - **원인 진단(실측)**: `3221225794 = 0xC0000142 (STATUS_DLL_INIT_FAILED)` — 자식 프로세스가 init 단계에서 즉사. 격리 재현으로 **코드 경로는 정상**임을 확인: `piWorker.mjs` 존재, 샌드박스 cwd 존재(`.sandboxes/<postId>`, DB `path`도 현재 루트), API_KEY set, `pi.ts`와 동일한 spawn(injected env + stdio pipe)을 **새 node 프로세스에서 실행하면 `ready` 정상**. 잘못된 cwd는 `ENOENT`(0xC0000142 아님)·env에서 SystemRoot 제거도 정상(node24 자동 복구). → 결정적 차이는 **실행 중인 백엔드 인스턴스**: PID 71904가 `cmd.exe /d /s /c tsx watch`(다른 세션의 백그라운드 태스크)로 06-26 23:36 기동 후, 그 세션이 kill되며(이번 대화의 `killed` 알림) **런치 콘솔/윈도우 스테이션이 파괴**됨. 스테이션이 사라진 프로세스는 새 자식의 데스크톱을 할당하지 못해 **모든 spawn이 0xC0000142로 실패**(핸들 321개·워커 0개 = 누수 아님, 기동 후~지금까지 정상→실패 전환이 kill 시점과 일치).

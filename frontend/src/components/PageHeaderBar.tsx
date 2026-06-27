@@ -11,7 +11,7 @@ import type { ReactNode } from 'react';
 // term-screen 솔리드→term-nav.)
 export default function PageHeaderBar({ children }: { children: ReactNode }) {
   return (
-    <div className="sticky top-12 z-10 -mx-4 -mt-4 flex h-12 items-center gap-2 border-b border-term-line bg-term-nav px-4">
+    <div className="sticky top-12 z-10 -mx-4 -mt-4 flex h-12 items-center gap-2 border-b border-term-line bg-term-screen px-4">
       {children}
     </div>
   );

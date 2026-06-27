@@ -138,7 +138,7 @@ function TabBar() {
 
   return (
     <nav
-      className="sticky bottom-0 z-20 border-t border-term-line bg-term-nav/95 backdrop-blur"
+      className="sticky bottom-0 z-20 border-t border-term-line bg-term-screen"
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
       <div className="mx-auto flex h-14 max-w-2xl items-stretch justify-around">
