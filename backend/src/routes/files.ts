@@ -14,6 +14,7 @@ import { readdir, stat, readFile, open } from 'node:fs/promises';
 import path from 'node:path';
 import { prisma } from '../db.js';
 import { resolveInsideRoot, PathEscapeError } from '../sandbox/pathGuard.js';
+import { resolveSandboxDir } from '../sandbox/service.js';
 
 /** 단일 파일 내용 반환 상한(초과 시 잘라서 truncated:true). */
 const MAX_CONTENT_BYTES = 256 * 1024;
@@ -74,7 +75,8 @@ export async function filesRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(404).send({ error: 'post not found' });
     }
 
-    const rootAbs = path.resolve(sandbox.path);
+    // 저장 절대경로를 그대로 믿지 않고 재계산(레포 이동/이름변경 self-heal).
+    const rootAbs = path.resolve(resolveSandboxDir(sandbox));
     let dirAbs: string;
     try {
       dirAbs = resolveInsideRoot(rootAbs, relInput);
@@ -140,7 +142,8 @@ export async function filesRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(404).send({ error: 'post not found' });
     }
 
-    const rootAbs = path.resolve(sandbox.path);
+    // 저장 절대경로를 그대로 믿지 않고 재계산(레포 이동/이름변경 self-heal).
+    const rootAbs = path.resolve(resolveSandboxDir(sandbox));
     let abs: string;
     try {
       abs = resolveInsideRoot(rootAbs, relInput);

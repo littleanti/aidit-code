@@ -226,6 +226,10 @@ class PiRuntime implements AgentRuntime {
       env,
       // stdin = pipe: M4 턴 프로토콜({type:'input'|'interrupt'})을 worker stdin 으로 기록한다.
       stdio: ['pipe', 'pipe', 'pipe'],
+      // Windows: 콘솔 창을 만들지 않는다. 서버가 부모 콘솔/윈도우 스테이션에 묶이지 않은
+      // 상태(예: 런치 콘솔이 종료된 detached 서버)에서도 자식 생성이 0xC0000142
+      // (STATUS_DLL_INIT_FAILED)로 깨지지 않도록 하는 하드닝. 비Windows에선 무시됨.
+      windowsHide: true,
     });
 
     const sessionRef = `pi:${sandbox.id}:${Date.now()}`;

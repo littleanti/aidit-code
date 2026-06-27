@@ -11,6 +11,83 @@
 
 ## Changelog
 
+### 2026-06-27 · [fix] · 완료 · 에이전트 세션 시작 실패(`agent worker exited before ready (code 3221225794)`) — 고아 백엔드 프로세스 + Windows 자식 spawn 하드닝
+- **증상(사용자)**: 글에서 "세션 시작" 시 `errors.sessionFailed`("Failed to start the agent session. Please retry."). 실측 재현 — `POST /posts/:id/session` → **500** `{"message":"agent worker exited before ready (code 3221225794)"}`.
+- **원인 진단(실측)**: `3221225794 = 0xC0000142 (STATUS_DLL_INIT_FAILED)` — 자식 프로세스가 init 단계에서 즉사. 격리 재현으로 **코드 경로는 정상**임을 확인: `piWorker.mjs` 존재, 샌드박스 cwd 존재(`.sandboxes/<postId>`, DB `path`도 현재 루트), API_KEY set, `pi.ts`와 동일한 spawn(injected env + stdio pipe)을 **새 node 프로세스에서 실행하면 `ready` 정상**. 잘못된 cwd는 `ENOENT`(0xC0000142 아님)·env에서 SystemRoot 제거도 정상(node24 자동 복구). → 결정적 차이는 **실행 중인 백엔드 인스턴스**: PID 71904가 `cmd.exe /d /s /c tsx watch`(다른 세션의 백그라운드 태스크)로 06-26 23:36 기동 후, 그 세션이 kill되며(이번 대화의 `killed` 알림) **런치 콘솔/윈도우 스테이션이 파괴**됨. 스테이션이 사라진 프로세스는 새 자식의 데스크톱을 할당하지 못해 **모든 spawn이 0xC0000142로 실패**(핸들 321개·워커 0개 = 누수 아님, 기동 후~지금까지 정상→실패 전환이 kill 시점과 일치).
+- **방향(2단)**: ① **즉시**: 고아 백엔드 트리(서버 71904 / tsx-watch 74356 / cmd 69784) 종료 후 살아있는 스테이션에서 재기동 → spawn 복구. ② **하드닝(영구)**: 서버가 띄우는 자식이 부모 콘솔/스테이션에 덜 의존하도록 `child_process.spawn`에 **`windowsHide: true`** 추가(콘솔 창 미할당 → 데스크톱 힙 소모↓, 반복 spawn 내성↑). 적용처: `agent/pi.ts`(worker spawn), `agent/toolExec.ts`(SHELL/PACKAGE 자식). 동작/스트리밍 불변(stdio pipe 유지).
+- **구현**: `pi.ts` worker spawn + `toolExec.ts` SHELL/PACKAGE 자식 spawn에 `windowsHide: true` 추가.
+- **검증(③) — 실측**: 고아 트리(74356 tsx-watch / 69784 cmd) 종료 → 3001 listener down 확인 → 라이브 스테이션에서 `npm run dev`(tsx watch) 재기동(health 200). **재현됐던 호출이 복구**: `POST /posts/cmqwc9jy…/session` → **201** `{session:{status:"IDLE", runtimePid:43404, model:"openai/gpt-4o-mini", …}}`(직전 500 `exited before ready` 해소). backend `tsc --noEmit` 클린(EXIT 0).
+- **운영 권고**: 백엔드는 사용자 본인 터미널(`cd backend && npm run dev`)에서 띄우면 콘솔/스테이션이 세션 종료에 영향받지 않아 가장 안정적. (이번 고아화는 다른 세션의 백그라운드 태스크 콘솔이 kill되며 발생.)
+- 변경 파일: `backend/src/agent/pi.ts`, `backend/src/agent/toolExec.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
+### 2026-06-27 · [fix] · 완료 · 세션/샌드박스 상태 표시등 색을 신호등 의미로 — RUNNING 초록 · SUSPENDED 빨강 · 그 외 무색
+- **요청(사용자)**: 상태 "불 표시"를 RUNNING이면 초록, SUSPENDED면 빨강, unknown이면 무색으로.
+- **현황**: `StatusBadge`의 `styleFor` 매핑이 RUNNING=`term-amber`(●), READY/SUSPENDED=`term-dim`(○), ERROR=`term-red`(✗), CREATING=`term-dim`(⟳), none=`term-dim-3`(·). RUNNING이 amber라 "켜짐=초록" 직관과 어긋나고 SUSPENDED가 dim이라 "정지" 강조가 약함. `StatusBadge`는 Thread(상단 sticky 점 + 세션 행)와 피드 카드(`PostCard`) 양쪽에서 쓰여 **앱 전역 일관 적용**됨.
+- **방향(신호등 의미 + 명시 안 한 상태 정리)**: RUNNING `term-glow`(초록, ●), SUSPENDED `term-red`(빨강, ●), ERROR `term-red`(✗, 정지/이상=빨강 일관 유지), READY `term-dim`(무색 대기 ○), CREATING `term-dim`(무색 생성중 ⟳), none `term-dim-3`(가장 옅은 무색 ·). 색 변경 + RUNNING/SUSPENDED 글리프를 ●로 통일("켜진 등" 느낌), 나머지 글리프 유지. 새 색 토큰 추가 없음(기존 term-* 재사용).
+- **구현(예정)**: `frontend/src/components/StatusBadge.tsx`(`styleFor` color/glyph 매핑).
+- **검증(③) — 실측**: FE `tsc --noEmit` **클린(EXIT 0)**. 브라우저(5173, KO) Thread에서 RUNNING일 때 상단 sticky 점 + 세션 행 `● RUNNING`이 **초록(term-glow)**, 세션 중지 후 SUSPENDED일 때 둘 다 **빨강(term-red) ●**로 전환됨을 스크린샷 확인. ※ 검증 위해 세션을 RUNNING→SUSPENDED로 변경했으나, 이 dev 환경의 백엔드 세션 시작 실패(`에이전트 세션 시작에 실패했습니다` — 색 변경과 무관)로 RUNNING 복구는 못 함. 데이터 손실 없음(SUSPENDED는 재개 가능 상태).
+- 변경 파일: `frontend/src/components/StatusBadge.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
+### 2026-06-27 · [feat] · 완료 · Thread 화면을 공통 디자인 언어(PageHeaderBar sticky bar + ShellPrompt)에 합류 + 북마크 버튼 추가 + 세션 제어 레이어 분리
+- **요청(사용자)**: 부모 Aidit 게시글 화면은 상단 sticky bar(뒤로가기·제목·북마크)가 있는데 Aidit-Code Thread엔 없어 통일성이 깨짐. 단 Aidit-Code는 Running 상태·Start/Stop Session 등 세션 제어가 있어 모든 걸 한 바에 넣으면 UX가 나쁨. 또 Thread엔 북마크 버튼·꾸미기 셸(ShellPrompt)도 없음. 통일성+기능성 둘 다 잡는 방향으로 수정.
+- **현황 비교**: `PageHeaderBar`(sticky `top-12`) + `ShellPrompt`는 이미 Home·Create·Profile·Settings에 적용된 공통 패턴인데 **Thread만 자체 비-sticky 헤더**(`mb-3 flex` — 뒤로가기 ‹ + StatusBadge + Start/Stop 칩)를 써서 합류 안 됨. 북마크는 백엔드·API(`bookmark()/unbookmark()` idempotent)·`post.bookmarked`·Profile 북마크 탭까지 전부 구현돼 있는데 **Thread(원본 글)에만 토글 버튼이 없음**(upvote는 이미 article 안에 낙관적 토글로 존재).
+- **방향(두 관심사를 레이어로 분리 — 사용자 승인안)**:
+  1. **sticky bar(PageHeaderBar)** = 항행/정체성: 뒤로가기 ‹ · 제목(truncate) · **세션 상태 점(read-only dot)** · **북마크 토글** · 작성자 ⋯ 메뉴. 부모 Aidit sticky bar와 동일 역할.
+  2. **세션 상태 점**: `StatusBadge`에 `dot` 변형 추가(glyph만, 라벨 없음 — 색/글리프 매핑은 기존 `styleFor` 단일 소스 재사용). 스크롤로 세션 행이 사라져도 "지금 켜져있나"를 sticky로 유지.
+  3. **ShellPrompt**: 바 바로 아래 `thread --attach=<id>` 꾸미기 셸(다른 페이지와 통일).
+  4. **세션 행(비-sticky)**: 전체 `StatusBadge` + 재연결 표시 + `[Start/Stop Session]` 버튼을 ShellPrompt 아래 행으로. 자주 누르는 버튼이 아니고(진입 시 자동 연결 + 끊김 시 composer 위 경고 상존) 스크롤로 사라져도 무방.
+  5. 작성자 ⋯ 메뉴를 article 액션행 → sticky bar로 이동(부모 패리티). article엔 upvote·댓글수 유지.
+- **구현(예정)**: `frontend/src/pages/Thread.tsx`(헤더 → PageHeaderBar+ShellPrompt+세션행 재구성, 북마크 상태/토글, ⋯ 메뉴 이동), `frontend/src/components/StatusBadge.tsx`(`dot` prop), `frontend/src/i18n/dicts/post.ts`(`bookmark` 라벨), `frontend/src/i18n/dicts/thread.ts`(`sessionDisconnected` 문구를 위치 비종속으로 — "우측 상단"→"상단").
+- **검증(③) — 실측**: FE `tsc --noEmit` **클린(EXIT 0)**. 브라우저(5173, KO) Thread(`/posts/cmquhmzwq…`)에서 ① sticky bar = `‹ helloworld  ● 🔖`(뒤로가기·제목·세션 점·북마크) 노출, ② 바 바로 아래 ShellPrompt `aidit@…:~$ thread --attach=cmquhmzwq…`, ③ 비-sticky 세션 행 `● RUNNING … [세션 중지]`(우측), ④ article에서 ⋯ 메뉴 제거됨(▲0·💬7만 유지) 확인. ⑤ 북마크 토글 실측: 외곽선→채워진 amber→외곽선(양방향), 롤백 없이 유지=서버 영속 성공(테스트 후 원복). ※ 작성자 ⋯ 메뉴(바 이식분)는 현재 로그인 계정 소유 글이 없어 브라우저 미노출 — `post && isAuthor` 가드 + 기존 메뉴 1:1 이식 + tsc로 검증.
+- 변경 파일(예정): `frontend/src/pages/Thread.tsx`, `frontend/src/components/StatusBadge.tsx`, `frontend/src/i18n/dicts/post.ts`, `frontend/src/i18n/dicts/thread.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
+
+### 2026-06-27 · [fix] · 완료 · 피드/프로필 EOF 줄을 부모 Aidit 스타일로 — `─── EOF ───` → `— EOF · <문구> —` (한국어 매칭)
+- **요청(사용자)**: Aidit-Code의 EOF 표시를 부모 Aidit처럼 `— EOF · No more posts —` 형태로, 한국어도 부모 문구에 매칭.
+- **현황 비교**: Aidit-Code는 `Home.tsx`·`Profile.tsx`가 공통 `common.eof:'EOF'`를 `─── {eof} ───`(박스 대시)로 감싸 `─── EOF ───` 표시. 부모 Aidit는 페이지별 문구에 데코를 내장해 bare 렌더 — `home.eof` ko `— EOF · 마지막 게시글이에요 —`/en `— EOF · No more posts —`, `profile.eof` ko `— EOF · 마지막이에요 —`/en `— EOF · Nothing more —`.
+- **방향(부모 문구 그대로 매칭)**: Aidit-Code엔 `home` 네임스페이스가 없어 **피드(Home)는 `common.eof`를 재사용**해 ko `— EOF · 마지막 게시글이에요 —`/en `— EOF · No more posts —`로, **프로필은 신규 `profile.eof`** ko `— EOF · 마지막이에요 —`/en `— EOF · Nothing more —` 추가. 렌더 사이트의 `─── … ───` 래핑 제거하고 bare `{t(...)}`로(데코는 문자열에 내장, 부모와 동일). 스타일 클래스(`text-term-dim-3 font-mono text-xs`)는 유지.
+- **구현(예정)**: `frontend/src/i18n/dicts/common.ts`(eof 문자열), `frontend/src/i18n/dicts/profile.ts`(eof 키 추가), `frontend/src/pages/Home.tsx`(L111 래핑 제거), `frontend/src/pages/Profile.tsx`(L75 → `profile.eof`).
+- **검증(③) — 실측**: FE `tsc --noEmit` **클린(EXIT 0)**. 브라우저(5173, KO) 홈 피드 하단 `<p>` = **`— EOF · 마지막 게시글이에요 —`** 노출 확인(기존 `─── EOF ───` 대체). 프로필(`/me`)은 현재 로그인 계정에 게시글이 없어 EOF 블록 미렌더이나 `t('profile.eof')` **원시 키 노출 없음**(key leak=false) + tsc로 키 존재 확인.
+- 변경 파일: `frontend/src/i18n/dicts/common.ts`, `frontend/src/i18n/dicts/profile.ts`, `frontend/src/pages/Home.tsx`, `frontend/src/pages/Profile.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
+
+### 2026-06-27 · [fix] · 완료 · 헤더 LLM 상태 배지 표기 `LLM`→`AI` (부모 Aidit와 용어 통일)
+- **요청(사용자)**: Aidit-Code 헤더 연결 배지의 `LLM` 표기도 `AI`로 변경. (부모 Aidit는 앞서 `● AI` 라벨 + 툴팁 `AI`로 통일됨 — 형제 앱 용어 일치.)
+- **방향(텍스트만)**: 반응형 동작(`hidden sm:inline`, 640px 기준 — 좁으면 숨김/넓으면 표시)은 **그대로 유지**하고 **표시 문구만** 변경. ① `LlmStatusBadge`의 가시 라벨 `LLM`→`AI`(클래스 불변), ② i18n `common.llmConnected/Offline/Unknown`의 `LLM`→`AI`(ko·en, aria-label·title용). 상태 로직·LED 색상 불변.
+- **구현(예정)**: `frontend/src/components/LlmStatusBadge.tsx`(라벨 텍스트만), `frontend/src/i18n/dicts/common.ts`(llm* 문자열).
+- **검증(③) — 실측**: FE `tsc --noEmit` **클린(EXIT 0)**. 브라우저(5173, 폭 1245px) 헤더 span 텍스트 = `AIDIT-CODE`·`● AI`·`KO|EN`·`[ wdyoon#e1eb ]` — `● AI` 노출, **`LLM` 잔존 없음**(`anyLLMleft=false`), `AI` 라벨 클래스 `hidden … sm:inline` 그대로 가시(반응형 동작 보존).
+- 변경 파일: `frontend/src/components/LlmStatusBadge.tsx`, `frontend/src/i18n/dicts/common.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
+
+
+### 2026-06-26 · [fix] · 완료 · 작성 페이지 게시 버튼 + 하단 탭바 글씨를 부모 Aidit 디자인과 통일 (+ 버튼/메뉴 대괄호·안내 섹션박스·⋯팝오버 여백)
+- **요청(사용자)**: ① Aidit-Code 작성 페이지의 "게시하기" 버튼을 부모 Aidit 작성 페이지 게시 버튼과 **동일 디자인**으로. ② Aidit-Code 하단 메뉴바의 **글씨 크기·글씨 폰트·글씨 위치**를 부모 Aidit 하단 메뉴바와 통일.
+- **현황 비교**:
+  - 게시 버튼 — 부모: `border-term-cta bg-gradient-to-b from-[#155230] to-[#0c3a20] text-sm font-bold text-term-title glow-lg shadow-glow-cta transition disabled:cursor-not-allowed disabled:opacity-50`(인광 라이즈드 버튼). Aidit-Code: `border-term-border bg-term-cta text-term-fg-bright`(평면, glow 없음).
+  - 하단 탭바 라벨 — 부모: `text-xs`(12px) + 기본 mono. Aidit-Code: `text-[10px]`(10px) + `font-mono`. 폰트 스택은 두 앱 `font-mono`가 글자단위 동일.
+- **방향(토큰 매핑 — Aidit-Code엔 부모와 이름이 다른 동일 색이 이미 존재)**: `border-term-cta`→`border-term-active`(둘 다 #3fa564), `text-term-title`→`text-term-glow`(둘 다 #7dffa0), `bg-gradient…`→`bg-term-cta`(Aidit-Code 토큰이 동일 그라디언트). 누락분만 추가: boxShadow `glow-cta`(→`shadow-glow-cta`), 유틸 `.glow`/`.glow-lg`(text-shadow). 탭바는 `text-[10px]`→`text-xs`(폰트/위치는 이미 동일).
+- **추가 요청(후속, 동일 작업 중)**:
+  - ③ 게시 버튼 라벨을 부모 Aidit처럼 대괄호로: `게시하기`→`[ 게시하기 ]` 등. 편집 모드 저장 버튼도 같은 버튼이라 동일하게 대괄호 처리(부모 `btn_*` 전체가 대괄호 — `[ 게시하기 ]`/`[ 게시 중… ]`/`[ 저장 ]`/`[ 저장 중… ]`, EN 동일).
+  - ④ 샌드박스 안내문(`! 게시하면 …`)을 평면 텍스트→부모 Aidit `PersonaEditor` 힌트와 동일한 **섹션 박스**로: `rounded-[2px] border border-term-border bg-term-modal px-3 py-2 text-xs leading-relaxed text-term-dim`(부모 `bg-term-info`=#06190e → Aidit-Code `bg-term-modal`=#06190e 동일).
+  - ⑤ Thread ⋯ 메뉴의 게시글 편집/삭제 라벨을 부모 Aidit처럼 대괄호로: `편집`→`[ 편집 ]`, `삭제`→`[ 삭제 ]`(EN `[ Edit ]`/`[ Delete ]`). 두 키는 메뉴 아이템 본문 전용(확인 다이얼로그 `deleteConfirm/Yes/No`·aria 미사용)이라 부작용 없음.
+  - ⑥ ⋯ 팝오버 폭 조정(두 앱 공통). **측정(브라우저 canvas, text-xs mono + px-3)**: `[ Delete ]`=**90px**(메뉴 상태 최장 단일행), `[ Edit ]`=77px, `[ 삭제 ]`/`[ 편집 ]`=72px(한글이 더 좁음). 기존 `w-36`=144px는 `[ Delete ]` 기준 우측 ~54px(약 1/3) 빈 공간.
+    - **1차 시도(`w-fit max-w-[9rem]`) → 실패/되돌림**: `w-fit`(fit-content)이 절대배치+래핑 가능 콘텐츠에서 **min-content로 수축**, 라벨의 공백(`[ Delete ]`의 스페이스)이 줄바꿈 기회가 되어 `[`/`Delete`/`]`가 **3줄로 깨짐**(한·영 모두 과도하게 좁아짐).
+    - **확정(고정폭 `w-28`=112px)**: 사용자 요청대로 **영어 최장 라벨 기준으로 고정폭을 정하고 한·영 동일 적용**. 90px 콘텐츠 + 22px 여백으로 `[ Delete ]`가 한 줄에 들어오고(래핑 없음), 144px 대비 여백 32px 축소. 고정폭이라 언어 무관 동일 가로. 삭제 확인 긴 문구는 112px 안에서 자연 줄바꿈. **부모 Aidit도 동일 1줄 수정**(`bg-term-card`만 다르고 폭 클래스 동일).
+- **구현(예정)**: `frontend/tailwind.config.js`(boxShadow `glow-cta` 추가), `frontend/src/index.css`(`@layer utilities`에 `.glow`/`.glow-lg`), `frontend/src/pages/CreatePost.tsx`(게시 버튼 className + 안내문 섹션 박스), `frontend/src/layout/AppShell.tsx`(TabBar 라벨 `text-[10px]`→`text-xs`), `frontend/src/i18n/dicts/post.ts`(버튼 라벨 대괄호).
+- **검증(④) — 실측**: FE `tsc --noEmit` **클린(EXIT 0)** — Aidit-Code·부모 Aidit 양쪽. 브라우저(5173) 작성 페이지에서 ① 게시 버튼이 인광 그라디언트+밝은 글로우 텍스트(`text-term-glow`+`glow-lg`)+`shadow-glow-cta`로 부모 라이즈드 CTA와 동일 외형(활성 시), ② 라벨 `[ 게시하기 ]`, ③ 샌드박스 안내가 테두리+info 배경 섹션 박스, ④ 하단 탭바 글씨 `text-xs`로 확대됨을 스크린샷 확인. ⑤ ⋯팝오버 `[ 편집 ]`/`[ 삭제 ]` 대괄호 + 고정폭 `w-28`(112px)은 `tsc` 클린 + **브라우저 DOM 실측**으로 검증: 컨테이너 112px, `[ Delete ]`·`[ Edit ]` 모두 `getClientRects().length===1`(=한 줄, 래핑 없음, 텍스트 높이 14px) — 직전 `w-fit`의 3줄 깨짐 해소, `[ Delete ]`(90px) + ~20px 여백.
+- 변경 파일(예정): `frontend/tailwind.config.js`, `frontend/src/index.css`, `frontend/src/pages/CreatePost.tsx`, `frontend/src/layout/AppShell.tsx`, `frontend/src/i18n/dicts/post.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
+
+### 2026-06-26 · [fix] · 완료 · 샌드박스 작업경로를 절대경로 박제 대신 런타임 재계산(레포 이동/이름변경 내성)
+- **배경(사고)**: 프로젝트 폴더명이 `Audit-Code`→`Aidit-Code`로 바뀌자, DB `Sandbox.path`에 **생성 시점 절대경로가 박제**돼 있어 세션 시작 시 `pi.ts` `spawn({cwd: sandbox.path})`가 `ENOENT`로 실패. 174개 글 중 171개가 세션 시작 불가 → (사용자 승인 후) 삭제 완료. 같은 일이 레포를 옮기거나 이름 바꾸거나 다른 머신/배포로 가면 또 재발하는 **설계 결함**.
+- **원인**: `sandbox/service.ts createSandboxForPost`가 `resolveInsideRoot(config.sandboxRoot, postId)`로 만든 **절대경로**를 DB에 저장 → 호스트 경로에 종속. 소비처(spawn cwd, 도구 실행 root, 파일 트리, 디렉토리 삭제)가 모두 그 절대경로를 그대로 신뢰.
+- **방향**: 저장된 `path`는 "힌트"로만 쓰고, 진짜 작업 디렉토리는 **(현재 `sandboxRoot`, `postId`)에서 매번 재계산**하는 단일 리졸버 `resolveSandboxDir({postId, path})` 도입. ① 저장 path가 현재 루트 안이면 그대로 사용 ② 루트 밖 + `basename === postId`(=createSandboxForPost 레이아웃 → 옛 루트 박제 케이스)면 표준 위치 `root/postId`가 **실제 존재할 때만** 자가복구 ③ 그 외(루트 밖 + basename≠postId = 의도적 외부 디렉토리/테스트 mkdtemp)는 저장 path 유지. → 레포 이동/이름변경에도 세션이 안 깨지고, out-of-root 테스트 디렉토리도 그대로 동작.
+  - **basename 판별 추가 이유(검증 중 발견)**: 초기엔 "루트 밖 + canonical 존재 → 무조건 self-heal"이었으나, `redaction.test.ts`가 **API로 글 생성(→ `root/postId` 디렉토리 실재) 후 path를 외부 mkdtemp로 교정**하는 패턴이라 잘못 self-heal돼 도구가 외부 dir 대신 canonical에 파일을 써 실패. basename 판별로 의도적 외부 지정과 박제를 구분해 해결.
+- **구현**: `sandbox/service.ts`(리졸버 `resolveSandboxDir` 추가), `agent/sessionStart.ts`(spawn 전 리졸브), `agent/turn.ts`(도구 root 리졸브, sandbox select에 `postId` 추가), `routes/files.ts`(파일 트리·내용 root 2곳 리졸브), `routes/posts.ts`(삭제 디렉토리 리졸브 — 박제 경로가 루트밖이라 기존엔 가드에 막혀 정리 실패하던 것도 해결), `config.ts`(주석의 옛 이름 `Audit-Code`→`Aidit-Code` 정정). 신규 단위테스트 `test/sandboxDir.test.ts`.
+- **검증(③) — 실측**: backend `tsc --noEmit` 클린(EXIT 0). 백엔드 테스트 **85/85 통과(23 파일)** — 신규 `sandboxDir`(in-root 신뢰 / 박제 self-heal / 외부 보존 3케이스) + 기존 `redaction`·`sessionStart`·`toolCall`·`files`·`agentTurn` 그린.
+- 변경 파일: `backend/src/sandbox/service.ts`·`agent/sessionStart.ts`·`agent/turn.ts`·`routes/files.ts`·`routes/posts.ts`·`config.ts`, `backend/test/sandboxDir.test.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+- **참고(데이터 사고 정리)**: 이 수정 전, 박제 경로로 세션 불가였던 글 171개를 사용자 승인 후 트랜잭션 삭제(메시지 94·투표 2·북마크 2·세션 33·툴콜 16·샌드박스 171 동반). 남은 글 3개. 이 수정 이후 생성되는 글은 레포 이동/이름변경에도 세션이 self-heal 된다.
+
 ### 2026-06-26 · [fix] · 완료 · 작성 페이지 체크박스 라벨에 "(답변 깊이)" 명시 (Aidit-Code 전용)
 - **요청(사용자)**: `게시 후 AI 1차 답변 받기` → `게시 후 AI 1차 답변 받기 (답변 깊이)`, 매칭 영어도 반영.
 - **범위**: Aidit-Code 의 `aiFirstReply` 만. Aidit-Code 의 낮음/중간/높음은 reasoning effort(=답변 깊이)라 라벨로 그 의미를 명확히 한다. 부모 Aidit 의 동일 라벨은 컨트롤이 "응답 길이"라 "깊이"가 맞지 않으므로 **건드리지 않음**.

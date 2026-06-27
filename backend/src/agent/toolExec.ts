@@ -237,9 +237,10 @@ function runShell(
     // 플랫폼별 셸: Windows=cmd /c, POSIX=sh -c. cwd 격리(루트 밖 접근은 OS 권한/경로 가드 밖이나
     // PoC §6.2 는 샌드박스 내부 모든 permission 허용 — 경계는 경로 가드가 담당하는 FILE_* 뿐).
     const isWin = process.platform === 'win32';
+    // windowsHide: 콘솔 창 미할당(부모 콘솔/스테이션 의존도↓, 0xC0000142 내성). 비Windows 무시.
     const child = isWin
-      ? spawn(command, { cwd: root, shell: true })
-      : spawn('sh', ['-c', command], { cwd: root });
+      ? spawn(command, { cwd: root, shell: true, windowsHide: true })
+      : spawn('sh', ['-c', command], { cwd: root, windowsHide: true });
 
     liveChildren.add(child);
 

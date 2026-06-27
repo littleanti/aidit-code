@@ -14,7 +14,7 @@
 //   AgentSession.model 은 모델명만 저장(키 절대 미저장). 이벤트 payload 에도 키 필드 없음.
 
 import { prisma } from '../db.js';
-import { setSandboxStatus } from '../sandbox/service.js';
+import { setSandboxStatus, resolveSandboxDir } from '../sandbox/service.js';
 import { getAgentRuntime } from './runtime.js';
 import { getLlmRuntimeConfig } from './config.js';
 import { publishToPost } from '../realtime/publish.js';
@@ -166,7 +166,10 @@ async function runCriticalSection(input: StartOrAttachInput): Promise<StartOrAtt
   const rt = getLlmRuntimeConfig(); // 내부 전용 — 응답/로그/이벤트에 절대 미포함.
 
   // spawn(STARTING). 디렉토리는 이미 존재(resume 도 동일 경로). pi.ts spawn 은 멱등(live 면 재사용).
-  const { pid } = await runtime.spawn({ id: sandbox.id, path: sandbox.path });
+  //   cwd 는 저장된 절대경로를 그대로 믿지 않고 resolveSandboxDir 로 재계산한다
+  //   (레포 이동/이름변경으로 박제된 옛 경로가 ENOENT 로 깨지는 것을 방지 — self-heal).
+  const workdir = resolveSandboxDir({ postId, path: sandbox.path });
+  const { pid } = await runtime.spawn({ id: sandbox.id, path: workdir });
 
   // AgentSession 행 생성: model 은 모델명만, runtimePid = pid, status STARTING.
   const created = await prisma.agentSession.create({

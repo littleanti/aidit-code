@@ -151,7 +151,8 @@ function TabBar() {
               to={tab.to}
               aria-label={tab.label}
               className={[
-                'inline-flex h-full flex-1 flex-col items-center justify-center gap-0.5 font-mono text-[10px]',
+                // 글씨 크기/폰트/위치를 부모 Aidit 하단 탭바와 통일: text-xs(12px), mono(공통 스택), gap-0.5 라벨.
+                'inline-flex h-full flex-1 flex-col items-center justify-center gap-0.5 font-mono text-xs',
                 active ? 'text-term-amber' : 'text-term-dim hover:text-term-fg-bright',
               ].join(' ')}
             >

@@ -8,6 +8,8 @@
 //   ※ READY 전이/디렉토리·meta 준비는 provision.ts(BE-PROV)가 담당. 에이전트 스폰은 M3.
 
 import { mkdir, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import type { Sandbox } from '@prisma/client';
 import { config } from '../config.js';
 import { prisma } from '../db.js';
@@ -44,6 +46,39 @@ export async function createSandboxForPost(postId: string): Promise<Sandbox> {
   });
 
   return sandbox;
+}
+
+/**
+ * 샌드박스의 "현재" 작업 디렉토리(호스트 절대경로)를 해석한다.
+ *
+ * 왜 필요한가: Sandbox.path 에는 생성 시점의 절대경로가 박제된다. 레포를 옮기거나 폴더명을
+ * 바꾸면(예: Audit-Code→Aidit-Code) 그 절대경로가 사라져 spawn(cwd)·도구 실행·파일 트리·
+ * 디렉토리 삭제가 ENOENT/루트밖으로 깨진다(2026-06-26 사고: 171개 글 세션 불가).
+ * 그래서 저장된 path 는 "힌트"로만 쓰고, 진짜 위치는 (현재 sandboxRoot, postId)에서 재계산한다:
+ *   1) 저장 path 가 현재 루트 안이면 그대로 사용한다(정상/이동 없음).
+ *   2) 루트 밖이고 **createSandboxForPost 레이아웃**(basename === postId)이면 — 즉 옛 루트가 박제된
+ *      케이스 — 표준 위치(sandboxRoot/postId)가 실재할 때만 그쪽으로 자가복구한다.
+ *   3) 그 외(루트 밖 + basename ≠ postId)는 의도적으로 지정한 외부 디렉토리(테스트의 mkdtemp 등)로
+ *      보고 저장 path 를 그대로 유지한다.
+ *
+ * basename 판별 이유: createSandboxForPost 는 항상 `sandboxRoot/postId`(단일 레벨)로 만들므로 박제된
+ * 옛 경로도 basename === postId 다. 반면 외부 디렉토리는 basename 이 postId 가 아니므로, 우연히
+ * 표준 위치가 존재해도(예: API 로 만든 뒤 path 를 외부로 교정한 테스트) 잘못 self-heal 하지 않는다.
+ *
+ * @returns 호스트 절대경로(작업 디렉토리). 디스크 존재를 보장하지는 않는다(호출부가 ENOENT 처리).
+ */
+export function resolveSandboxDir(sandbox: { postId: string; path: string }): string {
+  // 1) 현재 루트 안이면 신뢰.
+  if (isInsideRoot(config.sandboxRoot, sandbox.path)) {
+    return sandbox.path;
+  }
+  // 2) 루트 밖 + createSandboxForPost 레이아웃 → 표준 위치가 실재하면 자가복구.
+  if (path.basename(sandbox.path) === sandbox.postId) {
+    const canonical = resolveInsideRoot(config.sandboxRoot, sandbox.postId);
+    if (existsSync(canonical)) return canonical;
+  }
+  // 3) 의도적 외부 디렉토리(또는 표준 위치 부재) → 저장 path 유지.
+  return sandbox.path;
 }
 
 /**

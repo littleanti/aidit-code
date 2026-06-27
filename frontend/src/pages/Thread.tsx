@@ -14,12 +14,16 @@ import {
   deletePost,
   upvote as apiUpvote,
   unupvote as apiUnupvote,
+  bookmark as apiBookmark,
+  unbookmark as apiUnbookmark,
   ApiError,
 } from '../api/rest';
 import { relativeTime, formatCount } from '../lib/time';
 import SafeMarkdown from '../lib/SafeMarkdown';
 import Avatar from '../components/Avatar';
 import StatusBadge from '../components/StatusBadge';
+import PageHeaderBar from '../components/PageHeaderBar';
+import ShellPrompt from '../components/ShellPrompt';
 import ChatBubble from '../components/ChatBubble';
 import Composer from '../components/Composer';
 import FileTree from '../components/FileTree';
@@ -58,6 +62,9 @@ export default function Thread() {
   const [voted, setVoted] = useState(false);
   const [postScore, setPostScore] = useState(0);
   const [votePending, setVotePending] = useState(false);
+  // Optimistic bookmark toggle (sticky-bar action; seeded from the loaded post).
+  const [bookmarked, setBookmarked] = useState(false);
+  const [bookmarkPending, setBookmarkPending] = useState(false);
 
   const hydrate = useThreadStore((s) => s.hydrate);
   const reset = useThreadStore((s) => s.reset);
@@ -289,6 +296,7 @@ export default function Thread() {
     if (post) {
       setVoted(Boolean(post.voted));
       setPostScore(post.score);
+      setBookmarked(Boolean(post.bookmarked));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [post?.id]);
@@ -341,6 +349,29 @@ export default function Thread() {
       setVotePending(false);
     }
   }, [post, token, openLogin, votePending, voted, postScore]);
+
+  // Optimistic bookmark toggle (sticky-bar). Write action → opens login when
+  // unauthenticated; idempotent server call; rolls back on failure.
+  const handleToggleBookmark = useCallback(async () => {
+    if (!post) return;
+    if (!token) {
+      openLogin();
+      return;
+    }
+    if (bookmarkPending) return;
+    const nextBookmarked = !bookmarked;
+    const prev = bookmarked;
+    setBookmarked(nextBookmarked);
+    setBookmarkPending(true);
+    try {
+      const res = nextBookmarked ? await apiBookmark(post.id) : await apiUnbookmark(post.id);
+      setBookmarked(res.bookmarked);
+    } catch {
+      setBookmarked(prev);
+    } finally {
+      setBookmarkPending(false);
+    }
+  }, [post, token, openLogin, bookmarkPending, bookmarked]);
 
   const handleDelete = useCallback(async () => {
     if (!id) return;
@@ -404,23 +435,135 @@ export default function Thread() {
 
   return (
     <div className="-mb-4 flex flex-col" style={{ minHeight: 'calc(100vh - 7rem)' }}>
-      {/* Header: back + sandbox badge + reconnect indicator */}
-      <div className="mb-3 flex items-center gap-2">
+      {/* Sticky page header bar (부모 Aidit 패리티 — 모든 주요 화면 공통 언어):
+          뒤로가기 ‹ · 제목(truncate) · 세션 상태 점(read-only) · 북마크 · 작성자 ⋯.
+          세션 상태/제어 자체는 아래 비-sticky "세션 행"으로 분리(클러터 방지)하되,
+          상태 점만 sticky 로 남겨 스크롤 중에도 연결 여부를 항상 알 수 있게 한다. */}
+      <PageHeaderBar>
         <Link
           to="/"
           aria-label={t('common.back')}
-          className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center font-mono text-term-dim hover:text-term-fg-bright"
+          className="-ml-1 inline-flex min-h-[44px] min-w-[32px] items-center justify-center font-mono text-lg text-term-dim hover:text-term-fg-bright"
         >
           ‹
         </Link>
+        <h1 className="min-w-0 flex-1 truncate font-mono text-sm font-bold text-term-glow [text-shadow:0_0_4px_rgba(125,255,160,0.45)]">
+          {post?.title ?? ''}
+        </h1>
+        {/* 세션 상태 점 — glyph만(라벨 없음), 색은 StatusBadge 와 동일 매핑 */}
+        <StatusBadge status={badgeStatus} dot />
+        {post && (
+          <button
+            type="button"
+            aria-pressed={bookmarked}
+            aria-label={t('post.bookmark')}
+            title={t('post.bookmark')}
+            onClick={handleToggleBookmark}
+            disabled={bookmarkPending}
+            className={`flex h-9 w-9 items-center justify-center rounded-[2px] transition hover:bg-term-hover disabled:opacity-50 ${
+              bookmarked ? 'text-term-amber' : 'text-term-dim hover:text-term-fg-bright'
+            }`}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="17"
+              height="17"
+              fill={bookmarked ? 'currentColor' : 'none'}
+              stroke="currentColor"
+              strokeWidth={1.8}
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M6 3h12v18l-6-4-6 4z" />
+            </svg>
+          </button>
+        )}
+        {/* 작성자 전용 ⋯ 팝오버(편집 / 2단계 삭제 확인) — 부모 Aidit 처럼 상단바에 배치 */}
+        {post && isAuthor && (
+          <div ref={ownerMenuRef} className="relative">
+            <button
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={ownerMenuOpen}
+              aria-label={t('thread.moreActionsAria')}
+              title={t('thread.moreActionsAria')}
+              onClick={() => setOwnerMenuOpen((v) => !v)}
+              className={`flex h-9 w-9 items-center justify-center rounded-[2px] text-base leading-none transition hover:bg-term-hover hover:text-term-fg-bright ${
+                ownerMenuOpen ? 'text-term-fg-bright' : 'text-term-dim'
+              }`}
+            >
+              ⋯
+            </button>
+            {ownerMenuOpen && (
+              <div
+                role="menu"
+                aria-label={t('thread.ownerMenuAria')}
+                className="absolute right-0 top-full z-30 mt-1 flex w-28 flex-col rounded-[2px] border border-term-border bg-term-panel py-1 shadow-glow-soft"
+              >
+                {confirmingDelete ? (
+                  <>
+                    <span className="px-3 py-1 font-mono text-xs text-term-red">
+                      {t('thread.deleteConfirm')}
+                    </span>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={deleting}
+                      onClick={handleDelete}
+                      className="flex min-h-[44px] items-center gap-2 px-3 font-mono text-xs text-term-red transition hover:bg-term-hover disabled:opacity-50"
+                    >
+                      {deleting ? t('thread.deleting') : t('thread.deleteYes')}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={deleting}
+                      onClick={() => setConfirmingDelete(false)}
+                      className="flex min-h-[44px] items-center gap-2 px-3 font-mono text-xs text-term-dim transition hover:bg-term-hover hover:text-term-fg-bright disabled:opacity-50"
+                    >
+                      {t('thread.deleteNo')}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <Link
+                      to="/create"
+                      state={{ editPostId: post.id }}
+                      role="menuitem"
+                      onClick={() => setOwnerMenuOpen(false)}
+                      className="flex min-h-[44px] items-center gap-2 px-3 font-mono text-xs text-term-dim transition hover:bg-term-hover hover:text-term-fg-bright"
+                    >
+                      {t('thread.editPost')}
+                    </Link>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => setConfirmingDelete(true)}
+                      className="flex min-h-[44px] items-center gap-2 px-3 font-mono text-xs text-term-red transition hover:bg-term-hover"
+                    >
+                      {t('thread.deletePost')}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </PageHeaderBar>
+
+      {/* 꾸미기 셸 프롬프트 — 고정바 바로 아래(다른 화면과 통일) */}
+      <ShellPrompt command={`thread --attach=${id ?? ''}`} className="mt-4 mb-3" />
+
+      {/* 세션 행(비-sticky) — 전체 상태 배지 + 재연결 + Start/Stop Session.
+          자주 누르는 버튼이 아니고(진입 시 자동 연결 + 끊김 시 composer 위 경고
+          상존), 스크롤로 사라져도 상단바의 상태 점이 연결 여부를 유지한다. */}
+      <div className="mb-3 flex items-center gap-2">
         <StatusBadge status={badgeStatus} />
         {streamStatus === 'reconnecting' && (
           <span className="font-mono text-[10px] tracking-wider text-term-dim" role="status">
             ⟳ {t('thread.reconnecting')}
           </span>
         )}
-        {/* Session toggle chip (top-right): [Start Session] when not connected,
-            [Stop Session] when running. Stays visible in both states. */}
         <button
           type="button"
           onClick={sessionActive ? handleStopSession : handleStartSession}
@@ -511,77 +654,7 @@ export default function Thread() {
                   <span aria-hidden="true">💬</span>
                   <span>{formatCount(post.commentCount)}</span>
                 </span>
-                {/* 작성자 전용 ⋯ 팝오버(편집 / 2단계 삭제 확인) */}
-                {isAuthor && (
-                  <div ref={ownerMenuRef} className="relative">
-                    <button
-                      type="button"
-                      aria-haspopup="menu"
-                      aria-expanded={ownerMenuOpen}
-                      aria-label={t('thread.moreActionsAria')}
-                      title={t('thread.moreActionsAria')}
-                      onClick={() => setOwnerMenuOpen((v) => !v)}
-                      className={`flex h-7 w-7 items-center justify-center rounded-[2px] text-base leading-none transition hover:bg-term-hover hover:text-term-fg-bright ${
-                        ownerMenuOpen ? 'text-term-fg-bright' : 'text-term-dim'
-                      }`}
-                    >
-                      ⋯
-                    </button>
-                    {ownerMenuOpen && (
-                      <div
-                        role="menu"
-                        aria-label={t('thread.ownerMenuAria')}
-                        className="absolute right-0 top-full z-30 mt-1 flex w-36 flex-col rounded-[2px] border border-term-border bg-term-panel py-1 shadow-glow-soft"
-                      >
-                        {confirmingDelete ? (
-                          <>
-                            <span className="px-3 py-1 font-mono text-xs text-term-red">
-                              {t('thread.deleteConfirm')}
-                            </span>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              disabled={deleting}
-                              onClick={handleDelete}
-                              className="flex min-h-[44px] items-center gap-2 px-3 font-mono text-xs text-term-red transition hover:bg-term-hover disabled:opacity-50"
-                            >
-                              {deleting ? t('thread.deleting') : t('thread.deleteYes')}
-                            </button>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              disabled={deleting}
-                              onClick={() => setConfirmingDelete(false)}
-                              className="flex min-h-[44px] items-center gap-2 px-3 font-mono text-xs text-term-dim transition hover:bg-term-hover hover:text-term-fg-bright disabled:opacity-50"
-                            >
-                              {t('thread.deleteNo')}
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <Link
-                              to="/create"
-                              state={{ editPostId: post.id }}
-                              role="menuitem"
-                              onClick={() => setOwnerMenuOpen(false)}
-                              className="flex min-h-[44px] items-center gap-2 px-3 font-mono text-xs text-term-dim transition hover:bg-term-hover hover:text-term-fg-bright"
-                            >
-                              {t('thread.editPost')}
-                            </Link>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              onClick={() => setConfirmingDelete(true)}
-                              className="flex min-h-[44px] items-center gap-2 px-3 font-mono text-xs text-term-red transition hover:bg-term-hover"
-                            >
-                              {t('thread.deletePost')}
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
+                {/* 작성자 전용 ⋯ 메뉴는 상단 sticky bar(PageHeaderBar)로 이동 — 부모 Aidit 패리티 */}
               </span>
             </div>
           </article>

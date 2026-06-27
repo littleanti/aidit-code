@@ -11,7 +11,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { prisma } from '../db.js';
 import { hotScore } from '../domain/hotScore.js';
 import { encodeCursor, decodeCursor, BadCursorError } from '../domain/cursor.js';
-import { createSandboxForPost, sandboxLimiter, deleteSandboxDir } from '../sandbox/service.js';
+import { createSandboxForPost, sandboxLimiter, deleteSandboxDir, resolveSandboxDir } from '../sandbox/service.js';
 import { provisionSandbox } from '../sandbox/provision.js';
 import { getAgentRuntime } from '../agent/runtime.js';
 import { runAgentTurn } from '../agent/turn.js';
@@ -275,11 +275,13 @@ export async function postRoutes(app: FastifyInstance): Promise<void> {
 
     // 3) 샌드박스 격리 디렉토리 삭제(루트 내부 확인 후에만).
     if (sandbox) {
+      // 저장 절대경로가 박제돼 루트 밖이면 deleteSandboxDir 가드에 걸리므로, 실제 위치로 재계산.
+      const sandboxDir = resolveSandboxDir({ postId: id, path: sandbox.path });
       try {
-        await deleteSandboxDir(sandbox.path);
+        await deleteSandboxDir(sandboxDir);
       } catch (err) {
         // 디렉토리 삭제 실패는 치명적이지 않음(행은 이미 삭제됨). 로깅만.
-        app.log.warn({ err, sandboxPath: sandbox.path }, 'sandbox dir cleanup failed');
+        app.log.warn({ err, sandboxPath: sandboxDir }, 'sandbox dir cleanup failed');
       }
     }
 

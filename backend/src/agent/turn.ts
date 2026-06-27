@@ -19,6 +19,7 @@ import { prisma } from '../db.js';
 import { nextSeq } from '../domain/seq.js';
 import { getAgentRuntime } from './runtime.js';
 import { runToolIntent } from './toolBridge.js';
+import { resolveSandboxDir } from '../sandbox/service.js';
 import { publishToPost } from '../realtime/publish.js';
 import {
   makeMessageCreatedEvent,
@@ -151,9 +152,10 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
   //   샌드박스 루트(경로 가드/cwd 기준)를 조회. 없으면 도구를 건너뛴다(plain chat 만 진행).
   const sandbox = await prisma.sandbox.findUnique({
     where: { id: session.sandboxId },
-    select: { path: true },
+    select: { postId: true, path: true },
   });
-  const sandboxRoot = sandbox?.path ?? null;
+  // 저장 절대경로를 그대로 믿지 않고 재계산(레포 이동/이름변경 self-heal). cwd·경로가드 기준 동일.
+  const sandboxRoot = sandbox ? resolveSandboxDir(sandbox) : null;
   // 도구 처리를 직렬 큐로 잇는다(여러 의도가 순차 ack 되도록). onTool 은 동기 콜백.
   let toolChain: Promise<void> = Promise.resolve();
   const onTool = (intent: Parameters<NonNullable<Parameters<typeof runtime.send>[4]>>[0]): void => {

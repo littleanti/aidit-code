@@ -108,7 +108,7 @@ export default function Home() {
 
       {done && items.length > 0 && (
         <p className="py-4 text-center font-mono text-xs text-term-dim-3">
-          ─── {t('common.eof')} ───
+          {t('common.eof')}
         </p>
       )}
 
