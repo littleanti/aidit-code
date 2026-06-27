@@ -1,6 +1,7 @@
 // src/components/StatusBadge.tsx
-// Sandbox status summary badge (WIREFRAME §2/§12):
-//   RUNNING = term-amber, READY/SUSPENDED = term-dim, ERROR = term-red, CREATING = term-dim + ⟳.
+// Sandbox status summary badge (WIREFRAME §2/§12) — 신호등 의미:
+//   RUNNING = term-glow(초록) ●, SUSPENDED = term-red(빨강) ●, ERROR = term-red ✗,
+//   READY = term-dim(무색) ○, CREATING = term-dim ⟳, none = term-dim-3(무색) ·.
 // Uses ONLY term-* tokens.
 import { useT } from '../i18n/useT';
 import type { SandboxStatus } from '../api/types';
@@ -21,11 +22,11 @@ interface BadgeStyle {
 function styleFor(status: SandboxStatus | null | undefined): BadgeStyle {
   switch (status) {
     case 'RUNNING':
-      return { glyph: '●', color: 'text-term-amber', labelKey: 'post.statusRunning' };
+      return { glyph: '●', color: 'text-term-glow', labelKey: 'post.statusRunning' };
     case 'READY':
       return { glyph: '○', color: 'text-term-dim', labelKey: 'post.statusReady' };
     case 'SUSPENDED':
-      return { glyph: '○', color: 'text-term-dim', labelKey: 'post.statusSuspended' };
+      return { glyph: '●', color: 'text-term-red', labelKey: 'post.statusSuspended' };
     case 'ERROR':
       return { glyph: '✗', color: 'text-term-red', labelKey: 'post.statusError' };
     case 'CREATING':

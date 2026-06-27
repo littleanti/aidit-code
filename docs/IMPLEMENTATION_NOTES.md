@@ -11,6 +11,14 @@
 
 ## Changelog
 
+### 2026-06-27 · [fix] · 완료 · 세션/샌드박스 상태 표시등 색을 신호등 의미로 — RUNNING 초록 · SUSPENDED 빨강 · 그 외 무색
+- **요청(사용자)**: 상태 "불 표시"를 RUNNING이면 초록, SUSPENDED면 빨강, unknown이면 무색으로.
+- **현황**: `StatusBadge`의 `styleFor` 매핑이 RUNNING=`term-amber`(●), READY/SUSPENDED=`term-dim`(○), ERROR=`term-red`(✗), CREATING=`term-dim`(⟳), none=`term-dim-3`(·). RUNNING이 amber라 "켜짐=초록" 직관과 어긋나고 SUSPENDED가 dim이라 "정지" 강조가 약함. `StatusBadge`는 Thread(상단 sticky 점 + 세션 행)와 피드 카드(`PostCard`) 양쪽에서 쓰여 **앱 전역 일관 적용**됨.
+- **방향(신호등 의미 + 명시 안 한 상태 정리)**: RUNNING `term-glow`(초록, ●), SUSPENDED `term-red`(빨강, ●), ERROR `term-red`(✗, 정지/이상=빨강 일관 유지), READY `term-dim`(무색 대기 ○), CREATING `term-dim`(무색 생성중 ⟳), none `term-dim-3`(가장 옅은 무색 ·). 색 변경 + RUNNING/SUSPENDED 글리프를 ●로 통일("켜진 등" 느낌), 나머지 글리프 유지. 새 색 토큰 추가 없음(기존 term-* 재사용).
+- **구현(예정)**: `frontend/src/components/StatusBadge.tsx`(`styleFor` color/glyph 매핑).
+- **검증(③) — 실측**: FE `tsc --noEmit` **클린(EXIT 0)**. 브라우저(5173, KO) Thread에서 RUNNING일 때 상단 sticky 점 + 세션 행 `● RUNNING`이 **초록(term-glow)**, 세션 중지 후 SUSPENDED일 때 둘 다 **빨강(term-red) ●**로 전환됨을 스크린샷 확인. ※ 검증 위해 세션을 RUNNING→SUSPENDED로 변경했으나, 이 dev 환경의 백엔드 세션 시작 실패(`에이전트 세션 시작에 실패했습니다` — 색 변경과 무관)로 RUNNING 복구는 못 함. 데이터 손실 없음(SUSPENDED는 재개 가능 상태).
+- 변경 파일: `frontend/src/components/StatusBadge.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-27 · [feat] · 완료 · Thread 화면을 공통 디자인 언어(PageHeaderBar sticky bar + ShellPrompt)에 합류 + 북마크 버튼 추가 + 세션 제어 레이어 분리
 - **요청(사용자)**: 부모 Aidit 게시글 화면은 상단 sticky bar(뒤로가기·제목·북마크)가 있는데 Aidit-Code Thread엔 없어 통일성이 깨짐. 단 Aidit-Code는 Running 상태·Start/Stop Session 등 세션 제어가 있어 모든 걸 한 바에 넣으면 UX가 나쁨. 또 Thread엔 북마크 버튼·꾸미기 셸(ShellPrompt)도 없음. 통일성+기능성 둘 다 잡는 방향으로 수정.
 - **현황 비교**: `PageHeaderBar`(sticky `top-12`) + `ShellPrompt`는 이미 Home·Create·Profile·Settings에 적용된 공통 패턴인데 **Thread만 자체 비-sticky 헤더**(`mb-3 flex` — 뒤로가기 ‹ + StatusBadge + Start/Stop 칩)를 써서 합류 안 됨. 북마크는 백엔드·API(`bookmark()/unbookmark()` idempotent)·`post.bookmarked`·Profile 북마크 탭까지 전부 구현돼 있는데 **Thread(원본 글)에만 토글 버튼이 없음**(upvote는 이미 article 안에 낙관적 토글로 존재).
