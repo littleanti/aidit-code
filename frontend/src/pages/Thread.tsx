@@ -443,9 +443,21 @@ export default function Thread() {
         <Link
           to="/"
           aria-label={t('common.back')}
-          className="-ml-1 inline-flex min-h-[44px] min-w-[32px] items-center justify-center font-mono text-lg text-term-dim hover:text-term-fg-bright"
+          className="-ml-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-[2px] text-term-dim hover:bg-term-hover"
         >
-          ‹
+          {/* 부모 Aidit Thread 뒤로가기 버튼과 크기·모양 동일: 40×40 사각 + 24×24 SVG 셰브론. */}
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-6 w-6"
+            aria-hidden
+          >
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
         </Link>
         <h1 className="min-w-0 flex-1 truncate font-mono text-sm font-bold text-term-glow [text-shadow:0_0_4px_rgba(125,255,160,0.45)]">
           {post?.title ?? ''}
