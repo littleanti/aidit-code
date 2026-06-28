@@ -83,6 +83,21 @@ export interface ToolAckResult {
   callId?: string;
 }
 
+/**
+ * 큐에 대기 중인(아직 시작 전) 한 턴. send() 가 적재하고 pumpQueue() 가 꺼내 활성화한다.
+ * 같은 샌드박스의 동시 요청을 인터럽트(선점)하지 않고 FIFO 로 직렬화하기 위한 단위다.
+ */
+interface QueuedTurn {
+  input: string;
+  lang: string;
+  onToken: (delta: string) => void;
+  onTool?: (intent: ToolIntent) => void;
+  options?: TurnOptions;
+  /** 이 턴의 send() Promise 를 마감하는 settler(done→resolve / error·종료→reject). */
+  resolve: () => void;
+  reject: (err: Error) => void;
+}
+
 /** in-memory 세션 레지스트리: sandboxId -> 활성 프로세스 핸들. */
 interface RuntimeHandle {
   child: ChildProcess;
@@ -92,6 +107,49 @@ interface RuntimeHandle {
   stdoutBuf: string;
   /** 현재 활성 턴의 sink(없으면 null — 턴 외 라인은 무시). */
   activeTurn: TurnSink | null;
+  /** 진행 중 턴이 끝나길 기다리는 FIFO 대기열(선점 대신 순차 처리). */
+  queue: QueuedTurn[];
+}
+
+/**
+ * 대기열에서 다음 턴을 꺼내 활성화한다(진행 중 턴이 없을 때만).
+ * worker 는 1턴씩 처리하므로, 각 턴의 done/error(pumpTurnLines 가 activeTurn=null 로 만든 뒤
+ * sink.onDone/onError 호출) 시점에 다시 호출되어 큐를 한 칸씩 전진시킨다.
+ */
+function pumpQueue(h: RuntimeHandle): void {
+  if (h.activeTurn) return; // 턴 진행 중 — 끝나면 onDone/onError 에서 재호출된다.
+  const next = h.queue.shift();
+  if (!next) return; // 대기열 비어있음.
+  const sink: TurnSink = {
+    onToken: (delta) => next.onToken(delta),
+    onTool: (intent) => next.onTool?.(intent),
+    onDone: () => {
+      next.resolve();
+      pumpQueue(h); // 다음 대기 턴 진행.
+    },
+    onError: (message) => {
+      next.reject(new Error(message));
+      pumpQueue(h);
+    },
+  };
+  h.activeTurn = sink;
+  try {
+    // Feature A/B: image{absPath,mime}·reasoningEffort 를 턴 프로토콜에 동봉(값 있을 때만).
+    const payload: {
+      type: 'input';
+      text: string;
+      lang: string;
+      image?: TurnImage;
+      reasoningEffort?: string;
+    } = { type: 'input', text: next.input, lang: next.lang };
+    if (next.options?.image) payload.image = next.options.image;
+    if (next.options?.reasoningEffort) payload.reasoningEffort = next.options.reasoningEffort;
+    h.child.stdin?.write(JSON.stringify(payload) + '\n');
+  } catch (err) {
+    h.activeTurn = null;
+    next.reject(err instanceof Error ? err : new Error('failed to write input'));
+    pumpQueue(h); // 쓰기 실패한 턴은 건너뛰고 다음을 시도.
+  }
 }
 
 const handles = new Map<string, RuntimeHandle>();
@@ -268,6 +326,7 @@ class PiRuntime implements AgentRuntime {
           sessionRef,
           stdoutBuf: '',
           activeTurn: null,
+          queue: [],
         };
         handles.set(sandbox.id, handle);
         // ready 라인 이후 같은 청크에 턴 데이터가 붙어왔을 수 있으니 잔여를 펌프로 넘긴다.
@@ -277,16 +336,20 @@ class PiRuntime implements AgentRuntime {
         child.stdout?.removeAllListeners('data');
         child.stdout?.on('data', (c: string) => pumpTurnLines(handle, c));
         if (afterReady) pumpTurnLines(handle, afterReady);
-        // 프로세스가 예기치 않게 죽으면 레지스트리에서 정리하고 진행 턴을 에러로 마감.
+        // 프로세스가 예기치 않게 죽으면 레지스트리에서 정리하고 진행 턴 + 대기열을 에러로 마감.
         child.once('exit', () => {
           const h = handles.get(sandbox.id);
           if (h && h.child === child) {
             handles.delete(sandbox.id);
+            // 대기열을 먼저 비운다: 활성 턴 onError 가 트리거하는 pumpQueue 가 죽은 stdin 에
+            // 다음 입력을 쓰지 않도록(빈 큐 → no-op). 비운 항목은 아래에서 일괄 reject.
+            const pending = h.queue.splice(0);
             const sink = h.activeTurn;
             if (sink) {
               h.activeTurn = null;
               sink.onError('agent process exited');
             }
+            for (const q of pending) q.reject(new Error('agent process exited'));
           }
         });
         resolve({ pid, sessionRef });
@@ -345,41 +408,14 @@ class PiRuntime implements AgentRuntime {
     if (!h) {
       throw new Error('no active runtime process to send input to');
     }
-    if (h.activeTurn) {
-      // 동시 활성 세션 1개 권장(TRD §5.4): 이전 턴을 인터럽트하고 새 턴을 시작.
-      try {
-        h.child.stdin?.write(JSON.stringify({ type: 'interrupt' }) + '\n');
-      } catch {
-        /* noop */
-      }
-      h.activeTurn = null;
-    }
 
+    // 같은 샌드박스의 동시 요청은 인터럽트(선점)하지 않고 FIFO 큐로 직렬화한다.
+    //   진행 중 턴이 있으면 대기열에 적재되고, 현재 턴이 done/error 로 끝나면 pumpQueue 가
+    //   다음 턴을 자동 시작한다. image 의 absPath 는 라우트(imageRef.resolveImageRef)가
+    //   업로드 디렉토리 내부로 검증한 경로다.
     return await new Promise<void>((resolve, reject) => {
-      const sink: TurnSink = {
-        onToken: (delta) => onToken(delta),
-        onTool: (intent) => onTool?.(intent),
-        onDone: () => resolve(),
-        onError: (message) => reject(new Error(message)),
-      };
-      h.activeTurn = sink;
-      try {
-        // Feature A/B: image{absPath,mime}·reasoningEffort 를 턴 프로토콜에 동봉(값 있을 때만).
-        //   image 의 absPath 는 라우트(imageRef.resolveImageRef)가 업로드 디렉토리 내부로 검증한 경로.
-        const payload: {
-          type: 'input';
-          text: string;
-          lang: string;
-          image?: TurnImage;
-          reasoningEffort?: string;
-        } = { type: 'input', text: input, lang };
-        if (options?.image) payload.image = options.image;
-        if (options?.reasoningEffort) payload.reasoningEffort = options.reasoningEffort;
-        h.child.stdin?.write(JSON.stringify(payload) + '\n');
-      } catch (err) {
-        h.activeTurn = null;
-        reject(err instanceof Error ? err : new Error('failed to write input'));
-      }
+      h.queue.push({ input, lang, onToken, onTool, options, resolve, reject });
+      pumpQueue(h);
     });
   }
 
@@ -416,8 +452,12 @@ class PiRuntime implements AgentRuntime {
       /* noop — 이미 종료된 프로세스 */
     }
     // 진행 중 턴 sink 는 done 라인을 받지 못할 수 있으므로 정리(턴 Promise 는 turn.ts 가 race 로 마감).
+    //   worker 는 인터럽트된 턴의 stale done/error 를 억제하므로(piWorker), 아래 pumpQueue 가
+    //   다음 대기 턴을 안전하게 시작해도 취소된 턴의 done 이 그 턴을 조기 resolve 하지 않는다.
     h.activeTurn = null;
     if (steer && steer.trim()) {
+      // steer 가 곧바로 활성 작업이 되므로 큐는 펌프하지 않고 취소한다(인터럽트+steer+큐 = 드문 조합).
+      //   매달림 방지를 위해 대기 턴은 reject(취소).
       try {
         h.child.stdin?.write(
           JSON.stringify({ type: 'input', text: steer, lang: 'en' }) + '\n',
@@ -425,13 +465,22 @@ class PiRuntime implements AgentRuntime {
       } catch {
         /* noop */
       }
+      const pending = h.queue.splice(0);
+      for (const q of pending) q.reject(new Error('agent turn interrupted'));
+      return;
     }
+    // steer 가 없으면 대기 중인 후속 질문을 이어서 처리한다(A안 — 대기 질문 보존).
+    pumpQueue(h);
   }
 
   async suspend(session: Pick<AgentSession, 'id' | 'sandboxId'>): Promise<void> {
     const h = handles.get(session.sandboxId);
     if (!h) return; // 이미 내려갔거나 attach 만 한 클라이언트 — 멱등.
     handles.delete(session.sandboxId);
+    // 대기열을 정리한다: 프로세스를 내리므로 더는 진행 불가 — 매달림 방지로 일괄 reject.
+    //   (handles 에서 먼저 제거했으므로 child 'exit' 핸들러는 이 큐를 보지 못한다.)
+    const pending = h.queue.splice(0);
+    for (const q of pending) q.reject(new Error('agent runtime suspended'));
     try {
       h.child.kill('SIGTERM');
     } catch {

@@ -11,6 +11,18 @@
 
 ## Changelog
 
+### 2026-06-28 · [fix] · 완료 · 같은 게시글 동시 질문을 인터럽트(선점)→FIFO 큐(순차) 처리로 전환
+- **요청(사용자)**: 같은 게시글(샌드박스)에 여러 사람이 동시에 질문하면 현재 구현은 "나중 질문이 진행 중 질문을 인터럽트(선점)"해 먼저 한 사람의 답변/파일수정이 중간에 잘림. 이를 **순차 큐(A안)** 로 바꿔, 진행 중 턴이 끝난 뒤 대기 질문을 차례로 처리.
+- **현황(원인)**: `agent/pi.ts` `send()` 가 `h.activeTurn` 이 있으면 worker 에 `{type:'interrupt'}` 를 보내고 새 턴으로 교체(`pi.ts:348-356`). 게시글당 worker 프로세스는 1개(`handles` Map)이며 worker 는 stdin 입력을 1턴씩 처리 가능(`piWorker.mjs` rl.on('line')). 즉 큐만 부재.
+- **방향(A안 — FIFO 직렬화)**:
+  1. `RuntimeHandle` 에 `queue: QueuedTurn[]` 추가. `send()` 는 인터럽트하지 않고 큐에 적재 후 `pumpQueue()` 호출 — 진행 중 턴이 없을 때만 다음 턴을 시작하고, 각 턴의 `done`/`error` 에서 다음 턴을 자동 기동.
+  2. 누수/행(hang) 방지: 프로세스 `exit`·`suspend()` 시 대기 큐를 모두 reject. 명시적 `interrupt()`(인터럽트 버튼/steer)는 현재 턴 취소 후, steer 없으면 큐를 이어서 펌프(대기 질문 보존)·steer 있으면 큐 취소(드문 조합).
+  3. `piWorker.mjs`: 인터럽트된 턴은 stale `done`/`error` 를 방출하지 않도록 억제(인터럽트+큐 펌프 시 잘못된 턴이 조기 resolve 되는 레이스 제거 — 기존 선점 경로의 잠재 레이스도 함께 해소).
+- **범위 밖(알려진 한계)**: 같은 게시글에 turn1 진행 중 turn2 가 큐 대기일 때 `session.status` 가 turn1 종료 시 잠깐 IDLE 로 보일 수 있음(메시지별 PENDING→STREAMING→COMPLETE 상태는 정확). 답변 스트리밍/직렬 처리에는 영향 없음 — 후속 개선 후보.
+- **구현**: `pi.ts` — `RuntimeHandle.queue` + `pumpQueue()` 추가, `send()` 를 enqueue+pump 로 교체(선점 코드 제거), 프로세스 `exit`·`suspend()`·steer 인터럽트 시 대기열 일괄 reject, steer 없는 `interrupt()` 는 큐 펌프. `piWorker.mjs` — 인터럽트된 턴의 stale done/error 억제.
+- **검증(③) — 실측**: backend `tsc --noEmit` **클린(EXIT 0)**. vitest 전체 **23 파일 / 86 테스트 통과(EXIT 0)**. 신규 직렬화 테스트(`runtime.test.ts` "serializes concurrent sends") 통과 — 동시 2건 `send('first')`·`send('second')` 시 두 번째 턴 토큰이 첫 턴 done **이전에 0건**(선점 없음), 두 턴 모두 끝까지 완료(`'first'`·`'second'` 에코 포함), 완료 순서 `['done1','done2']`(FIFO).
+- 변경 파일: `backend/src/agent/pi.ts`, `backend/src/agent/piWorker.mjs`, `backend/test/runtime.test.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-28 · [feat] · 완료 · 게시글 상단 sticky bar 자동 숨김(스크롤↓ 숨김 / 스크롤↑ 표시) — 댓글 가독 영역 확대
 - **요청(사용자)**: 게시글 화면에서 글로벌 바 밑 sticky bar(제목 바)가 세로 공간을 점유해 댓글이 적게 보임. 두 앱(Aidit·Aidit-Code) 모두 제목 sticky bar를 "스크롤에 따라 자동 숨김/표시"로 바꿔 댓글 영역을 넓힌다. (부모 Aidit는 게시글 스크롤 영역도 Aidit-Code식 window-scroll로 통일 — 본 노트는 Aidit-Code 쪽.)
 - **방향(Aidit-Code)**: 신규 훅 `useHideOnScroll`(window 스크롤 방향 감지 — 아래로 스크롤 시 숨김 `true`, 위로/최상단 표시 `false`, 지터 threshold 6px·최상단 64px 밴드에서 항상 표시) 추가. `PageHeaderBar`에 옵트인 `autoHide` prop 추가 — `true`일 때 `transition-transform`으로 글로벌 앱바 뒤로 슬라이드업(`-translate-y-[calc(100%+1px)]`, PageHeaderBar `z-10` < 글로벌 헤더 `z-20`이라 뒤로 숨음). `Thread.tsx`만 `<PageHeaderBar autoHide>` 사용; 다른 페이지(홈·나·작성·설정)는 기본값(`false`)이라 불변(상시 고정).

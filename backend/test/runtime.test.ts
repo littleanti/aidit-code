@@ -71,6 +71,45 @@ describe('PiRuntime spawn/suspend', () => {
     expect(piRuntime.getPid(sandboxId)).toBeNull();
   });
 
+  it('serializes concurrent sends (FIFO queue, no preemption)', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'pi-rt-'));
+    const sandboxId = `sbx-${Date.now()}-q`;
+    spawnedSandboxIds.push(sandboxId);
+
+    await piRuntime.spawn({ id: sandboxId, path: dir });
+    const session = { id: 'sess', sandboxId };
+
+    // 이벤트 순서 기록: 두 번째 턴 토큰이 첫 턴 done 이후에만 오는지(직렬화) 검증.
+    const order: string[] = [];
+    let firstDone = false;
+    const t1: string[] = [];
+    const t2: string[] = [];
+    let t2BeforeDone1 = false;
+
+    const p1 = piRuntime
+      .send(session, 'first', 'en', (d) => t1.push(d))
+      .then(() => {
+        firstDone = true;
+        order.push('done1');
+      });
+    const p2 = piRuntime
+      .send(session, 'second', 'en', (d) => {
+        if (!firstDone) t2BeforeDone1 = true; // 선점됐다면 첫 턴 done 전에 토큰이 옴.
+        t2.push(d);
+      })
+      .then(() => order.push('done2'));
+
+    await Promise.all([p1, p2]);
+
+    // 두 턴 모두 끝까지 완료(인터럽트로 잘리지 않음).
+    expect(t1.join('')).toContain('first');
+    expect(t2.join('')).toContain('second');
+    // 직렬화: 두 번째 턴 토큰은 첫 턴 done 이후에만 도착.
+    expect(t2BeforeDone1).toBe(false);
+    // 완료 순서도 FIFO.
+    expect(order).toEqual(['done1', 'done2']);
+  });
+
   it('attach reuses the existing process (no new spawn)', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'pi-rt-'));
     const sandboxId = `sbx-${Date.now()}-a`;
