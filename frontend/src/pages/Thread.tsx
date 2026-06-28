@@ -438,8 +438,10 @@ export default function Thread() {
       {/* Sticky page header bar (부모 Aidit 패리티 — 모든 주요 화면 공통 언어):
           뒤로가기 ‹ · 제목(truncate) · 세션 상태 점(read-only) · 북마크 · 작성자 ⋯.
           세션 상태/제어 자체는 아래 비-sticky "세션 행"으로 분리(클러터 방지)하되,
-          상태 점만 sticky 로 남겨 스크롤 중에도 연결 여부를 항상 알 수 있게 한다. */}
-      <PageHeaderBar>
+          상태 점만 sticky 로 남겨 스크롤 중에도 연결 여부를 항상 알 수 있게 한다.
+          autoHide: 아래로 스크롤 시 글로벌 앱바 뒤로 숨고 위로 스크롤 시 다시 나타나
+          긴 댓글 스레드에서 댓글 영역을 넓힌다(useHideOnScroll). */}
+      <PageHeaderBar autoHide>
         <Link
           to="/"
           aria-label={t('common.back')}

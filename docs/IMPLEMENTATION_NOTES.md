@@ -11,6 +11,13 @@
 
 ## Changelog
 
+### 2026-06-28 · [feat] · 완료 · 게시글 상단 sticky bar 자동 숨김(스크롤↓ 숨김 / 스크롤↑ 표시) — 댓글 가독 영역 확대
+- **요청(사용자)**: 게시글 화면에서 글로벌 바 밑 sticky bar(제목 바)가 세로 공간을 점유해 댓글이 적게 보임. 두 앱(Aidit·Aidit-Code) 모두 제목 sticky bar를 "스크롤에 따라 자동 숨김/표시"로 바꿔 댓글 영역을 넓힌다. (부모 Aidit는 게시글 스크롤 영역도 Aidit-Code식 window-scroll로 통일 — 본 노트는 Aidit-Code 쪽.)
+- **방향(Aidit-Code)**: 신규 훅 `useHideOnScroll`(window 스크롤 방향 감지 — 아래로 스크롤 시 숨김 `true`, 위로/최상단 표시 `false`, 지터 threshold 6px·최상단 64px 밴드에서 항상 표시) 추가. `PageHeaderBar`에 옵트인 `autoHide` prop 추가 — `true`일 때 `transition-transform`으로 글로벌 앱바 뒤로 슬라이드업(`-translate-y-[calc(100%+1px)]`, PageHeaderBar `z-10` < 글로벌 헤더 `z-20`이라 뒤로 숨음). `Thread.tsx`만 `<PageHeaderBar autoHide>` 사용; 다른 페이지(홈·나·작성·설정)는 기본값(`false`)이라 불변(상시 고정).
+- **구현**: `frontend/src/hooks/useHideOnScroll.ts`(신규), `frontend/src/components/PageHeaderBar.tsx`, `frontend/src/pages/Thread.tsx`.
+- **검증(③)**: FE `tsc --noEmit` 통과(exit 0).
+- 변경 파일: `frontend/src/hooks/useHideOnScroll.ts`, `frontend/src/components/PageHeaderBar.tsx`, `frontend/src/pages/Thread.tsx`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-28 · [fix] · 완료 · 서브 상단바(PageHeaderBar)·하단 메뉴바를 부모 Aidit처럼 CRT 그라디언트(`bg-term-screen`)로
 - **요청(사용자)**: 부모 Aidit의 글로벌 상단바 아래 서브 상단바와 하단 메뉴바의 그라디언트 디자인을 확인하고, 동일하면 Aidit-Code의 동일 바에도 적용.
 - **확인(브라우저 실측)**: 부모(5174) `PageHeaderBar`·`BottomTabBar` 모두 `bg-term-screen` → `background-image: radial-gradient(120% 80% at 50% 0%, #06190e, #04130b, #020a05)`(CRT 스크린 wash), backdrop 없음. Aidit-Code(5173)는 서브바 `bg-term-nav`(평면 #04130b), 하단바 `bg-term-nav/95 + backdrop-blur(8px)` → **그라디언트 없음**.
