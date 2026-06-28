@@ -532,13 +532,16 @@ rl.on('line', (line) => {
     };
     runTurn(msg.text, msg.lang, turn, opts)
       .then(() => {
+        // 인터럽트된 턴은 stale done 을 방출하지 않는다(부모가 다음 큐 턴을 조기 resolve 하는 레이스 방지).
+        const interrupted = turn.interrupted;
         if (currentTurn === turn) currentTurn = null;
-        emit({ type: 'done' });
+        if (!interrupted) emit({ type: 'done' });
       })
       .catch(() => {
+        const interrupted = turn.interrupted;
         if (currentTurn === turn) currentTurn = null;
-        // 일반 메시지만 — 키/원문 미노출.
-        emit({ type: 'error', message: 'agent turn failed' });
+        // 인터럽트된 턴은 stale error 도 억제. 그 외에는 일반 메시지만 — 키/원문 미노출.
+        if (!interrupted) emit({ type: 'error', message: 'agent turn failed' });
       });
   }
 });

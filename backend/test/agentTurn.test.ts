@@ -151,6 +151,52 @@ describe('runAgentTurn', () => {
     }
   });
 
+  it('concurrent turns on one session: no IDLE status until the last turn finishes', async () => {
+    const { postId, sessionId, sandboxId } = await setupSession();
+
+    const received: RealtimeEvent[] = [];
+    const unsubscribe = bus.subscribe(postId, (ev) => received.push(ev));
+
+    try {
+      // 같은 세션/샌드박스에 두 질문을 동시에 던진다(런타임이 FIFO 큐로 직렬화).
+      await Promise.all([
+        runAgentTurn({
+          post: { id: postId },
+          session: { id: sessionId, sandboxId },
+          prompt: 'first question here',
+          lang: 'en',
+        }),
+        runAgentTurn({
+          post: { id: postId },
+          session: { id: sessionId, sandboxId },
+          prompt: 'second question here',
+          lang: 'en',
+        }),
+      ]);
+
+      // 두 AGENT_REPLY 모두 COMPLETE.
+      const completes = received.filter(
+        (e) => e.type === 'message.updated' && e.status === 'COMPLETE',
+      );
+      expect(completes.length).toBe(2);
+
+      // 핵심: 첫 session.status=IDLE 은 마지막 agent.token 이후에만 나와야 한다.
+      //   (선점 시절/미수정 시 turn1 이 turn2 처리 중에 IDLE 를 쏴 깜빡임 → firstIdle < lastToken.)
+      const lastTokenIdx = received.map((e) => e.type).lastIndexOf('agent.token');
+      const firstIdleIdx = received.findIndex(
+        (e) => e.type === 'session.status' && e.status === 'IDLE',
+      );
+      expect(lastTokenIdx).toBeGreaterThanOrEqual(0);
+      expect(firstIdleIdx).toBeGreaterThan(lastTokenIdx);
+
+      // 최종 DB 세션 IDLE.
+      const sess = await prisma.agentSession.findUnique({ where: { id: sessionId } });
+      expect(sess!.status).toBe('IDLE');
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it('snapshot replay: GET-style afterSeq query returns prior messages', async () => {
     const { postId, sessionId, sandboxId, humanId } = await setupSession();
     await runAgentTurn({
