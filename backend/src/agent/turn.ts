@@ -234,14 +234,20 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
   }
 
   // ── 5) 세션 IDLE 복귀 ──
-  await prisma.agentSession.update({
-    where: { id: session.id },
-    data: { status: 'IDLE' },
-  });
-  publishToPost(
-    post.id,
-    makeSessionStatusEvent({ sessionId: session.id, status: 'IDLE' }),
-  );
+  //   동시 질문은 런타임에서 FIFO 큐로 직렬화된다. 이 턴이 끝나도 같은 샌드박스에 아직
+  //   진행/대기 중인 다른 턴이 있으면 IDLE 로 내리지 않는다(마지막 턴에서만 전이) — 중간
+  //   IDLE 깜빡임 방지. isBusy 미구현 런타임은 false 로 보아 기존처럼 항상 IDLE 로 복귀.
+  const stillBusy = runtime.isBusy?.({ sandboxId: session.sandboxId }) ?? false;
+  if (!stillBusy) {
+    await prisma.agentSession.update({
+      where: { id: session.id },
+      data: { status: 'IDLE' },
+    });
+    publishToPost(
+      post.id,
+      makeSessionStatusEvent({ sessionId: session.id, status: 'IDLE' }),
+    );
+  }
 }
 
 /**

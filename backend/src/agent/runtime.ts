@@ -71,6 +71,13 @@ export interface AgentRuntime {
     steer?: string,
   ): Promise<void>;
 
+  /**
+   * (선택) 해당 샌드박스에 진행 중(활성) 또는 대기열에 쌓인 턴이 있는지. 선택 구현.
+   * 동시 질문을 FIFO 큐로 직렬화할 때, 호출부(turn.ts)가 "마지막 턴이 끝났는지"를 판별해
+   * 세션 IDLE 전이를 한 번만(중간 깜빡임 없이) 수행하기 위한 질의다. 미구현이면 false 로 본다.
+   */
+  isBusy?(session: Pick<AgentSession, 'sandboxId'>): boolean;
+
   /** 프로세스를 내린다(디렉토리 보존). IDLE/RUNNING -> STOPPED. */
   suspend(session: Pick<AgentSession, 'id' | 'sandboxId'>): Promise<void>;
 

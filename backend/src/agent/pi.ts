@@ -473,6 +473,16 @@ class PiRuntime implements AgentRuntime {
     pumpQueue(h);
   }
 
+  /**
+   * 해당 샌드박스에 활성 턴이 있거나 대기열이 비어있지 않으면 true(직렬 큐 진행 중).
+   * 큐의 활성↔대기 전이는 단일 스레드에서 원자적이라 "처리 중인데 false" 인 틈은 없다.
+   */
+  isBusy(session: Pick<AgentSession, 'sandboxId'>): boolean {
+    const h = handles.get(session.sandboxId);
+    if (!h) return false;
+    return h.activeTurn !== null || h.queue.length > 0;
+  }
+
   async suspend(session: Pick<AgentSession, 'id' | 'sandboxId'>): Promise<void> {
     const h = handles.get(session.sandboxId);
     if (!h) return; // 이미 내려갔거나 attach 만 한 클라이언트 — 멱등.

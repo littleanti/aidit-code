@@ -11,6 +11,14 @@
 
 ## Changelog
 
+### 2026-06-28 · [fix] · 완료 · 동시 질문 큐 처리 중 세션 상태등이 중간에 IDLE 로 깜빡이는 문제
+- **요청(사용자)**: 직전 FIFO 큐 전환의 알려진 한계 — turn1 진행 중 turn2 가 큐 대기일 때 turn1 종료 시점에 `session.status` 가 잠깐 `IDLE` 로 보이는 현상을 별도로 수정.
+- **현황(원인)**: `agent/turn.ts` 의 각 `runAgentTurn` 이 독립적으로 step2 에서 세션 `RUNNING`, step5 에서 **무조건** `IDLE` 로 전이/publish 한다. 동시 2턴이면 먼저 끝난 turn1 의 step5 가 turn2 가 아직 처리/대기 중인데도 `IDLE` 를 쏴, 상태등이 깜빡인다(메시지별 PENDING→STREAMING→COMPLETE 는 정확).
+- **방향**: 런타임이 해당 샌드박스에 진행/대기 중 턴이 있는지 아는 유일한 권위자이므로, `AgentRuntime.isBusy?(sandboxId)`(활성 턴 또는 대기열 비어있지 않음) 를 추가한다. `turn.ts` step5 는 `isBusy` 가 `false`(마지막 턴) 일 때만 `IDLE` 로 전이한다 → 중간 IDLE 깜빡임 제거. 큐가 활성→대기 전이를 단일 스레드에서 원자적으로 처리하므로 "busy 인데 false" 틈은 없다(IDLE 은 항상 모든 토큰 이후에만 방출).
+- **구현**: `runtime.ts` 에 `isBusy?(sandboxId)` 추가, `pi.ts` 가 `activeTurn !== null || queue.length > 0` 로 구현, `turn.ts` step5 가 `isBusy` false 일 때만 `IDLE` 전이/publish.
+- **검증(③) — 실측**: backend `tsc --noEmit` **클린(EXIT 0)**, vitest 전체 **23 파일 / 87 테스트 통과(EXIT 0)**. 신규 동시-턴 테스트(`agentTurn.test.ts` "concurrent turns on one session") 통과 — 같은 세션 `runAgentTurn` 2건 동시 실행 시 두 AGENT_REPLY 모두 COMPLETE, 첫 `session.status=IDLE` 이벤트 index > 마지막 `agent.token` index(작업 중 IDLE 없음), 최종 DB 세션 `IDLE`. **판별력 확인**: step5 게이트를 임시 무력화(`stillBusy=false`) 하면 이 테스트가 **실패** → 게이트가 실제 깜빡임을 막음을 증명(이후 원복).
+- 변경 파일: `backend/src/agent/runtime.ts`, `backend/src/agent/pi.ts`, `backend/src/agent/turn.ts`, `backend/test/agentTurn.test.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-28 · [fix] · 완료 · 같은 게시글 동시 질문을 인터럽트(선점)→FIFO 큐(순차) 처리로 전환
 - **요청(사용자)**: 같은 게시글(샌드박스)에 여러 사람이 동시에 질문하면 현재 구현은 "나중 질문이 진행 중 질문을 인터럽트(선점)"해 먼저 한 사람의 답변/파일수정이 중간에 잘림. 이를 **순차 큐(A안)** 로 바꿔, 진행 중 턴이 끝난 뒤 대기 질문을 차례로 처리.
 - **현황(원인)**: `agent/pi.ts` `send()` 가 `h.activeTurn` 이 있으면 worker 에 `{type:'interrupt'}` 를 보내고 새 턴으로 교체(`pi.ts:348-356`). 게시글당 worker 프로세스는 1개(`handles` Map)이며 worker 는 stdin 입력을 1턴씩 처리 가능(`piWorker.mjs` rl.on('line')). 즉 큐만 부재.
