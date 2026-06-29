@@ -3,7 +3,7 @@
 // Loads the post + initial messages, starts/attaches a session, mounts the SSE
 // stream, and renders the bubble list + Composer + sandbox/session status.
 // Mobile-first; touch targets >=44px. Uses ONLY term-* tokens; labels via t().
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useT } from '../i18n/useT';
 import {
@@ -35,6 +35,12 @@ import { useThreadStore } from '../stores/threadStore';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import { useAuthStore } from '../stores/authStore';
 import { useUiStore } from '../stores/uiStore';
+import {
+  buildAttribution,
+  attributeToolBubble,
+  resolveActiveTurnsCount,
+  type AttributionEntry,
+} from '../lib/threadSelectors';
 import type { Post } from '../api/types';
 
 type WorkspaceTab = 'chat' | 'files';
@@ -45,6 +51,7 @@ export default function Thread() {
   const navigate = useNavigate();
   const token = useAuthStore((s) => s.token);
   const userId = useAuthStore((s) => s.userId);
+  const username = useAuthStore((s) => s.username);
   const openLogin = useUiStore((s) => s.openLogin);
 
   const [post, setPost] = useState<Post | null>(null);
@@ -72,6 +79,16 @@ export default function Thread() {
   const messages = useThreadStore((s) => s.messages);
   const activeSession = useThreadStore((s) => s.activeSession);
   const sandboxStatus = useThreadStore((s) => s.sandboxStatus);
+  const activeSessionTurns = useThreadStore((s) => s.activeSessionTurns);
+
+  // FE-MULTI(M8): 동시 다중 턴 표면화 — 모든 결정은 순수 셀렉터에서 파생한다.
+  // 배지 수만 서버 권위값(activeTurns) 우선, 나머지(구분 띠/칩 승격/게이팅)는
+  // messages 파생(SSE 지연에 강건). concurrent = 2턴+ 동시 스트리밍.
+  const activeTurns = useMemo(
+    () => resolveActiveTurnsCount(activeSessionTurns, messages),
+    [activeSessionTurns, messages]
+  );
+  const concurrent = activeTurns >= 2;
 
   const selectedPath = useWorkspaceStore((s) => s.selectedPath);
   const selectFile = useWorkspaceStore((s) => s.selectFile);
@@ -202,6 +219,42 @@ export default function Thread() {
       },
       reduce ? 0 : 700
     );
+  }, []);
+
+  // FE-MULTI: 각 AGENT_REPLY의 1:1 귀속(↳@질문자). self/작성자만 실명, 그 외
+  // peer는 someoneElse 폴백(M4 데이터 한계 — 빈 라벨 절대 금지).
+  const attrMap = useMemo<Map<string, AttributionEntry>>(
+    () =>
+      buildAttribution(messages, {
+        postAuthorId: post?.authorId ?? null,
+        postAuthorName: post?.author?.username ?? null,
+        myUserId: userId,
+        myUserName: username,
+        youLabel: t('thread.you'),
+        someoneLabel: t('thread.someoneElse'),
+      }),
+    [messages, post?.authorId, post?.author?.username, userId, username, t]
+  );
+
+  // TOOL_* 버블의 상속 귀속까지 합친 렌더용 최종 맵(동시 모드에서만 상속 — 단일
+  // 턴이면 TOOL 귀속 생략 → 회귀 0). seq-인접 직전 AGENT_REPLY에서 상속(근사).
+  const renderAttrMap = useMemo(() => {
+    if (!concurrent) return attrMap;
+    const m = new Map(attrMap);
+    for (const msg of messages) {
+      if (msg.type === 'TOOL_CALL' || msg.type === 'TOOL_RESULT') {
+        const inherited = attributeToolBubble(messages, msg.id, attrMap);
+        if (inherited) m.set(msg.id, inherited);
+      }
+    }
+    return m;
+  }, [messages, attrMap, concurrent]);
+
+  // 본인 답글 칩 → 대응 HUMAN 버블로 스크롤(양방향 앵커). reduced-motion 준수.
+  const scrollToMessage = useCallback((messageId: string) => {
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const el = document.querySelector(`[data-msg-id="${CSS.escape(messageId)}"]`);
+    el?.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
   }, []);
 
   // Auto-scroll to the newest bubble as messages/tokens arrive. The user's own
@@ -578,6 +631,17 @@ export default function Thread() {
             ⟳ {t('thread.reconnecting')}
           </span>
         )}
+        {/* FE-MULTI: 동시 활성 턴 배지 — ≥1 표시, ≥2 강조(term-amber). 정적 ◉ 글리프. */}
+        {activeTurns >= 1 && (
+          <span
+            role="status"
+            className={`inline-flex items-center gap-1 font-mono text-[11px] tracking-wider ${
+              activeTurns >= 2 ? 'text-term-amber' : 'text-term-dim'
+            }`}
+          >
+            ◉ {t('thread.activeTurnsBadge', { count: activeTurns })}
+          </span>
+        )}
         <button
           type="button"
           onClick={sessionActive ? handleStopSession : handleStartSession}
@@ -713,19 +777,35 @@ export default function Thread() {
                     {t('thread.empty')}
                   </p>
                 ) : (
-                  messages.map((m) => (
-                    <ChatBubble
-                      key={m.id}
-                      message={m}
-                      // Known author name only for the post author's own messages;
-                      // other participants' names aren't loaded in this M4 cut.
-                      authorName={
-                        m.type === 'HUMAN' && m.authorId === post.authorId
-                          ? post.author?.username
-                          : undefined
-                      }
-                    />
-                  ))
+                  <>
+                    {/* FE-MULTI: 동시 스트리밍 2턴+ 구분 띠(load-bearing, term-dim-2). */}
+                    {concurrent && (
+                      <div
+                        role="separator"
+                        className="my-1 px-2 text-center font-mono text-[11px] text-term-dim-2"
+                      >
+                        ── {t('thread.concurrentDivider', { count: activeTurns })} ──
+                      </div>
+                    )}
+                    {messages.map((m) => (
+                      // data-msg-id: 양방향 앵커 점프 대상(HUMAN 버블 포함).
+                      <div key={m.id} data-msg-id={m.id}>
+                        <ChatBubble
+                          message={m}
+                          // Known author name only for the post author's own messages;
+                          // other participants' names aren't loaded in this M4 cut.
+                          authorName={
+                            m.type === 'HUMAN' && m.authorId === post.authorId
+                              ? post.author?.username
+                              : undefined
+                          }
+                          attribution={renderAttrMap.get(m.id)}
+                          concurrent={concurrent}
+                          onAnchorJump={scrollToMessage}
+                        />
+                      </div>
+                    ))}
+                  </>
                 )}
               </div>
 

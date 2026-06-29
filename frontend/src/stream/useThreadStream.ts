@@ -74,6 +74,7 @@ export function useThreadStream(postId: string | undefined): UseThreadStreamResu
   const appendToken = useThreadStore((s) => s.appendToken);
   const setMessageStatus = useThreadStore((s) => s.setMessageStatus);
   const setSessionStatus = useThreadStore((s) => s.setSessionStatus);
+  const setActiveSessionTurns = useThreadStore((s) => s.setActiveSessionTurns);
   const setSandboxStatus = useThreadStore((s) => s.setSandboxStatus);
   const upsertToolCall = useThreadStore((s) => s.upsertToolCall);
   const appendToolOutput = useThreadStore((s) => s.appendToolOutput);
@@ -136,6 +137,8 @@ export function useThreadStream(postId: string | undefined): UseThreadStreamResu
     es.addEventListener('session.status', (ev) => {
       const p = safeParse<SessionStatusPayload>((ev as MessageEvent).data);
       if (p?.status) setSessionStatus(p.status);
+      // RT-MULTI(M8): 권위 활성 턴 수 소비(FE-MULTI). 레거시(미수신) → 미호출 → 0 유지.
+      if (typeof p?.activeTurns === 'number') setActiveSessionTurns(p.activeTurns);
     });
 
     es.addEventListener('sandbox.status', (ev) => {
@@ -192,6 +195,7 @@ export function useThreadStream(postId: string | undefined): UseThreadStreamResu
     appendToken,
     setMessageStatus,
     setSessionStatus,
+    setActiveSessionTurns,
     setSandboxStatus,
     upsertToolCall,
     appendToolOutput,

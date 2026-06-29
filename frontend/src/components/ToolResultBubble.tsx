@@ -11,12 +11,15 @@
 // letter-spacing, no key fields (result is stdout/stderr only).
 import { useT } from '../i18n/useT';
 import type { Message } from '../api/types';
+import type { AttributionEntry } from '../lib/threadSelectors';
 
 interface ToolResultBubbleProps {
   message: Message;
+  /** FE-MULTI: 소속 턴 귀속(동시 모드에서만 전달). 있을 때만 ↳@ 마이크로라벨. */
+  attribution?: AttributionEntry;
 }
 
-export default function ToolResultBubble({ message }: ToolResultBubbleProps) {
+export default function ToolResultBubble({ message, attribution }: ToolResultBubbleProps) {
   const t = useT();
   const tc = message.toolCall ?? null;
 
@@ -84,6 +87,9 @@ export default function ToolResultBubble({ message }: ToolResultBubbleProps) {
             failed ? 'border-term-red-line' : 'border-term-line'
           } ${badgeColor}`}
         >
+          {attribution && (
+            <span className="mr-2 text-term-faint">↳@{attribution.questionerName}</span>
+          )}
           {badge}
         </div>
       </div>

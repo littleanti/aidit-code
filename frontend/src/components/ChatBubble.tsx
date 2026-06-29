@@ -13,6 +13,7 @@ import { useT } from '../i18n/useT';
 import { useAuthStore } from '../stores/authStore';
 import { assetUrl } from '../api/rest';
 import type { Message } from '../api/types';
+import type { AttributionEntry } from '../lib/threadSelectors';
 import ToolCallBubble from './ToolCallBubble';
 import ToolResultBubble from './ToolResultBubble';
 
@@ -20,12 +21,24 @@ interface ChatBubbleProps {
   message: Message;
   /** Author display name for peer HUMAN bubbles (optional). */
   authorName?: string;
+  /** FE-MULTI: AGENT_REPLY / (상속) TOOL_* 버블의 귀속 정보. */
+  attribution?: AttributionEntry;
+  /** FE-MULTI: 2턴+ 동시 스트리밍 시 true(칩/라벨 위계 승격). */
+  concurrent?: boolean;
+  /** FE-MULTI: HUMAN 버블로 스크롤(본인 답글 앵커 점프). */
+  onAnchorJump?: (humanMessageId: string) => void;
 }
 
 // WIREFRAME self-bubble text color (literal from the design table; not a token class).
 const SELF_TEXT = '#c8ffe0';
 
-export default function ChatBubble({ message, authorName }: ChatBubbleProps) {
+export default function ChatBubble({
+  message,
+  authorName,
+  attribution,
+  concurrent,
+  onAnchorJump,
+}: ChatBubbleProps) {
   const t = useT();
   const currentUserId = useAuthStore((s) => s.userId);
 
@@ -55,18 +68,60 @@ export default function ChatBubble({ message, authorName }: ChatBubbleProps) {
   // ── AGENT_REPLY: left, amber tint, [AGENT] label, streaming cursor ─
   if (type === 'AGENT_REPLY') {
     const streaming = status === 'STREAMING' || status === 'PENDING';
+    const pendingEmpty = status === 'PENDING' && !body;
+    const attr = attribution;
+    // 귀속 라벨 노출 규칙: 동시(concurrent)면 항상, 단일 턴이면 isMine 일 때만
+    // (단일 턴 픽셀 동치 — 하위호환 안전).
+    const showLabel = !!attr && (concurrent || attr.isMine);
+    const labelText = attr ? `↳ @${attr.questionerName}` : '';
+    const canAnchor = !!attr?.anchorHumanId && !!onAnchorJump;
+    // 동시면 term-amber-line 박스 칩으로 위계 승격, 단일이면 term-dim 마이크로라벨.
+    const labelClass = `mb-1 inline-block font-mono text-[10px] ${
+      concurrent
+        ? 'rounded-[2px] border border-term-amber-line px-1.5 py-0.5 text-term-amber'
+        : 'text-term-dim'
+    }`;
+
+    const label = showLabel ? (
+      canAnchor ? (
+        <button
+          type="button"
+          onClick={() => onAnchorJump!(attr!.anchorHumanId!)}
+          aria-label={t('thread.replyToAnchorAria')}
+          className={labelClass}
+        >
+          {labelText}
+        </button>
+      ) : (
+        <div className={labelClass}>{labelText}</div>
+      )
+    ) : null;
+
     return (
       <div className="flex justify-start">
-        <div className="max-w-[78%]">
+        {/* 본인 질문 답글 → 좌보더 term-active 강조 */}
+        <div className={`max-w-[78%] ${attr?.isMine ? 'border-l-2 border-term-active pl-2' : ''}`}>
+          {label}
           <div className="mb-1 font-mono text-[10px] uppercase tracking-wider text-term-amber">
             ⚡ {t('thread.agentLabel')}
           </div>
           <div className="rounded-[3px] border border-term-amber-line bg-term-amber-bg px-3 py-2 font-mono text-sm leading-relaxed text-term-fg-bright">
-            <span className="whitespace-pre-wrap break-words">{body}</span>
-            {streaming && (
-              <span className="term-cursor ml-0.5 align-text-bottom" aria-hidden="true">
-                &nbsp;
+            {pendingEmpty ? (
+              <span className="text-term-dim">
+                ✦ {t('thread.writing')}{' '}
+                <span className="term-dots" aria-hidden="true">
+                  •••
+                </span>
               </span>
+            ) : (
+              <>
+                <span className="whitespace-pre-wrap break-words">{body}</span>
+                {streaming && (
+                  <span className="term-cursor ml-0.5 align-text-bottom" aria-hidden="true">
+                    &nbsp;
+                  </span>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -75,11 +130,14 @@ export default function ChatBubble({ message, authorName }: ChatBubbleProps) {
   }
 
   // ── TOOL_CALL / TOOL_RESULT: dedicated terminal bubbles (M5) ───
+  // 동시 모드에서만 귀속 마이크로라벨을 전달(단일 턴이면 생략 → 회귀 0).
   if (type === 'TOOL_CALL') {
-    return <ToolCallBubble message={message} />;
+    return <ToolCallBubble message={message} attribution={concurrent ? attribution : undefined} />;
   }
   if (type === 'TOOL_RESULT') {
-    return <ToolResultBubble message={message} />;
+    return (
+      <ToolResultBubble message={message} attribution={concurrent ? attribution : undefined} />
+    );
   }
 
   // ── HUMAN: self (right) vs peer (left) ─────────────────────────
