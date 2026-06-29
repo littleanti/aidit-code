@@ -103,7 +103,13 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
   });
   publishToPost(
     post.id,
-    makeSessionStatusEvent({ sessionId: session.id, status: 'RUNNING' }),
+    makeSessionStatusEvent({
+      sessionId: session.id,
+      status: 'RUNNING',
+      // RT-MULTI: 이 턴은 아직 runtime 에 등록 전(send 호출 전)이라 self 미포함 → +1 보정.
+      //   미구현 런타임은 0+1=1(레거시 RUNNING 동치). cap 초과로 곧 큐 대기하더라도 사용자엔 RUNNING≥1 표면.
+      activeTurns: (runtime.activeTurnCount?.({ sandboxId: session.sandboxId }) ?? 0) + 1,
+    }),
   );
 
   // ── 3) 스트리밍: 토큰 delta 누적 + agent.token publish ──
@@ -266,7 +272,13 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
     });
     publishToPost(
       post.id,
-      makeSessionStatusEvent({ sessionId: session.id, status: 'IDLE' }),
+      makeSessionStatusEvent({
+        sessionId: session.id,
+        status: 'IDLE',
+        // RT-MULTI: 이 턴은 pumpTurnLines 가 onDone 전에 de-count 했으므로 self 미포함(보정 없음).
+        //   stillBusy=false 게이트 안 → 잔여 활성 0 → activeTurns:0. 중간 IDLE 깜빡임은 게이트가 그대로 억제.
+        activeTurns: runtime.activeTurnCount?.({ sandboxId: session.sandboxId }) ?? 0,
+      }),
     );
   }
 }

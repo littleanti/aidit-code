@@ -95,6 +95,14 @@ export interface AgentRuntime {
    */
   isBusy?(session: Pick<AgentSession, 'sandboxId'>): boolean;
 
+  /**
+   * (선택) 해당 샌드박스의 통합 활성 턴 수(레거시 단일 activeTurn + concurrent activeTurns).
+   * RT-MULTI(M8): session.status 이벤트에 활성 턴 수를 표면화하기 위한 질의.
+   *   isBusy 와 의미 분리 — isBusy=활성+대기, activeTurnCount=활성만(대기 미포함).
+   *   미구현이면 호출부가 0 으로 폴백(레거시 동치 유지). 정수만 반환(키 무관).
+   */
+  activeTurnCount?(session: Pick<AgentSession, 'sandboxId'>): number;
+
   /** 프로세스를 내린다(디렉토리 보존). IDLE/RUNNING -> STOPPED. */
   suspend(session: Pick<AgentSession, 'id' | 'sandboxId'>): Promise<void>;
 

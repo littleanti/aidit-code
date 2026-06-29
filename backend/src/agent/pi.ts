@@ -681,6 +681,16 @@ class PiRuntime implements AgentRuntime {
     return h.activeTurn !== null || h.activeTurns.size > 0 || h.queue.length > 0 || h.concurrentQueue.length > 0;
   }
 
+  /**
+   * RT-MULTI: 통합 활성 턴 수 = (레거시 단일 activeTurn?1:0) + concurrent activeTurns.size.
+   *   대기(queue/concurrentQueue)는 세지 않는다(isBusy 와 의미 분리). 핸들 없으면 0.
+   *   레거시 단일 턴이면 0 또는 1 → 오늘의 IDLE/RUNNING 과 정확히 동치.
+   *   standalone export 와 단일 출처화(같은 식 중복 회피).
+   */
+  activeTurnCount(session: Pick<AgentSession, 'sandboxId'>): number {
+    return activeTurnCount(session.sandboxId);
+  }
+
   async suspend(session: Pick<AgentSession, 'id' | 'sandboxId'>): Promise<void> {
     const h = handles.get(session.sandboxId);
     if (!h) return; // 이미 내려갔거나 attach 만 한 클라이언트 — 멱등.
@@ -717,6 +727,16 @@ export function inflightTurns(sandboxId: string): number {
 /** 테스트/진단용: 해당 샌드박스의 cap/게이트 대기 중 concurrent 턴 수. */
 export function queuedConcurrent(sandboxId: string): number {
   return handles.get(sandboxId)?.concurrentQueue.length ?? 0;
+}
+/**
+ * 테스트/진단용 + RT-MULTI 카운트 단일 출처: 해당 샌드박스의 통합 활성 턴 수
+ *   = (레거시 단일 activeTurn?1:0) + concurrent activeTurns.size. 핸들 없으면 0.
+ *   inflightTurns 는 승격하지 않는다(xcCap.test 가 inflightTurns===activeTurns.size 전제) — 별도 export.
+ */
+export function activeTurnCount(sandboxId: string): number {
+  const h = handles.get(sandboxId);
+  if (!h) return 0;
+  return (h.activeTurn !== null ? 1 : 0) + h.activeTurns.size;
 }
 
 export const piRuntime = new PiRuntime();
