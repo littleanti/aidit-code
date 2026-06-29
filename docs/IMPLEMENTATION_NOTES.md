@@ -11,6 +11,22 @@
 
 ## Changelog
 
+### 2026-06-29 · [docs] · 완료 · v2(동시 병렬 협업 에이전트 — 병렬 추론 + 직렬 부수효과) 설계를 상위 문서에 반영
+- **요청(사용자)**: v0.1은 게시글당 단일 pi agent 세션에 N명이 attach하고 동시 질문을 "단일 활성 턴 + FIFO 큐"로 **직렬화**한다(직전 06-28 두 항목) → 내 질문이 남의 긴 턴 뒤로 pending되는 head-of-line blocking. 이 직렬 병목을 제거하되 단일 세션·단일 공유 컨텍스트·단일 샌드박스라는 협업 모델은 그대로 유지하는 v2 설계를 상위 문서(PRD/TRD/WIREFRAME/PLAN)에 반영해달라.
+- **결정(채택안 — 병렬 추론 + 직렬 부수효과)**:
+  1. 게시글당 여전히 **단일 에이전트 세션 / 단일 공유 컨텍스트(convo) / 단일 샌드박스 디렉토리**(per-user 프로세스 격리 아님 — 공유 협업 유지).
+  2. **추론(LLM completion 스트리밍)은 병렬**: N명의 메시지가 각자 독립 "턴"으로 동시 inflight → 각자 답이 남의 긴 작업과 무관하게 즉시 스트리밍(HOL blocking 제거).
+  3. **부수효과(파일 쓰기/도구 실행/컨텍스트 커밋)는 직렬**: 샌드박스 단위 단일 직렬 실행기(lock/queue) 통과 → 파일을 머지하지 않고 쓰기를 직렬화(파일 충돌·머지 불필요).
+  4. **공유 컨텍스트 보존**: 단일 convo 유지, 각 병렬 턴은 시작 시 스냅샷 읽기 + 완료 순 직렬 커밋(assistant.tool_calls ↔ role:tool 짝 정합 보존). 동시 발사 턴은 서로의 '그 순간' 입력을 못 볼 수 있음(staleness, 수용).
+  5. **1:1 귀속 유지**: 각 턴 = 한 사용자 메시지 = 자기 AGENT_REPLY(replyToId 1:1). 배칭하지 않음.
+- **결정(기각안)**: ① **per-user 프로세스 격리** — 공유 컨텍스트를 파괴하고 N프로세스가 같은 cwd에 lock 없이 써 파일안전 최악 + 프로세스 폭증/회수 부재로 기각. ② **입력 배칭(N→1턴)** — 귀속 붕괴·무관 요청 혼합·per-message reasoningEffort 소실·인터럽트 윈도우 레이스 4문제로 기각. → 병렬 추론 + 직렬 부수효과가 동시성·협업·파일안전·1:1 귀속을 모두 만족하는 유일 정합.
+- **결정(opt-in 게이트 — 추가)**: v2 병렬 동작은 **게시글 생성 시 체크박스로 명시적으로 켜야** 적용된다(기본 OFF = v0.1 직렬 동작 보존). `POST /posts`에 `concurrent:boolean`(기본 false)을 받아 `Sandbox.meta.concurrentTurns`로 저장하고 런타임(pi.ts/turn.ts)이 플래그로 분기한다. CreatePost에 라벨/짧은 설명/경고(실험적·끄면 순차·동시 요청 수만큼 LLM 비용↑·같은 파일 동시 수정 last-wins)를 **i18n 문자열**(`createPost.concurrent.{label,desc,warning}`, 하드코딩 금지)로 노출하고 term-amber/term-dim 토큰만 쓴다(새 색 없음). 모드는 **생성 시 1회 확정·변경 불가**(같은 샌드박스에서 직렬/병렬 혼재 방지). 반영: PRD §Δv2·§5.1·FR-3.6, TRD §Δv2·§3(Sandbox.meta)·§4(POST /posts)·§6.4, WIREFRAME §3(폼/토글)·§10, PLAN L6·M8(신규 WP **XC-MODE** 선행)·§5·임계경로.
+- **결정(1인 1활성턴) + 와이어프레임 디자인 리뷰(P1/P2/P3) 반영**: self-concurrency = 1 — 한 사용자는 동시에 자기 턴 1개만(병렬은 사용자 간에만; 동시 턴 ≤ 활성 사용자 수, 자연 상한). frontend-design 리뷰 반영 — **P1**(TOOL_CALL/TOOL_RESULT 버블에 소속 턴 `↳@질문자` 귀속·자기-동시성 정의·동시 턴 구분 띠를 '선택'→load-bearing 승격), **P2**(동시 인디케이터 `prefers-reduced-motion` 정지·고밀도 시 남의 진행 턴 접기·귀속 라벨 동시 2턴+ 시 위계 승격), **P3**(§6 잔여 단일-스트림 서술 v2 정정·opt-in 표시 라벨 사용자 언어화 "실시간 동시 협업"). 반영처: WIREFRAME §6·§6.1·§6.2·§3, 1인 1활성턴은 PRD §5.1·TRD §6.4·PLAN M8(XC-CAP)에도 명시.
+- **알려진 한계(정직히 명시)**: 동시 N턴 = N× 토큰 비용 / 멀티유저로 convo 캡에 빨리 도달(상향·요약 필요) / 같은 파일 동시 턴의 논리적 레이스(직렬 적용 last-wins, 필요 시 같은 파일 턴만 직렬 폴백) / detached 셸 라이터는 직렬화 밖(프로세스그룹 kill 등 별도 하드닝) / convo 스냅샷 staleness.
+- **반영 문서(이번 작업 범위 — 문서만)**: `docs/PRD.md`·`docs/TRD.md`·`docs/WIREFRAME.md`·`docs/PLAN.md` 각각 헤더 버전 라인을 `Version: 0.2 · v2(동시 병렬 협업 에이전트) · Date: 2026-06-29`로 갱신, 기존 'Δ from Aidit' 블록 바로 아래에 'Δ v2 — 동시 병렬 협업 에이전트(병렬 추론 + 직렬 부수효과)' 델타 블록 추가 + 관련 번호 섹션(§) 갱신, v0.1 모순 서술(단일 활성 턴/직렬 큐 전제)만 인라인 정정. 그린 인광 CRT term-* 디자인 시스템·i18n(KO/EN)·서버 .env 키 등 기존 불변식은 유지. (각 문서는 담당 에이전트가 병렬 편집.)
+- **코드 변경 없음(명시)**: 이번 항목은 **설계 문서 반영 전용**으로 소스 코드 변경은 아직 없다. piWorker.mjs 턴별 멀티플렉싱(currentTurn/toolAck/convo 턴별화·스트림별 AbortController·callId/turnId 라우팅), pi.ts `RuntimeHandle.activeTurn`→`Map<turnId,TurnSink>` + stdin `{type:'input',turnId,…}` 멀티플렉싱, 샌드박스 단위 직렬 lock, `MAX_CONCURRENT_TURNS` cap, 세션 상태 "활성 턴 카운트"화 등 구현은 후속 별도 [feat] 항목에서 GR-1 5단계로 진행한다. 따라서 본 항목의 검증은 문서 정합(버전 라인·델타 블록·모순 정정 반영 여부) 확인에 한정한다.
+- 변경 파일: `docs/PRD.md`, `docs/TRD.md`, `docs/WIREFRAME.md`, `docs/PLAN.md`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-28 · [fix] · 완료 · 동시 질문 큐 처리 중 세션 상태등이 중간에 IDLE 로 깜빡이는 문제
 - **요청(사용자)**: 직전 FIFO 큐 전환의 알려진 한계 — turn1 진행 중 turn2 가 큐 대기일 때 turn1 종료 시점에 `session.status` 가 잠깐 `IDLE` 로 보이는 현상을 별도로 수정.
 - **현황(원인)**: `agent/turn.ts` 의 각 `runAgentTurn` 이 독립적으로 step2 에서 세션 `RUNNING`, step5 에서 **무조건** `IDLE` 로 전이/publish 한다. 동시 2턴이면 먼저 끝난 turn1 의 step5 가 turn2 가 아직 처리/대기 중인데도 `IDLE` 를 쏴, 상태등이 깜빡인다(메시지별 PENDING→STREAMING→COMPLETE 는 정확).
