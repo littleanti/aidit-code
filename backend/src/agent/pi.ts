@@ -65,6 +65,12 @@ interface TurnSink {
    * concurrent=true 턴만 실제 turnId(`t{n}`)를 갖고 activeTurns Map 에 등록된다.
    */
   turnId: string | null;
+  /**
+   * XC-CAP: 이 활성 턴의 사용자 식별자(per-user 1활성턴 게이트 스캔용). null=게이트 면제
+   * (레거시 pumpQueue sink, 자동 인트로 턴). activeTurns 가 per-user 활성의 단일 진실원천 —
+   *  별도 Map 동기화 없이 sink.userId 스캔으로 판정한다.
+   */
+  userId: string | null;
 }
 
 /** worker 가 방출하는 도구 실행 의도(piWorker.mjs 의 {type:'tool', ...} 라인). */
@@ -109,6 +115,22 @@ interface QueuedTurn {
   reject: (err: Error) => void;
 }
 
+/**
+ * XC-CAP: cap/per-user 게이트에 막혀 대기 중인 concurrent 턴(레거시 QueuedTurn 과 완전 분리).
+ * turnId 는 enqueue 시점엔 없다 — 디스패치 시점에 부여(turnSeq 가 실제 디스패치 순서와 일치).
+ */
+interface ConcurrentQueuedTurn {
+  input: string;
+  lang: string;
+  onToken: (delta: string) => void;
+  onTool?: (intent: ToolIntent) => void;
+  options?: TurnOptions;
+  /** per-user 게이트 식별자. null=게이트 면제(인트로 턴/arMux 의 userId 미전달). */
+  userId: string | null;
+  resolve: () => void;
+  reject: (err: Error) => void;
+}
+
 /** in-memory 세션 레지스트리: sandboxId -> 활성 프로세스 핸들. */
 interface RuntimeHandle {
   child: ChildProcess;
@@ -131,6 +153,11 @@ interface RuntimeHandle {
   activeTurns: Map<string, TurnSink>;
   /** AR-MUX: turnId 생성용 핸들-단조 카운터(spawn 시 0). Date.now 금지(결정성) — 핸들 스코프 유일이면 충분. */
   turnSeq: number;
+  /**
+   * XC-CAP: cap·per-user 게이트로 즉시 디스패치 못 한 concurrent 턴 FIFO 대기열.
+   * 레거시 queue(QueuedTurn[])와 완전 분리 — 레거시 경로는 이 배열을 절대 건드리지 않는다(항상 빈 채).
+   */
+  concurrentQueue: ConcurrentQueuedTurn[];
 }
 
 /**
@@ -144,6 +171,7 @@ function pumpQueue(h: RuntimeHandle): void {
   if (!next) return; // 대기열 비어있음.
   const sink: TurnSink = {
     turnId: null, // 레거시 표식 — 워커에 turnId 미부착(SINGLE 경로), onTool 도 turnId undefined.
+    userId: null, // XC-CAP: 레거시 sink 는 게이트 면제(애초에 concurrent 큐/게이트 미진입).
     onToken: (delta) => next.onToken(delta),
     onTool: (intent) => next.onTool?.(intent),
     onDone: () => {
@@ -172,6 +200,71 @@ function pumpQueue(h: RuntimeHandle): void {
     h.activeTurn = null;
     next.reject(err instanceof Error ? err : new Error('failed to write input'));
     pumpQueue(h); // 쓰기 실패한 턴은 건너뛰고 다음을 시도.
+  }
+}
+
+/** XC-CAP: 한 샌드박스 동시 inflight concurrent 턴 상한(런타임 싱글톤 — 테스트는 env 로 제어). */
+function maxConcurrent(): number {
+  return config.maxConcurrentTurns;
+}
+
+/** XC-CAP: userId 의 활성 concurrent 턴이 하나라도 있으면 true. null userId 는 서로 막지 않는다. */
+function hasActiveUser(h: RuntimeHandle, userId: string | null): boolean {
+  if (userId == null) return false; // 게이트 면제 — null 끼리 매칭 금지(arMux 병렬 보존).
+  for (const s of h.activeTurns.values()) {
+    if (s.userId != null && s.userId === userId) return true;
+  }
+  return false;
+}
+
+/**
+ * XC-CAP: 큐에서 다음 자격 턴을 디스패치 가능한 만큼 꺼낸다(cap 여유 동안 반복).
+ * 공정성 = FIFO 스캔 + 활성사용자 스킵: 큐를 head→tail 로 보며 'userId 가 null 이거나 그 userId 의
+ *   활성 턴이 없는' 첫 항목을 splice → dispatch. 적격 후보가 없으면 break(전부 활성 사용자 대기).
+ * 한 사용자가 큐에 N건 쌓아도 per-user=1 로 1건만 활성 → 나머지는 스킵되어 다른 사용자가 슬롯 획득(기아 방지).
+ */
+function pumpConcurrent(h: RuntimeHandle): void {
+  while (h.activeTurns.size < maxConcurrent()) {
+    let idx = -1;
+    for (let i = 0; i < h.concurrentQueue.length; i++) {
+      const cand = h.concurrentQueue[i];
+      if (cand.userId == null || !hasActiveUser(h, cand.userId)) { idx = i; break; }
+    }
+    if (idx < 0) return; // 자격 후보 없음(모든 대기 항목의 사용자가 현재 활성) — 완료 시 재펌프.
+    const item = h.concurrentQueue.splice(idx, 1)[0];
+    dispatchConcurrent(h, item);
+  }
+}
+
+/**
+ * XC-CAP: 큐 항목 1건을 실제 inflight 로 전환한다. turnId 는 여기서(디스패치 시점) 부여 —
+ *   turnSeq 가 실제 디스패치 순서와 일치하고, interrupt(turnId) 가 stdin 에 나간 턴만 가리킨다.
+ */
+function dispatchConcurrent(h: RuntimeHandle, item: ConcurrentQueuedTurn): void {
+  const turnId = `t${++h.turnSeq}`;
+  const sink: TurnSink = {
+    turnId,
+    userId: item.userId,
+    onToken: (delta) => item.onToken(delta),
+    onTool: (intent) => item.onTool?.(intent),
+    // 완료/실패 시 Promise 마감 직후 pump 로 슬롯 회수(레거시 pumpQueue 대칭).
+    onDone: () => { item.resolve(); pumpConcurrent(h); },
+    onError: (message) => { item.reject(new Error(message)); pumpConcurrent(h); },
+  };
+  h.activeTurns.set(turnId, sink); // 진짜 inflight = activeTurns.size.
+  try {
+    const payload: {
+      type: 'input'; turnId: string; text: string; lang: string;
+      image?: TurnImage; reasoningEffort?: string;
+    } = { type: 'input', turnId, text: item.input, lang: item.lang };
+    if (item.options?.image) payload.image = item.options.image;
+    if (item.options?.reasoningEffort) payload.reasoningEffort = item.options.reasoningEffort;
+    h.child.stdin?.write(JSON.stringify(payload) + '\n');
+  } catch (err) {
+    // write 실패: 슬롯 회수 + reject + 다음 후보로 진행(무한루프 없음 — 항목은 이미 큐에서 splice).
+    h.activeTurns.delete(turnId);
+    item.reject(err instanceof Error ? err : new Error('failed to write input'));
+    pumpConcurrent(h);
   }
 }
 
@@ -363,6 +456,7 @@ class PiRuntime implements AgentRuntime {
           queue: [],
           activeTurns: new Map(), // AR-MUX: concurrent 턴 레지스트리(레거시에선 항상 비어있음).
           turnSeq: 0, // AR-MUX: turnId 단조 카운터.
+          concurrentQueue: [], // XC-CAP: cap/게이트 대기 concurrent 턴(레거시에선 항상 빈 채).
         };
         handles.set(sandbox.id, handle);
         // ready 라인 이후 같은 청크에 턴 데이터가 붙어왔을 수 있으니 잔여를 펌프로 넘긴다.
@@ -390,6 +484,9 @@ class PiRuntime implements AgentRuntime {
             h.activeTurns.clear();
             for (const s of live) s.onError('agent process exited');
             for (const q of pending) q.reject(new Error('agent process exited'));
+            // XC-CAP: 디스패치 안 된 concurrent 대기 턴도 일괄 reject(누락 시 Promise hang). 레거시 빈 배열 no-op.
+            const pendingC = h.concurrentQueue.splice(0);
+            for (const q of pendingC) q.reject(new Error('agent process exited'));
           }
         });
         resolve({ pid, sessionRef });
@@ -444,6 +541,12 @@ class PiRuntime implements AgentRuntime {
     onTool?: (intent: ToolIntent) => void,
     options?: TurnOptions,
     concurrent?: boolean,
+    /**
+     * XC-CAP(M8): per-user 1활성턴 게이트 식별자. null/미지정=게이트 면제(각 턴 독립).
+     * concurrent 경로에서만 사용 — 레거시 FIFO 분기는 이 인자를 읽지 않는다(무영향).
+     * 비밀 아님(서버 인증 식별자)이나 워커 payload/이벤트/stdout 으로는 절대 내보내지 않는다(메모리 게이트 판정만).
+     */
+    userId?: string | null,
   ): Promise<void> {
     const h = handles.get(session.sandboxId);
     if (!h) {
@@ -464,37 +567,19 @@ class PiRuntime implements AgentRuntime {
       });
     }
 
-    // ── concurrent 경로: turnId 부여 + 즉시 병렬 디스패치(큐 우회, FIFO 대기 없음). ──
-    //   같은 샌드박스의 N개 send 가 각자 turnId 로 워커에 동시 inflight → 토큰 인터리브(HOL 제거).
+    // ── concurrent 경로(XC-CAP): cap + per-user 게이트를 통과한 턴만 즉시 디스패치, 초과는 공정 큐. ──
+    //   send 는 항상 큐에 적재 후 pumpConcurrent — 여유가 있으면 같은 tick 에 디스패치(arMux 인터리브 보존),
+    //   cap 초과/같은 userId 활성이면 큐에서 대기(완료 시 pump 가 전진). turnId 는 디스패치 시점 부여.
     //   부수효과(도구)는 turn.ts 의 withSandboxLock 으로 여전히 직렬(XC-SERIAL) — 병렬은 추론/토큰만.
-    const turnId = `t${++h.turnSeq}`;
+    const uid = userId ?? null;
     return await new Promise<void>((resolve, reject) => {
-      const sink: TurnSink = {
-        turnId,
-        onToken: (delta) => onToken(delta),
-        onTool: (intent) => onTool?.(intent),
-        onDone: () => resolve(),
-        onError: (message) => reject(new Error(message)),
+      const item: ConcurrentQueuedTurn = {
+        input, lang, onToken, onTool, options,
+        userId: uid,
+        resolve, reject,
       };
-      h.activeTurns.set(turnId, sink); // 큐 우회 — FIFO 대기 없음.
-      try {
-        // payload 에 항상 turnId 포함(워커가 turns.get(turnId)로 등록 → 병렬 멀티플렉싱).
-        //   레거시 payload 빌더(pumpQueue)와 달리 turnId 키가 있다(바이트 비동일 = 의도된 분기).
-        const payload: {
-          type: 'input';
-          turnId: string;
-          text: string;
-          lang: string;
-          image?: TurnImage;
-          reasoningEffort?: string;
-        } = { type: 'input', turnId, text: input, lang };
-        if (options?.image) payload.image = options.image;
-        if (options?.reasoningEffort) payload.reasoningEffort = options.reasoningEffort;
-        h.child.stdin?.write(JSON.stringify(payload) + '\n');
-      } catch (err) {
-        h.activeTurns.delete(turnId);
-        reject(err instanceof Error ? err : new Error('failed to write input'));
-      }
+      h.concurrentQueue.push(item);
+      pumpConcurrent(h);
     });
   }
 
@@ -547,7 +632,10 @@ class PiRuntime implements AgentRuntime {
       // 그 턴 sink 해제 — Promise 마감은 turn.ts race 가 담당. 워커도 interrupted 턴의 stale
       //   done/error 를 억제하고, 부모도 activeTurns.get(turnId)=undefined 라 stale 라인을 드롭(이중 안전).
       h.activeTurns.delete(turnId);
-      // steer+concurrent 조합은 이번 WP 미지원(XC-CAP 이후) — turnId 인터럽트는 순수 취소만.
+      // XC-CAP: 아직 디스패치 안 된 큐 대기 항목이 이 turnId 일 가능성은 없으나(turnId 는 dispatch 시 부여),
+      //   취소로 빈 슬롯을 즉시 대기 턴에 넘긴다.
+      pumpConcurrent(h);
+      // steer+concurrent 조합은 이번 WP 미지원(후속) — turnId 인터럽트는 순수 취소만.
       return;
     }
 
@@ -588,7 +676,9 @@ class PiRuntime implements AgentRuntime {
     if (!h) return false;
     // AR-MUX: 두 자료구조 OR 합산. 레거시에선 activeTurns.size===0 이라 오늘과 동치
     //   (activeTurn!==null || queue.length>0). concurrent 에선 마지막 동시 턴까지 IDLE 억제.
-    return h.activeTurn !== null || h.activeTurns.size > 0 || h.queue.length > 0;
+    // XC-CAP: 대기 중(아직 디스패치 안 된) concurrent 턴도 busy 로 잡아 마지막 턴까지 IDLE 전이 억제.
+    //   레거시 영향 0(concurrentQueue 항상 빈 배열).
+    return h.activeTurn !== null || h.activeTurns.size > 0 || h.queue.length > 0 || h.concurrentQueue.length > 0;
   }
 
   async suspend(session: Pick<AgentSession, 'id' | 'sandboxId'>): Promise<void> {
@@ -603,6 +693,9 @@ class PiRuntime implements AgentRuntime {
     const live = [...h.activeTurns.values()];
     h.activeTurns.clear();
     for (const s of live) s.onError('agent runtime suspended');
+    // XC-CAP: concurrent 대기 턴 일괄 마감.
+    const pendingC = h.concurrentQueue.splice(0);
+    for (const q of pendingC) q.reject(new Error('agent runtime suspended'));
     try {
       h.child.kill('SIGTERM');
     } catch {
@@ -615,6 +708,15 @@ class PiRuntime implements AgentRuntime {
   getPid(sandboxId: string): number | null {
     return handles.get(sandboxId)?.pid ?? null;
   }
+}
+
+/** 테스트/진단용: 해당 샌드박스의 실제 inflight(activeTurns) concurrent 턴 수. */
+export function inflightTurns(sandboxId: string): number {
+  return handles.get(sandboxId)?.activeTurns.size ?? 0;
+}
+/** 테스트/진단용: 해당 샌드박스의 cap/게이트 대기 중 concurrent 턴 수. */
+export function queuedConcurrent(sandboxId: string): number {
+  return handles.get(sandboxId)?.concurrentQueue.length ?? 0;
 }
 
 export const piRuntime = new PiRuntime();

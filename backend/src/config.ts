@@ -64,6 +64,12 @@ export interface AppConfig {
   uploadDir: string;
   /** 동시 샌드박스 프로비저닝/활성 실행 상한(TRD §8 남용 방지). 초과 시 429. */
   sandboxMaxConcurrent: number;
+  /**
+   * 한 샌드박스에서 동시 inflight concurrent 턴 상한(M8 XC-CAP) — LLM 비용/부하 제어.
+   * per-user 게이트(1인1활성턴)의 자연 상한과 별개로 작동하는 절대 cap.
+   * sandboxMaxConcurrent(프로비저닝/활성 샌드박스 수 cap)와는 의미가 다르다.
+   */
+  maxConcurrentTurns: number;
   /** 쓰기 라우트 레이트리밋(M7 XC-RATE). */
   rateLimit: RateLimitConfig;
   /** 샌드박스 격리 하드닝(M7 XC-ISO). */
@@ -81,6 +87,9 @@ export const config: AppConfig = {
   sandboxRoot: process.env.SANDBOX_ROOT || defaultSandboxRoot,
   uploadDir: process.env.UPLOAD_DIR || defaultUploadDir,
   sandboxMaxConcurrent: Number(process.env.SANDBOX_MAX_CONCURRENT) || 4,
+  // M8 XC-CAP: 한 샌드박스 동시 inflight concurrent 턴 상한. `|| 4` 가 0/NaN/미설정을 4로 방어.
+  //   기본 4 ≥ 2 → arMux 동시 2턴 즉시 디스패치 양립.
+  maxConcurrentTurns: Number(process.env.MAX_CONCURRENT_TURNS) || 4,
   rateLimit: {
     // 테스트/스모크는 RATE_LIMIT_DISABLED=1 로 끈다(M1-M6 스위트 무영향). 기본 활성.
     disabled: process.env.RATE_LIMIT_DISABLED === '1',
@@ -114,6 +123,7 @@ export function redactConfig(cfg: AppConfig = config): Record<string, unknown> {
     sandboxRoot: cfg.sandboxRoot,
     uploadDir: cfg.uploadDir,
     sandboxMaxConcurrent: cfg.sandboxMaxConcurrent,
+    maxConcurrentTurns: cfg.maxConcurrentTurns,
     rateLimit: cfg.rateLimit,
     isolation: cfg.isolation,
     llm: {

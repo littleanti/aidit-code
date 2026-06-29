@@ -64,6 +64,12 @@ export interface AgentRuntime {
      * concurrent 여부는 호출부(turn.ts)가 sandbox.meta 의 concurrentTurns(getSandboxConcurrent)로 판정한다.
      */
     concurrent?: boolean,
+    /**
+     * XC-CAP(M8): per-user 1활성턴 게이트 식별자. null/미지정=게이트 면제(각 턴 독립).
+     * concurrent 경로에서만 사용(레거시 FIFO 무영향). 워커 payload/이벤트/stdout 으로 미전달 —
+     * 부모 메모리 게이트 판정 전용. 옵셔널 끝-인자이므로 기존 호출부(mock 포함) 무변경 컴파일.
+     */
+    userId?: string | null,
   ): Promise<void>;
 
   /**

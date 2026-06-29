@@ -20,6 +20,9 @@ export default defineConfig({
       //   동작은 limiter.test.ts 가 자체 ConcurrencyLimiter 인스턴스로 검증하므로(전역 limiter 무관),
       //   여기서 전역 cap 만 높여도 커버리지 손실이 없다(테스트 로직 불변).
       SANDBOX_MAX_CONCURRENT: '64',
+      // M8 XC-CAP: cap 을 결정적으로 알 수 있게 고정. arMux 동시 2턴 양립 위해 ≥2 — 3 으로 두면
+      //   arMux 2턴은 항상 즉시 디스패치(green 보존), xcCap 의 cap 오버플로는 서로 다른 4명으로 유발.
+      MAX_CONCURRENT_TURNS: '3',
     },
     // 실시간(SSE)·에이전트 스위트는 실제 소켓/자식 프로세스에 의존해 이벤트루프 타이밍에 민감하다.
     // 파일 수가 늘면서(M7) 과도한 병렬 fork 가 이벤트루프를 굶겨 간헐 타임아웃 실패를 유발했다.

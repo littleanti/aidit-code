@@ -217,6 +217,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
             lang,
             image: imageRef ? { absPath: imageRef.absPath, mime: imageRef.mime } : undefined,
             reasoningEffort, // Feature B: aiMode 면 medium 기본, 또는 사용자 선택값.
+            userId: authUser.userId, // XC-CAP: per-user 1활성턴 게이트 식별자.
           });
         }
       }

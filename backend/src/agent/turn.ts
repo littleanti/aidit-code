@@ -45,6 +45,8 @@ export interface RunAgentTurnArgs {
   image?: { absPath: string; mime: string };
   /** Feature B: per-message reasoning_effort('low'|'medium'|'high'). 값 있을 때만 전달. */
   reasoningEffort?: string;
+  /** XC-CAP(M8): per-user 1활성턴 게이트 식별자. 자동 인트로 턴(humanMessage 없음)은 미전달=null(게이트 면제). */
+  userId?: string | null;
 }
 
 /**
@@ -213,6 +215,7 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
       onTool,
       { image: args.image, reasoningEffort: args.reasoningEffort },
       concurrent,
+      args.userId ?? null, // XC-CAP: per-user 게이트 식별자(8번째 positional, concurrent 다음).
     );
     // worker 의 done 이후에도 마지막 도구 체인이 남아있을 수 있으니 마저 기다린다.
     await toolChain;
