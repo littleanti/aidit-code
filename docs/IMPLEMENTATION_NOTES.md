@@ -11,6 +11,14 @@
 
 ## Changelog
 
+### 2026-06-29 · [feat] · 완료 · M8 XC-SERIAL — 샌드박스 단위 부수효과 직렬 lock(seam)
+- **요청(사용자)**: XC-MODE에 이어 M8 두 번째 WP. AR-PAR 이후 여러 턴이 동시 inflight 되어도 **도구 실행(파일 쓰기/쉘/컨텍스트 커밋)은 샌드박스 단위로 한 번에 하나만** 진행되게 직렬 lock을 미리 깐다 → 동시 파일 쓰기 진입 0(충돌·머지 불필요, last-wins).
+- **범위(XC-SERIAL only)**: ① 신규 `agent/sandboxLock.ts` — sandboxId별 promise-chain 직렬 mutex `withSandboxLock(key, fn)`(키별 독립, 에러가 체인을 끊지 않음, 빈 키 정리). ② `agent/turn.ts` 의 도구 실행(`runToolIntent`)을 `withSandboxLock(session.sandboxId, …)` 으로 감싸 **턴 간에도** 직렬화(턴 내 직렬 toolChain 위에 샌드박스 lock 격상). ③ **동작 불변**: 현재는 단일 활성 턴이라 경합이 없어 no-op(실제 직렬화 효과는 AR-PAR 동시 턴 도입 시 발현).
+- **범위 밖(후속 WP)**: 워커/부모 턴 멀티플렉싱(AR-PAR/AR-MUX), 동시성 상한(XC-CAP), 세션 상태 다중턴(RT-MULTI), 다중 스트리밍 UI(FE-MULTI). 같은 파일 동시 턴 last-wins 정책/같은-파일-만-직렬 폴백도 후속.
+- **구현**: `agent/sandboxLock.ts`(신규) — `withSandboxLock(key, fn)` sandboxId별 promise-chain 직렬 mutex(키별 독립, reject 가 체인 안 끊음, 빈 키 정리, 진단용 `activeSandboxLockKeys`). `agent/turn.ts` — `onTool` 의 `runToolIntent` 호출을 `withSandboxLock(session.sandboxId, …)` 으로 감싸 턴 간 도구 실행 직렬화(턴 내 `toolChain` 위에 격상). 동작 불변(단일 활성 턴이라 경합 없음).
+- **검증(③) — 실측**: backend `tsc --noEmit` **클린(EXIT 0)**, vitest **26파일/100테스트 통과(EXIT 0)**(신규 `sandboxLock.test.ts` 4: 같은 키 직렬(겹침0)·다른 키 동시·reject 후 체인 유지·키 누수 0). 기존 96 통과 유지(turn.ts 변경은 동작 불변 — agentTurn/toolCall 스위트 그대로 통과).
+- 변경 파일: `backend/src/agent/sandboxLock.ts`(신규), `backend/src/agent/turn.ts`, `backend/test/sandboxLock.test.ts`(신규), `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-29 · [feat] · 완료 · M8 XC-MODE — 동시 병렬 협업 opt-in 게이트(기본 OFF) 배선
 - **요청(사용자)**: v2(병렬 추론 + 직렬 부수효과) 구현 착수. M8 첫 WP인 **XC-MODE**(opt-in 게이트)부터 — 기본 OFF로 깔아 기존 v0.1 직렬 동작을 보존하면서 이후 WP(XC-SERIAL/AR-PAR/AR-MUX/XC-CAP/RT-MULTI/FE-MULTI) 도입 토대를 만든다.
 - **범위(XC-MODE only)**: ① `POST /posts`가 `concurrent:boolean`(기본 false) 수용 → `Sandbox.meta`(JSON)에 `{ "concurrentTurns": <bool> }` 저장. ② 모드 읽기 헬퍼(`getSandboxConcurrent`, meta JSON 안전 파싱). ③ 런타임 분기 **seam**(주석 — 실제 병렬 경로는 AR-PAR에서; **이번엔 동작 불변, 항상 v0.1 직렬**). ④ CreatePost 체크박스 + i18n(ko/en) 라벨/설명/경고. 모드는 생성 시 1회 확정·변경 불가.

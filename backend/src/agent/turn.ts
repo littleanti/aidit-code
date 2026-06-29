@@ -19,6 +19,7 @@ import { prisma } from '../db.js';
 import { nextSeq } from '../domain/seq.js';
 import { getAgentRuntime } from './runtime.js';
 import { runToolIntent } from './toolBridge.js';
+import { withSandboxLock } from './sandboxLock.js';
 import { resolveSandboxDir } from '../sandbox/service.js';
 import { publishToPost } from '../realtime/publish.js';
 import {
@@ -171,9 +172,11 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
       };
       try {
         if (sandboxRoot) {
-          const outcome = await runToolIntent(
-            { postId: post.id, sessionId: session.id, sandboxRoot },
-            intent,
+          // XC-SERIAL(M8): 부수효과(파일 쓰기/쉘/도구 실행)를 샌드박스 단위 직렬 lock으로 감싼다.
+          //   턴 내 직렬(toolChain) 위에 '턴 간' 직렬을 격상 — AR-PAR 동시 턴에서도 동시 파일 쓰기 진입 0.
+          //   현재(단일 활성 턴)에는 경합이 없어 동작 불변(no-op).
+          const outcome = await withSandboxLock(session.sandboxId, () =>
+            runToolIntent({ postId: post.id, sessionId: session.id, sandboxRoot }, intent),
           );
           ack = { ok: outcome.ok, output: outcome.output, callId: intent.callId };
         }
