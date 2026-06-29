@@ -51,6 +51,9 @@ export interface RunAgentTurnArgs {
  * 예외는 내부에서 흡수해 AGENT_REPLY=FAILED + SYSTEM 버블로 표면화한다(throw 하지 않음).
  */
 export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
+  // v2 AR-PAR(미구현): 샌드박스 meta 의 concurrentTurns(getSandboxConcurrent)가 true 면 여기서
+  //   병렬 추론 경로(턴별 멀티플렉싱 + 부수효과 직렬 lock)로 분기 예정. 이번 WP(XC-MODE)는
+  //   플래그를 저장·노출만 하고 동작은 바꾸지 않는다 — 현재는 항상 v0.1 단일 활성 턴/FIFO 직렬 경로.
   const { post, session, lang } = args;
   // 사람 메시지가 있으면 그 본문을, 없으면 prompt 를 입력으로 쓴다(자동 인트로 턴).
   const input = args.humanMessage?.body ?? args.prompt ?? '';

@@ -25,16 +25,38 @@ import { makeSandboxStatusEvent, type SandboxStatusValue } from '../realtime/eve
 export const sandboxLimiter = new ConcurrencyLimiter(config.sandboxMaxConcurrent);
 
 /**
+ * createSandboxForPost 옵션(M8 XC-MODE).
+ *   - concurrentTurns: v2 동시 병렬 협업 모드 플래그(기본 false). 생성 시 1회 확정·변경 불가.
+ *     meta JSON `{ "concurrentTurns": <bool> }` 로 저장된다. meta 는 향후 다른 키도 가질 수 있어 객체로 둔다.
+ */
+export interface CreateSandboxOptions {
+  concurrentTurns?: boolean;
+}
+
+/**
  * 게시글에 1:1 샌드박스를 생성한다(행 + 격리 디렉토리, status=CREATING).
  * 경로는 resolveInsideRoot 로 계산되어 절대 sandboxRoot 를 벗어날 수 없다.
+ * @param postId 1:1 귀속 게시글 id.
+ * @param options XC-MODE 등 생성 시 1회 확정 메타(예: concurrentTurns).
  * @returns 생성된 Sandbox 행.
  */
-export async function createSandboxForPost(postId: string): Promise<Sandbox> {
+export async function createSandboxForPost(
+  postId: string,
+  options: CreateSandboxOptions = {},
+): Promise<Sandbox> {
   // postId 를 루트 상대 세그먼트로 해석. cuid 라 '..'/구분자 없지만 가드를 통해 경계를 강제한다.
   const sandboxPath = resolveInsideRoot(config.sandboxRoot, postId);
 
   // 격리 디렉토리 준비(존재 시 무해). recursive 로 루트까지 보장.
   await mkdir(sandboxPath, { recursive: true });
+
+  // XC-MODE: 모드 플래그를 meta JSON 객체로 직렬화(향후 다른 키 확장 가능).
+  //   concurrent 가 정확히 true 일 때만 true(그 외 false). 값이 없으면 meta 미설정(null) 유지.
+  const concurrentTurns = options.concurrentTurns === true;
+  const meta =
+    options.concurrentTurns === undefined
+      ? undefined
+      : JSON.stringify({ concurrentTurns });
 
   const sandbox = await prisma.sandbox.create({
     data: {
@@ -42,10 +64,30 @@ export async function createSandboxForPost(postId: string): Promise<Sandbox> {
       path: sandboxPath,
       status: 'CREATING',
       runtime: 'pi',
+      ...(meta !== undefined ? { meta } : {}),
     },
   });
 
   return sandbox;
+}
+
+/**
+ * 샌드박스 meta(JSON)에서 v2 동시 병렬 협업 모드 플래그를 안전하게 읽는다(M8 XC-MODE).
+ * meta 가 null/손상/형식 불일치면 false 로 폴백한다(throw 하지 않음).
+ * @returns concurrentTurns 불리언(없으면 false).
+ */
+export function getSandboxConcurrent(sandbox: { meta: string | null }): boolean {
+  if (!sandbox.meta) return false;
+  try {
+    const parsed = JSON.parse(sandbox.meta) as unknown;
+    if (parsed && typeof parsed === 'object' && 'concurrentTurns' in parsed) {
+      return (parsed as { concurrentTurns?: unknown }).concurrentTurns === true;
+    }
+    return false;
+  } catch {
+    // 손상된 meta JSON → 안전하게 직렬(false) 로 폴백.
+    return false;
+  }
 }
 
 /**

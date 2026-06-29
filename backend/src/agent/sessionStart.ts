@@ -163,6 +163,9 @@ async function runCriticalSection(input: StartOrAttachInput): Promise<StartOrAtt
     return { ok: false, reason: 'NOT_READY', sandboxStatus: sandbox.status };
   }
 
+  // v2 AR-PAR(미구현): 샌드박스 meta 의 concurrentTurns(getSandboxConcurrent)가 true 면 세션을
+  //   다중 활성 턴(턴별 멀티플렉싱)으로 시작하도록 분기 예정. XC-MODE 단계는 동작 불변 —
+  //   현재는 항상 단일 활성 턴/FIFO 직렬 경로로 spawn 한다.
   const rt = getLlmRuntimeConfig(); // 내부 전용 — 응답/로그/이벤트에 절대 미포함.
 
   // spawn(STARTING). 디렉토리는 이미 존재(resume 도 동일 경로). pi.ts spawn 은 멱등(live 면 재사용).

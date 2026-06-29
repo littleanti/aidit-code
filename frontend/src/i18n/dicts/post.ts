@@ -28,6 +28,12 @@ export const post = {
     publish: '[ 게시하기 ]',
     publishing: '[ 게시 중… ]',
     aiFirstReply: '게시 후 AI 1차 답변 받기 (답변 깊이)',
+    // XC-MODE(M8) — 동시 병렬 협업 opt-in 게이트(기본 OFF). 모드는 생성 시 1회 확정·변경 불가.
+    concurrentLabel: '실시간 동시 협업 (실험적)',
+    concurrentDesc:
+      '동시에 물어도 서로 안 기다리고 각자 답이 즉시 옵니다. 파일은 순차로 안전하게 적용됩니다.',
+    concurrentWarning:
+      '⚠ 끄면 순차 처리됩니다. 동시 요청 수만큼 LLM 비용이 늘고, 같은 파일을 동시에 고치면 마지막 쓰기가 이깁니다(last-wins).',
     loginToPost: '게시글을 작성하려면 로그인이 필요해요',
     // 편집 모드(CreatePost 재활용 — 부모 Aidit 패리티)
     editTitle: '게시글 수정',
@@ -65,6 +71,12 @@ export const post = {
     publish: '[ Publish ]',
     publishing: '[ Publishing… ]',
     aiFirstReply: 'Get first AI reply after posting (reply depth)',
+    // XC-MODE(M8) — concurrent collaboration opt-in gate (default OFF). Locked once at creation.
+    concurrentLabel: 'Real-time concurrent collaboration (experimental)',
+    concurrentDesc:
+      "Ask at the same time without waiting on each other — everyone's reply streams instantly. Files are applied sequentially and safely.",
+    concurrentWarning:
+      '⚠ When off, requests are processed sequentially. LLM cost grows with the number of concurrent requests, and editing the same file at once is last-wins.',
     loginToPost: 'Login is required to create a post',
     // Edit mode (CreatePost reuse — Aidit parity)
     editTitle: 'Edit post',

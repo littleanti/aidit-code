@@ -11,6 +11,16 @@
 
 ## Changelog
 
+### 2026-06-29 · [feat] · 완료 · M8 XC-MODE — 동시 병렬 협업 opt-in 게이트(기본 OFF) 배선
+- **요청(사용자)**: v2(병렬 추론 + 직렬 부수효과) 구현 착수. M8 첫 WP인 **XC-MODE**(opt-in 게이트)부터 — 기본 OFF로 깔아 기존 v0.1 직렬 동작을 보존하면서 이후 WP(XC-SERIAL/AR-PAR/AR-MUX/XC-CAP/RT-MULTI/FE-MULTI) 도입 토대를 만든다.
+- **범위(XC-MODE only)**: ① `POST /posts`가 `concurrent:boolean`(기본 false) 수용 → `Sandbox.meta`(JSON)에 `{ "concurrentTurns": <bool> }` 저장. ② 모드 읽기 헬퍼(`getSandboxConcurrent`, meta JSON 안전 파싱). ③ 런타임 분기 **seam**(주석 — 실제 병렬 경로는 AR-PAR에서; **이번엔 동작 불변, 항상 v0.1 직렬**). ④ CreatePost 체크박스 + i18n(ko/en) 라벨/설명/경고. 모드는 생성 시 1회 확정·변경 불가.
+- **범위 밖(후속 WP)**: 실제 병렬 추론(AR-PAR/AR-MUX 워커·부모 turnId 멀티플렉싱), 부수효과 직렬 lock(XC-SERIAL), 동시성 상한(XC-CAP), 세션 상태 다중턴(RT-MULTI), 다중 스트리밍 UI(FE-MULTI).
+- **계약(고정)**: `POST /posts` body `concurrent?: boolean`(기본 false); `Sandbox.meta` JSON `{ concurrentTurns: boolean }`; 응답 `sandbox`에 모드 노출(선택); 키는 어디에도 미노출(기존 불변식 유지).
+- **구현**: `routes/posts.ts`(body `concurrent` 파싱, `body.concurrent===true`만 true), `sandbox/service.ts`(`createSandboxForPost` 옵션 `{concurrentTurns}` → meta JSON 저장 + 읽기 헬퍼 `getSandboxConcurrent` 안전 파싱 export), `agent/turn.ts`·`agent/sessionStart.ts`(동작 불변 seam 주석만). 프론트: `pages/CreatePost.tsx`(controlled 체크박스 `useState(false)`→`createPost({concurrent})`, term-amber/term-dim·44px·focus-visible·aria-describedby), `i18n/dicts/post.ts`(ko/en `concurrentLabel/Desc/Warning`), `api/rest.ts`(`concurrent` body 전송).
+- **버그 발견·수정(브라우저/라이브 검증으로 포착)**: `sandbox/provision.ts`가 READY 전환 시 `Sandbox.meta`를 `{runtime,provisionedAt,policy}`로 **통째로 덮어써** `concurrentTurns`를 날렸다(생성 직후엔 저장되나 READY 후 항상 false). vitest E2E는 프로비저닝(비동기 fire-and-forget) **전** meta만 확인해 못 잡음. 수정: `provisionSandbox`가 호출부에서 받은 sandbox 행의 `meta`에서 `getSandboxConcurrent`로 플래그를 읽어 새 meta에 **머지·보존**(추가 DB 조회 없음 — 라우트가 넘긴 전체 행 사용). 회귀 가드 `test/provisionConcurrent.test.ts` 신설(provision 후 concurrentTurns 보존/false 유지).
+- **검증(③) — 실측**: backend `tsc --noEmit` **클린(EXIT 0)**, frontend `tsc --noEmit` **클린(EXIT 0)**, backend vitest **25파일/96테스트 통과(EXIT 0)**(신규 `xcMode.test.ts` 7 + `provisionConcurrent.test.ts` 2 포함). **라이브 end-to-end**(실행 중 서버): `POST /posts {concurrent:true, autoReply:false}` → 프로비저닝 후 `sandbox.status=READY`, `meta="{...,\"concurrentTurns\":true}"`(보존 확인). **브라우저 실측**: `/create`에서 신규 체크박스 렌더·i18n(ko)·term-* 스타일·기본 해제 확인(스크린샷). **동작 불변** 확인(런타임 분기 미작성, seam 주석만).
+- 변경 파일: `backend/src/routes/posts.ts`, `backend/src/sandbox/service.ts`, `backend/src/sandbox/provision.ts`, `backend/src/agent/turn.ts`, `backend/src/agent/sessionStart.ts`, `backend/test/xcMode.test.ts`(신규), `backend/test/provisionConcurrent.test.ts`(신규), `frontend/src/pages/CreatePost.tsx`, `frontend/src/api/rest.ts`, `frontend/src/i18n/dicts/post.ts`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-06-29 · [docs] · 완료 · v2(동시 병렬 협업 에이전트 — 병렬 추론 + 직렬 부수효과) 설계를 상위 문서에 반영
 - **요청(사용자)**: v0.1은 게시글당 단일 pi agent 세션에 N명이 attach하고 동시 질문을 "단일 활성 턴 + FIFO 큐"로 **직렬화**한다(직전 06-28 두 항목) → 내 질문이 남의 긴 턴 뒤로 pending되는 head-of-line blocking. 이 직렬 병목을 제거하되 단일 세션·단일 공유 컨텍스트·단일 샌드박스라는 협업 모델은 그대로 유지하는 v2 설계를 상위 문서(PRD/TRD/WIREFRAME/PLAN)에 반영해달라.
 - **결정(채택안 — 병렬 추론 + 직렬 부수효과)**:
