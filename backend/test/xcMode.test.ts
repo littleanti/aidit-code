@@ -91,8 +91,12 @@ describe('POST /posts — concurrent flag → Sandbox.meta (XC-MODE)', () => {
 
   it('concurrent:true → meta.concurrentTurns === true', async () => {
     const postId = await createPost({ concurrent: true });
+    // 생성 시 concurrentTurns:true 가 저장된다. 단, fire-and-forget provisionSandbox 가 READY 전환에서
+    //   meta 를 {runtime,provisionedAt,policy,concurrentTurns} 로 머지할 수 있어(타이밍 의존), 생성시점
+    //   '정확한 문자열'이 아니라 '플래그 보존'만 단정한다(머지 전/후 모두 성립). 머지 계약 자체는
+    //   provisionConcurrent.test.ts 가 별도 검증한다.
     const sandbox = await prisma.sandbox.findUnique({ where: { postId }, select: { meta: true } });
-    expect(sandbox!.meta).toBe(JSON.stringify({ concurrentTurns: true }));
+    expect(JSON.parse(sandbox!.meta!).concurrentTurns).toBe(true);
     expect(await metaConcurrent(postId)).toBe(true);
   });
 

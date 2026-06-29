@@ -13,6 +13,13 @@ export default defineConfig({
     //   config.ts 의 dotenv 는 이미 설정된 env 를 덮어쓰지 않으므로 여기서 1로 고정하면 항상 비활성.
     env: {
       RATE_LIMIT_DISABLED: '1',
+      // 기능 테스트가 프로비저닝 동시성 cap(sandboxLimiter)에 우발적으로 걸리지 않게 충분히 높인다.
+      //   M8 AR-PAR 의 동시성 테스트(piWorkerConcurrency, 워커 child spawn + busy polling)가 maxForks=2
+      //   병렬 실행에서 이벤트루프를 굶겨, 다른 fork 의 xcMode 가 fire-and-forget 프로비저닝 슬롯 반납을
+      //   기다리다 cap(기본 4)에 걸려 429 를 받는 cross-file 플레이크가 있었다. cap 자체의 오버플로
+      //   동작은 limiter.test.ts 가 자체 ConcurrencyLimiter 인스턴스로 검증하므로(전역 limiter 무관),
+      //   여기서 전역 cap 만 높여도 커버리지 손실이 없다(테스트 로직 불변).
+      SANDBOX_MAX_CONCURRENT: '64',
     },
     // 실시간(SSE)·에이전트 스위트는 실제 소켓/자식 프로세스에 의존해 이벤트루프 타이밍에 민감하다.
     // 파일 수가 늘면서(M7) 과도한 병렬 fork 가 이벤트루프를 굶겨 간헐 타임아웃 실패를 유발했다.
