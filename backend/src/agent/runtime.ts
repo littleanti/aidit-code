@@ -57,18 +57,29 @@ export interface AgentRuntime {
      * 미지정이면 텍스트-only/필드 생략(기존 동작 보존).
      */
     options?: TurnOptions,
+    /**
+     * AR-MUX(M8): 디스패치 모드. true 면 turnId 멀티플렉싱 병렬 경로(같은 샌드박스 N개 동시 inflight),
+     * false/미지정이면 FIFO 직렬(오늘과 100% 동일). '턴 옵션'이 아니라 '디스패치 정책'이므로
+     * options(index 5)와 분리한 7번째 인자다(reasoningEffort.test 의 callArgs[5] 보호 + 워커 payload 누출 차단).
+     * concurrent 여부는 호출부(turn.ts)가 sandbox.meta 의 concurrentTurns(getSandboxConcurrent)로 판정한다.
+     */
+    concurrent?: boolean,
   ): Promise<void>;
 
   /**
    * 직전 도구 의도 실행 완료를 런타임에 알려 다음 의도로 진행시킨다(M5). 선택 구현.
    * result 는 LLM function-calling 루프 되먹임용(ok/output) — 미지정도 허용(하위호환).
    */
-  ackTool?(session: Pick<AgentSession, 'sandboxId'>, result?: ToolAckResult): void;
+  ackTool?(session: Pick<AgentSession, 'sandboxId'>, result?: ToolAckResult, turnId?: string): void;
 
-  /** 현재 턴 인터럽트(옵션 steer 텍스트로 방향 전환). M4 에서 완성. */
+  /**
+   * 현재 턴 인터럽트(옵션 steer 텍스트로 방향 전환). M4 에서 완성.
+   * AR-MUX(M8): turnId 가 주어지면 그 concurrent 턴만 취소(다른 동시 턴 불간섭). 미지정이면 레거시 단일 턴.
+   */
   interrupt(
     session: Pick<AgentSession, 'id' | 'sandboxId'>,
     steer?: string,
+    turnId?: string,
   ): Promise<void>;
 
   /**

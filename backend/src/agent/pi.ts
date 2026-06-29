@@ -60,6 +60,11 @@ interface TurnSink {
   onTool: (intent: ToolIntent) => void;
   onDone: () => void;
   onError: (message: string) => void;
+  /**
+   * 이 sink 가 속한 turnId. 레거시(비-concurrent)=null → 워커/onTool 에 turnId 미부착(오늘과 바이트 동일).
+   * concurrent=true 턴만 실제 turnId(`t{n}`)를 갖고 activeTurns Map 에 등록된다.
+   */
+  turnId: string | null;
 }
 
 /** worker 가 방출하는 도구 실행 의도(piWorker.mjs 의 {type:'tool', ...} 라인). */
@@ -71,6 +76,12 @@ export interface ToolIntent {
   content?: string;
   /** OpenAI function-calling 의 tool_call id(있으면 worker 가 결과를 이 id 로 LLM 에 되먹임). */
   callId?: string;
+  /**
+   * AR-MUX: 이 도구 의도가 속한 턴의 turnId(concurrent 턴 라우팅용). 레거시(비-concurrent)=undefined.
+   * turn.ts 가 ackTool 에 이 값을 실어, 워커가 정확한 턴의 ackResolver 를 찾게 한다(forward-compat hang 봉합).
+   * turnId 는 비밀이 아니다(서버 생성 식별자) — 키/baseURL 과 무관.
+   */
+  turnId?: string;
 }
 
 /** 도구 실행 결과를 worker 로 되먹이는 ack 페이로드(LLM function-calling 루프용). */
@@ -105,10 +116,21 @@ interface RuntimeHandle {
   sessionRef: string;
   /** ready 이후 stdout 라인 파싱용 누적 버퍼. */
   stdoutBuf: string;
-  /** 현재 활성 턴의 sink(없으면 null — 턴 외 라인은 무시). */
+  /**
+   * 레거시(FIFO/비-concurrent) 전용 활성 턴 sink(없으면 null — 턴 외 라인은 무시).
+   * 의미·수명·제어흐름 100% 보존 — concurrent=false 경로는 오직 이 필드만 쓴다.
+   */
   activeTurn: TurnSink | null;
-  /** 진행 중 턴이 끝나길 기다리는 FIFO 대기열(선점 대신 순차 처리). */
+  /** 진행 중 턴이 끝나길 기다리는 FIFO 대기열(선점 대신 순차 처리). 레거시 전용. */
   queue: QueuedTurn[];
+  /**
+   * AR-MUX: concurrent=true 턴 전용 활성 턴 레지스트리. key=turnId.
+   * 같은 샌드박스의 N개 동시 턴이 각자 turnId 로 즉시 병렬 디스패치되어 여기 등록된다(HOL blocking 제거).
+   * 레거시 경로에선 항상 비어있어(no-op) 오늘 동작과 충돌하지 않는다.
+   */
+  activeTurns: Map<string, TurnSink>;
+  /** AR-MUX: turnId 생성용 핸들-단조 카운터(spawn 시 0). Date.now 금지(결정성) — 핸들 스코프 유일이면 충분. */
+  turnSeq: number;
 }
 
 /**
@@ -121,6 +143,7 @@ function pumpQueue(h: RuntimeHandle): void {
   const next = h.queue.shift();
   if (!next) return; // 대기열 비어있음.
   const sink: TurnSink = {
+    turnId: null, // 레거시 표식 — 워커에 turnId 미부착(SINGLE 경로), onTool 도 turnId undefined.
     onToken: (delta) => next.onToken(delta),
     onTool: (intent) => next.onTool?.(intent),
     onDone: () => {
@@ -186,14 +209,20 @@ function pumpTurnLines(handle: RuntimeHandle, chunk: string): void {
       relPath?: string;
       content?: string;
       callId?: string;
+      turnId?: string;
     };
     try {
       msg = JSON.parse(line);
     } catch {
       continue; // 비-JSON(예: 'ready' 잔여)은 무시.
     }
-    const sink = handle.activeTurn;
-    if (!sink) continue;
+    // AR-MUX 라우팅 분기: turnId 가 비어있지 않은 문자열이면 concurrent 경로(activeTurns Map),
+    //   아니면 레거시 경로(handle.activeTurn — 오늘 코드 그대로). 워커는 turn.id==null(레거시) 라인엔
+    //   turnId 를 애초에 echo 하지 않으므로 레거시 라인은 항상 hasTurnId=false → 단일 activeTurn.
+    //   ★ length>0 가드 필수: 빈 문자열 ''을 truthy 오판하면 activeTurns.get('') 미스로 토큰 유실(워커 keyOf 와 동일 기준).
+    const hasTurnId = typeof msg.turnId === 'string' && msg.turnId.length > 0;
+    const sink = hasTurnId ? handle.activeTurns.get(msg.turnId!) : handle.activeTurn;
+    if (!sink) continue; // 못 찾으면 무시(오늘 동작 보존 + 인터럽트 후 stale done 안전 드롭).
     if (msg.type === 'token') {
       sink.onToken(typeof msg.delta === 'string' ? msg.delta : '');
     } else if (msg.type === 'tool') {
@@ -204,12 +233,17 @@ function pumpTurnLines(handle: RuntimeHandle, chunk: string): void {
         relPath: typeof msg.relPath === 'string' ? msg.relPath : undefined,
         content: typeof msg.content === 'string' ? msg.content : undefined,
         callId: typeof msg.callId === 'string' ? msg.callId : undefined,
+        // 레거시 sink.turnId=null → undefined(ToolIntent 에 미포함, 오늘과 동일). concurrent 만 turnId 흐름.
+        turnId: sink.turnId ?? undefined,
       });
     } else if (msg.type === 'done') {
-      handle.activeTurn = null;
+      // 엔트리 삭제를 콜백 호출 '전에' — 재진입/이중정리 방지.
+      if (hasTurnId) handle.activeTurns.delete(msg.turnId!);
+      else handle.activeTurn = null; // 레거시 — 오늘 그대로.
       sink.onDone();
     } else if (msg.type === 'error') {
-      handle.activeTurn = null;
+      if (hasTurnId) handle.activeTurns.delete(msg.turnId!);
+      else handle.activeTurn = null; // 레거시 — 오늘 그대로.
       sink.onError(typeof msg.message === 'string' ? msg.message : 'agent turn failed');
     }
   }
@@ -327,6 +361,8 @@ class PiRuntime implements AgentRuntime {
           stdoutBuf: '',
           activeTurn: null,
           queue: [],
+          activeTurns: new Map(), // AR-MUX: concurrent 턴 레지스트리(레거시에선 항상 비어있음).
+          turnSeq: 0, // AR-MUX: turnId 단조 카운터.
         };
         handles.set(sandbox.id, handle);
         // ready 라인 이후 같은 청크에 턴 데이터가 붙어왔을 수 있으니 잔여를 펌프로 넘긴다.
@@ -349,6 +385,10 @@ class PiRuntime implements AgentRuntime {
               h.activeTurn = null;
               sink.onError('agent process exited');
             }
+            // AR-MUX: concurrent 동시 턴 일괄 마감(누락 시 동시 턴 Promise hang). 레거시에선 Map 비어 no-op.
+            const live = [...h.activeTurns.values()];
+            h.activeTurns.clear();
+            for (const s of live) s.onError('agent process exited');
             for (const q of pending) q.reject(new Error('agent process exited'));
           }
         });
@@ -403,19 +443,58 @@ class PiRuntime implements AgentRuntime {
     onToken: (delta: string) => void,
     onTool?: (intent: ToolIntent) => void,
     options?: TurnOptions,
+    concurrent?: boolean,
   ): Promise<void> {
     const h = handles.get(session.sandboxId);
     if (!h) {
       throw new Error('no active runtime process to send input to');
     }
 
-    // 같은 샌드박스의 동시 요청은 인터럽트(선점)하지 않고 FIFO 큐로 직렬화한다.
-    //   진행 중 턴이 있으면 대기열에 적재되고, 현재 턴이 done/error 로 끝나면 pumpQueue 가
-    //   다음 턴을 자동 시작한다. image 의 absPath 는 라우트(imageRef.resolveImageRef)가
-    //   업로드 디렉토리 내부로 검증한 경로다.
+    // AR-MUX: concurrent 는 '디스패치 모드'(턴 옵션 아님) — 7번째 인자로 분리해 options(index 5)를
+    //   보존한다(reasoningEffort.test 의 callArgs[5] 보호). 또한 concurrent 는 워커 payload 로 절대
+    //   보내지 않는다(워커는 turnId 유무로만 멀티플렉싱) — options 에 섞지 않는 이유.
+    if (concurrent !== true) {
+      // ── 레거시 경로(기본/미지정): 오늘과 100% 동일. FIFO 큐 직렬화, turnId 미부착. ──
+      //   진행 중 턴이 있으면 대기열에 적재되고, 현재 턴이 done/error 로 끝나면 pumpQueue 가
+      //   다음 턴을 자동 시작한다. image 의 absPath 는 라우트(imageRef.resolveImageRef)가
+      //   업로드 디렉토리 내부로 검증한 경로다.
+      return await new Promise<void>((resolve, reject) => {
+        h.queue.push({ input, lang, onToken, onTool, options, resolve, reject });
+        pumpQueue(h);
+      });
+    }
+
+    // ── concurrent 경로: turnId 부여 + 즉시 병렬 디스패치(큐 우회, FIFO 대기 없음). ──
+    //   같은 샌드박스의 N개 send 가 각자 turnId 로 워커에 동시 inflight → 토큰 인터리브(HOL 제거).
+    //   부수효과(도구)는 turn.ts 의 withSandboxLock 으로 여전히 직렬(XC-SERIAL) — 병렬은 추론/토큰만.
+    const turnId = `t${++h.turnSeq}`;
     return await new Promise<void>((resolve, reject) => {
-      h.queue.push({ input, lang, onToken, onTool, options, resolve, reject });
-      pumpQueue(h);
+      const sink: TurnSink = {
+        turnId,
+        onToken: (delta) => onToken(delta),
+        onTool: (intent) => onTool?.(intent),
+        onDone: () => resolve(),
+        onError: (message) => reject(new Error(message)),
+      };
+      h.activeTurns.set(turnId, sink); // 큐 우회 — FIFO 대기 없음.
+      try {
+        // payload 에 항상 turnId 포함(워커가 turns.get(turnId)로 등록 → 병렬 멀티플렉싱).
+        //   레거시 payload 빌더(pumpQueue)와 달리 turnId 키가 있다(바이트 비동일 = 의도된 분기).
+        const payload: {
+          type: 'input';
+          turnId: string;
+          text: string;
+          lang: string;
+          image?: TurnImage;
+          reasoningEffort?: string;
+        } = { type: 'input', turnId, text: input, lang };
+        if (options?.image) payload.image = options.image;
+        if (options?.reasoningEffort) payload.reasoningEffort = options.reasoningEffort;
+        h.child.stdin?.write(JSON.stringify(payload) + '\n');
+      } catch (err) {
+        h.activeTurns.delete(turnId);
+        reject(err instanceof Error ? err : new Error('failed to write input'));
+      }
     });
   }
 
@@ -424,12 +503,21 @@ class PiRuntime implements AgentRuntime {
    * worker 는 이 ack 를 받아 다음 도구 의도/토큰으로 진행한다(턴 직렬화).
    * 멱등: 활성 핸들이 없으면 no-op.
    */
-  ackTool(session: Pick<AgentSession, 'sandboxId'>, result?: ToolAckResult): void {
+  ackTool(session: Pick<AgentSession, 'sandboxId'>, result?: ToolAckResult, turnId?: string): void {
     const h = handles.get(session.sandboxId);
     if (!h) return;
     try {
       // result(ok/output/callId)는 LLM function-calling 루프 되먹임용. 키 없음(toolBridge 보장).
-      h.child.stdin?.write(JSON.stringify({ type: 'tool-done', result }) + '\n');
+      // AR-MUX: turnId 가 있으면 tool-done 에 실어 워커가 정확한 턴의 ackResolver 를 찾게 한다.
+      //   (없이 보내면 워커 keyOf=SINGLE 로 가, concurrent 턴의 resolver 를 못 찾아 영구 hang —
+      //    AR-PAR 리뷰가 짚은 forward-compat 갭의 본체.) turnId 는 비밀 아님(서버 생성 식별자).
+      //   레거시(turnId 미지정)는 {type,result} 그대로 → 워커 SINGLE → 오늘과 바이트 동일.
+      const m: { type: 'tool-done'; result?: ToolAckResult; turnId?: string } = {
+        type: 'tool-done',
+        result,
+      };
+      if (turnId) m.turnId = turnId;
+      h.child.stdin?.write(JSON.stringify(m) + '\n');
     } catch {
       /* noop — 이미 종료된 프로세스 */
     }
@@ -443,9 +531,27 @@ class PiRuntime implements AgentRuntime {
   async interrupt(
     session: Pick<AgentSession, 'id' | 'sandboxId'>,
     steer?: string,
+    turnId?: string,
   ): Promise<void> {
     const h = handles.get(session.sandboxId);
     if (!h) return; // 멱등.
+
+    // AR-MUX: turnId 가 주어지면 그 concurrent 턴만 취소(다른 동시 턴·activeTurn·queue 불간섭).
+    //   early-return 으로 레거시 블록(steer/queue splice)을 절대 건드리지 않는다.
+    if (turnId) {
+      try {
+        h.child.stdin?.write(JSON.stringify({ type: 'interrupt', turnId }) + '\n');
+      } catch {
+        /* noop */
+      }
+      // 그 턴 sink 해제 — Promise 마감은 turn.ts race 가 담당. 워커도 interrupted 턴의 stale
+      //   done/error 를 억제하고, 부모도 activeTurns.get(turnId)=undefined 라 stale 라인을 드롭(이중 안전).
+      h.activeTurns.delete(turnId);
+      // steer+concurrent 조합은 이번 WP 미지원(XC-CAP 이후) — turnId 인터럽트는 순수 취소만.
+      return;
+    }
+
+    // ── 레거시 경로(turnId 미지정): 오늘 코드 그대로. 손대지 않는다. ──
     try {
       h.child.stdin?.write(JSON.stringify({ type: 'interrupt' }) + '\n');
     } catch {
@@ -480,7 +586,9 @@ class PiRuntime implements AgentRuntime {
   isBusy(session: Pick<AgentSession, 'sandboxId'>): boolean {
     const h = handles.get(session.sandboxId);
     if (!h) return false;
-    return h.activeTurn !== null || h.queue.length > 0;
+    // AR-MUX: 두 자료구조 OR 합산. 레거시에선 activeTurns.size===0 이라 오늘과 동치
+    //   (activeTurn!==null || queue.length>0). concurrent 에선 마지막 동시 턴까지 IDLE 억제.
+    return h.activeTurn !== null || h.activeTurns.size > 0 || h.queue.length > 0;
   }
 
   async suspend(session: Pick<AgentSession, 'id' | 'sandboxId'>): Promise<void> {
@@ -491,6 +599,10 @@ class PiRuntime implements AgentRuntime {
     //   (handles 에서 먼저 제거했으므로 child 'exit' 핸들러는 이 큐를 보지 못한다.)
     const pending = h.queue.splice(0);
     for (const q of pending) q.reject(new Error('agent runtime suspended'));
+    // AR-MUX: concurrent 동시 턴도 일괄 마감(누락 시 Promise hang). 레거시 Map 비어 no-op.
+    const live = [...h.activeTurns.values()];
+    h.activeTurns.clear();
+    for (const s of live) s.onError('agent runtime suspended');
     try {
       h.child.kill('SIGTERM');
     } catch {
