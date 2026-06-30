@@ -37,6 +37,9 @@ export default function CreatePost() {
   // "게시 후 AI 1차 답변 받기"(기본 ON) + 자동 첫 턴의 작업 강도(reasoning effort, 기본 medium).
   const [firstAgent, setFirstAgent] = useState(true);
   const [effort, setEffort] = useState<ReasoningEffort>('medium');
+  // XC-MODE(M8) — 실시간 동시 협업 opt-in(기본 OFF). 켜면 이 글 Sandbox.meta 에 concurrentTurns=true 로
+  // 1회 확정 저장. 동작 불변: 런타임은 여전히 v0.1 직렬 경로(실제 병렬 분기는 후속 AR-PAR).
+  const [concurrent, setConcurrent] = useState(false);
 
   // 편집 진입 시 기존 글을 불러와 제목/본문을 prefill.
   useEffect(() => {
@@ -81,6 +84,7 @@ export default function CreatePost() {
         const { post } = await createPost(title.trim(), body, {
           autoReply: firstAgent,
           reasoningEffort: firstAgent ? effort : undefined,
+          concurrent,
         });
         navigate(`/posts/${post.id}`);
       }
@@ -202,6 +206,30 @@ export default function CreatePost() {
                 })}
               </div>
             )}
+
+            {/* XC-MODE(M8) — 실시간 동시 협업 opt-in(기본 OFF). 체크 활성 = term-amber, 설명/경고 = term-dim.
+                동작 불변: 플래그 저장/전송만; 실제 병렬 경로는 후속 AR-PAR. 새 글에만 노출(생성 시 1회 확정). */}
+            <div className="space-y-1.5 border-t border-term-border pt-2">
+              <label className="flex min-h-[44px] items-center gap-2 font-mono text-sm">
+                <input
+                  type="checkbox"
+                  checked={concurrent}
+                  onChange={(e) => setConcurrent(e.target.checked)}
+                  disabled={busy}
+                  aria-describedby="concurrent-desc concurrent-warning"
+                  className="h-4 w-4 rounded-[2px] accent-term-amber focus-visible:outline focus-visible:outline-2 focus-visible:outline-term-amber"
+                />
+                <span className={concurrent ? 'text-term-amber' : 'text-term-dim'}>
+                  {t('post.concurrentLabel')}
+                </span>
+              </label>
+              <p id="concurrent-desc" className="ml-6 font-mono text-xs leading-relaxed text-term-dim">
+                {t('post.concurrentDesc')}
+              </p>
+              <p id="concurrent-warning" className="ml-6 font-mono text-xs leading-relaxed text-term-dim">
+                {t('post.concurrentWarning')}
+              </p>
+            </div>
           </div>
         )}
 

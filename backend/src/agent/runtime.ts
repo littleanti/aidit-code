@@ -57,18 +57,35 @@ export interface AgentRuntime {
      * 미지정이면 텍스트-only/필드 생략(기존 동작 보존).
      */
     options?: TurnOptions,
+    /**
+     * AR-MUX(M8): 디스패치 모드. true 면 turnId 멀티플렉싱 병렬 경로(같은 샌드박스 N개 동시 inflight),
+     * false/미지정이면 FIFO 직렬(오늘과 100% 동일). '턴 옵션'이 아니라 '디스패치 정책'이므로
+     * options(index 5)와 분리한 7번째 인자다(reasoningEffort.test 의 callArgs[5] 보호 + 워커 payload 누출 차단).
+     * concurrent 여부는 호출부(turn.ts)가 sandbox.meta 의 concurrentTurns(getSandboxConcurrent)로 판정한다.
+     */
+    concurrent?: boolean,
+    /**
+     * XC-CAP(M8): per-user 1활성턴 게이트 식별자. null/미지정=게이트 면제(각 턴 독립).
+     * concurrent 경로에서만 사용(레거시 FIFO 무영향). 워커 payload/이벤트/stdout 으로 미전달 —
+     * 부모 메모리 게이트 판정 전용. 옵셔널 끝-인자이므로 기존 호출부(mock 포함) 무변경 컴파일.
+     */
+    userId?: string | null,
   ): Promise<void>;
 
   /**
    * 직전 도구 의도 실행 완료를 런타임에 알려 다음 의도로 진행시킨다(M5). 선택 구현.
    * result 는 LLM function-calling 루프 되먹임용(ok/output) — 미지정도 허용(하위호환).
    */
-  ackTool?(session: Pick<AgentSession, 'sandboxId'>, result?: ToolAckResult): void;
+  ackTool?(session: Pick<AgentSession, 'sandboxId'>, result?: ToolAckResult, turnId?: string): void;
 
-  /** 현재 턴 인터럽트(옵션 steer 텍스트로 방향 전환). M4 에서 완성. */
+  /**
+   * 현재 턴 인터럽트(옵션 steer 텍스트로 방향 전환). M4 에서 완성.
+   * AR-MUX(M8): turnId 가 주어지면 그 concurrent 턴만 취소(다른 동시 턴 불간섭). 미지정이면 레거시 단일 턴.
+   */
   interrupt(
     session: Pick<AgentSession, 'id' | 'sandboxId'>,
     steer?: string,
+    turnId?: string,
   ): Promise<void>;
 
   /**
@@ -77,6 +94,14 @@ export interface AgentRuntime {
    * 세션 IDLE 전이를 한 번만(중간 깜빡임 없이) 수행하기 위한 질의다. 미구현이면 false 로 본다.
    */
   isBusy?(session: Pick<AgentSession, 'sandboxId'>): boolean;
+
+  /**
+   * (선택) 해당 샌드박스의 통합 활성 턴 수(레거시 단일 activeTurn + concurrent activeTurns).
+   * RT-MULTI(M8): session.status 이벤트에 활성 턴 수를 표면화하기 위한 질의.
+   *   isBusy 와 의미 분리 — isBusy=활성+대기, activeTurnCount=활성만(대기 미포함).
+   *   미구현이면 호출부가 0 으로 폴백(레거시 동치 유지). 정수만 반환(키 무관).
+   */
+  activeTurnCount?(session: Pick<AgentSession, 'sandboxId'>): number;
 
   /** 프로세스를 내린다(디렉토리 보존). IDLE/RUNNING -> STOPPED. */
   suspend(session: Pick<AgentSession, 'id' | 'sandboxId'>): Promise<void>;

@@ -39,12 +39,17 @@ export type AgentSessionStatusValue =
 
 /**
  * 에이전트 세션 상태 변화 이벤트(TRD §7).
- * payload: { sessionId, status }. 키 필드 금지(apiKey/baseURL 등 절대 미포함).
+ * payload: { sessionId, status, activeTurns? }. 키 필드 금지(apiKey/baseURL 등 절대 미포함).
+ * RT-MULTI(M8): activeTurns 는 이 샌드박스의 통합 활성 턴 수(레거시 단일 + concurrent).
+ *   옵셔널 additive — 미전달 시 키 자체가 객체에 실리지 않는다(makeFileChangedEvent.size 패턴).
+ *   정수일 뿐 비밀이 아니다(키/시크릿/원문 아님) — redaction SENTINEL 스캔 안전.
  */
 export interface SessionStatusEvent {
   type: 'session.status';
   sessionId: string;
   status: AgentSessionStatusValue;
+  /** RT-MULTI: 통합 활성 턴 수(0=IDLE 동치, ≥1=RUNNING 동치). 미전달 시 키 생략. */
+  activeTurns?: number;
 }
 
 /** TRD §3 MessageType 와 1:1 (Prisma enum 과 동일 문자열). */
@@ -223,18 +228,19 @@ export function makeSandboxStatusEvent(args: {
 
 /**
  * session.status 이벤트 빌더(TRD §7).
- * sessionId + status 만 받음으로써 키 누출 가능성을 구조적으로 차단한다.
+ * sessionId + status (+ RT-MULTI activeTurns) 만 받음으로써 키 누출 가능성을 구조적으로 차단한다.
+ * RT-MULTI(M8): activeTurns 는 undefined 가 아닐 때만 객체에 실어 키 누락(=shape 불변)을 보장한다
+ *   (makeFileChangedEvent.size 조건부 할당 패턴과 1:1 동일). 정수만 받으므로 비밀 미노출.
  */
 export function makeSessionStatusEvent(args: {
   sessionId: string;
   status: AgentSessionStatusValue;
+  activeTurns?: number;
 }): SessionStatusEvent {
-  const { sessionId, status } = args;
-  return {
-    type: 'session.status',
-    sessionId,
-    status,
-  };
+  const { sessionId, status, activeTurns } = args;
+  const event: SessionStatusEvent = { type: 'session.status', sessionId, status };
+  if (activeTurns !== undefined) event.activeTurns = activeTurns;
+  return event;
 }
 
 /**

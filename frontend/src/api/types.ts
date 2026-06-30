@@ -222,6 +222,8 @@ export interface MessageUpdatedPayload {
 export interface SessionStatusPayload {
   sessionId: string;
   status: AgentSessionStatus;
+  /** RT-MULTI(M8): 통합 활성 턴 수. 소비는 FE-MULTI. 옵셔널 — 기존 코드 무영향. */
+  activeTurns?: number;
 }
 
 /** sandbox.status — sandbox lifecycle change. */

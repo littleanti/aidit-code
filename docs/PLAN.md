@@ -1,7 +1,7 @@
 # Aidit-Code — 구현 계획서 (PLAN.md)
 
 > 관련 문서: [PRD.md](./PRD.md), [TRD.md](./TRD.md), [WIREFRAME.md](./WIREFRAME.md), [IMPLEMENTATION_NOTES.md](./IMPLEMENTATION_NOTES.md)
-> 상태: PoC · 버전: 0.1 · 날짜: 2026-06-25
+> 상태: PoC · 버전: 0.2 · v2(동시 병렬 협업 에이전트) · 날짜: 2026-06-29
 > 본 계획서는 5개 영역 계획(Backend / Realtime / Frontend / AgentRuntime / Cross-cutting)을 종합한 것으로, Foundation(단일 출처)의 데이터 모델·API·이벤트·화면·라이프사이클에 엄격히 근거한다. Foundation과 본 계획서의 결정은 **구속력(binding)** 을 가진다.
 
 ---
@@ -25,13 +25,35 @@
 
 ---
 
+> ## Δ v2 — 동시 병렬 협업 에이전트(병렬 추론 + 직렬 부수효과)
+>
+> v0.1은 게시글당 단일 pi agent 세션에 N명이 attach(fan-out)하되, **동시 질문을 단일 활성 턴 + FIFO 큐로 직렬화**했다(`fix/agent-turn-serial-queue`). 그 결과 내 질문이 남의 긴 턴 뒤로 pending되는 **head-of-line(HOL) blocking**이 발생한다. v2는 이 직렬 병목만 제거하고, **단일 세션·단일 공유 컨텍스트(convo)·단일 샌드박스 디렉토리**라는 협업 모델은 **그대로 유지**한다.
+>
+> **핵심 결정(v2)**:
+> 1. 게시글당 여전히 **단일 에이전트 세션 / 단일 공유 convo / 단일 샌드박스**. per-user 프로세스 격리 아님(공유 협업 유지).
+> 2. **추론(LLM completion 스트리밍)은 병렬** — N명의 메시지가 각자 독립 "턴"으로 동시 inflight. 각 답이 남의 긴 작업과 무관하게 즉시 스트리밍(HOL blocking 제거).
+> 3. **부수효과(파일 쓰기/도구 실행/컨텍스트 커밋)는 직렬** — 샌드박스 단위 단일 직렬 실행기(lock/queue) 통과. 두 턴이 같은 파일을 써도 순차 적용 → 파일 충돌·머지 불필요(머지하지 않고 **쓰기를 직렬화**).
+> 4. **공유 컨텍스트 보존** — 단일 convo. 각 병렬 턴은 시작 시 convo 스냅샷을 읽고 완료 시 직렬 커밋(OpenAI `assistant.tool_calls` ↔ `role:tool` 짝 정합 보존). 동시 발사 턴은 서로의 '그 순간' 입력을 못 볼 수 있음(staleness, 수용).
+> 5. **1:1 귀속 유지** — 각 턴 = 한 사용자 메시지 = 자기 AGENT_REPLY(`replyToId` 1:1). **배칭하지 않음.**
+> 6. "결과 취합/머지"는 별도 로직이 아니라 transcript(seq 단조 Message)에서 자연 발생.
+>
+> **기각된 대안**: per-user 프로세스 격리(공유 컨텍스트 파괴 + N프로세스가 같은 cwd에 lock 없이 써 파일안전 최악 + 프로세스 폭증); 입력 배칭(N→1턴)(귀속 붕괴·무관요청 혼합·per-message reasoningEffort 소실·인터럽트 레이스). → **병렬 추론 + 직렬 부수효과**가 동시성·협업·파일안전·1:1 귀속을 모두 만족하는 유일 정합.
+>
+> **v2는 M1~M7 위의 증분**이다. 데이터 모델·API·이벤트·화면의 골격(M1~M7)은 그대로 두고, M3(런타임)·M4(턴/SSE)·M5(도구) 위에 멀티플렉싱·직렬 lock·동시성 상한·다중 스트리밍 UI를 **추가 마일스톤(M8)** 으로 얹는다. §2 L6은 v2로 갱신, §4에 M8 마일스톤 추가, §5에 v2 WP 추가, §8에 v2 리스크 추가.
+>
+> 계승(불변): 단일 세션·단일 convo·단일 샌드박스, term-* 디자인 토큰(새 색 0), i18n(KO/EN), 서버 `.env` 키, seq SoT, SSE fan-out.
+>
+> 알려진 한계(정직히): 동시 N턴 = N× 토큰 비용 / convo 캡이 멀티유저로 빨리 참(상향·요약 필요) / 같은 파일 동시 턴의 논리적 레이스(직렬 적용 last-wins, 필요 시 같은 파일 턴만 직렬 폴백) / detached 셸 라이터는 직렬화 밖(프로세스그룹 kill 등 별도 하드닝) / convo 스냅샷 staleness.
+
+---
+
 ## 1. 개요 (Introduction)
 
 Aidit-Code는 **게시글마다 백엔드 샌드박스에서 도는 코드 에이전트(pi agent)에 여러 사람이 함께 붙어, AI on/off로 채팅하며 협업 코딩하는 플랫폼**이다. 사용자가 글을 만들면 백엔드가 **샌드박스 디렉토리 하나를 생성해 그 게시글에 1:1로 할당**하고, 스레드에 진입하면 그 방은 **샌드박스에서 spawn된 pi agent 세션**이 된다. 모든 참여자는 같은 세션에 attach하며, 에이전트의 토큰·도구 호출·파일 변경은 **한 번 생성되어 전원에게 동일하게 SSE로 fan-out**된다.
 
 부모 Aidit과 가장 큰 차이는 **LLM/키 모델**이다. **BYOK를 전면 폐기**하고, LLM은 **OpenAI-compatible** 로 동작하며 `apikey`/`baseURL`은 **백엔드 서버의 `.env`** 에만 저장된다(클라이언트 미노출, 응답·로그에 키 미포함). 비용은 **서버(운영자 키)** 부담이며, 남용 방지는 글/메시지 레이트리밋 + 샌드박스 동시 실행 수 제한으로 한다. 컨텍스트 관리(히스토리·요약)는 부모의 클라이언트 128K 요약 엔진이 아니라 **pi agent 런타임의 책임**이다.
 
-본 문서는 작업을 **5개 영역**, **7개 마일스톤(M1→M7)** 으로 분해한다. 아키텍처는 **확정(locked)** 되어 있다: Node 20 + Fastify + Prisma 백엔드(메시지/이벤트 SoT + post별 SSE 릴레이 + **AgentRuntime 어댑터**); React 18 + TypeScript + Vite 모바일 우선 프론트엔드; pi agent 런타임 채택; 샌드박스는 **호스트 디렉토리 격리 + 경로 탈출 차단 + 리소스/네트워크 정책**; 컨테이너(Firecracker/gVisor/Docker) 강화는 Out of Scope(후속).
+본 문서는 작업을 **5개 영역**, **7개 마일스톤(M1→M7)** 으로 분해한다. **(v2)** 그 위에 동시 병렬 협업 에이전트 증분을 **M8(병렬 추론 + 직렬 부수효과)** 로 추가한다(§4 M8 참조). 아키텍처는 **확정(locked)** 되어 있다: Node 20 + Fastify + Prisma 백엔드(메시지/이벤트 SoT + post별 SSE 릴레이 + **AgentRuntime 어댑터**); React 18 + TypeScript + Vite 모바일 우선 프론트엔드; pi agent 런타임 채택; 샌드박스는 **호스트 디렉토리 격리 + 경로 탈출 차단 + 리소스/네트워크 정책**; 컨테이너(Firecracker/gVisor/Docker) 강화는 Out of Scope(후속).
 
 ---
 
@@ -44,7 +66,7 @@ Aidit-Code는 **게시글마다 백엔드 샌드박스에서 도는 코드 에�
 | L3 | **컨텍스트/요약은 pi agent 런타임의 책임.** 서버는 보관·요약하지 않는다. 부모 `contextEngine.ts`·`ContextSegment` 폐기. | Foundation keyDecisions | 서버는 메시지/이벤트의 SoT(seq)와 SSE 릴레이만. AR(AgentRuntime) 영역이 히스토리를 런타임에 위임. |
 | L4 | **`seq`가 메시지 순서·SSE 재생·멱등성의 단일 출처(SoT)**. post 내 단조 증가, 서버 부여, `@@unique([postId, seq])`. | Foundation prismaSchema(Message) | BE가 `seq` 부여; RT가 `afterSeq`/`Last-Event-ID`로 재생. |
 | L5 | **게시글당 Sandbox 1:1(@unique).** 글 생성 시 자동 프로비저닝(CREATING→READY 비동기). | Foundation prismaSchema(Sandbox); sandboxLifecycle §1 | BE-PROV가 디렉토리 생성·할당; sandbox.status SSE 통지. |
-| L6 | **채팅방 = 샌드박스에서 도는 pi agent 세션.** 다중 클라가 동일 세션 attach(fan-out); 에이전트 출력 1회 생성·전원 동일 중계. 샌드박스당 동시 활성 세션 1개 권장(PoC). | Foundation keyDecisions; sandboxLifecycle §2 | AR-ATTACH가 spawn/attach; RT가 토큰/툴/파일 이벤트 중계. |
+| L6 | **채팅방 = 샌드박스에서 도는 pi agent 세션.** 다중 클라가 동일 세션 attach(fan-out); 에이전트 출력 1회 생성·전원 동일 중계. **(v2)** 샌드박스당 **단일 세션·단일 공유 convo·단일 샌드박스를 유지하되, 동시 다중 턴(병렬 추론)을 허용**한다 — 부수효과(파일 쓰기/도구 실행/컨텍스트 커밋)는 **샌드박스 단위 직렬 lock**으로 순차화. (v0.1의 "동시 활성 세션 1개 권장 + 단일 활성 턴/FIFO 큐"는 v2에서 폐기 — 직렬 큐는 HOL blocking을 유발.) **(opt-in)** v2 병렬은 **글 생성 시 `concurrent` 체크박스로 켜야** 동작한다(기본 OFF = v0.1 직렬; `Sandbox.meta.concurrentTurns`, 생성 시 1회 확정·변경 불가). | Foundation keyDecisions; sandboxLifecycle §2; Δ v2 | AR-ATTACH가 spawn/attach; AR-PAR/AR-MUX가 턴 멀티플렉싱; XC-SERIAL이 부수효과 직렬화; RT가 토큰/툴/파일 이벤트 중계. |
 | L7 | **LLM은 OpenAI-compatible, 모델명은 단일 config/세션 필드.** 키는 `AgentSession.model`에 저장하지 않고 모델명만. | Foundation prismaSchema(AgentSession.model) | AR-CFG config 모듈; `GET /runtime`이 model·baseURL 호스트만 read-only 노출(키 미포함). |
 | L8 | **커뮤니티/페르소나 없음.** Community/Persona 모델·화면 전면 제거. 홈=게시글 피드. | Foundation keyDecisions; screens | 부모의 BE-4(커뮤니티)/FE-5·6(검색/생성)/PersonaEditor 작업 **삭제**. |
 | L9 | **모바일 우선, 터치 ≥44px, 그린 인광 CRT(term-*) 100% 계승.** | 공유 결정 브리프; DESIGN-SYSTEM v2 | FE-SHELL 레이아웃; 신규 컴포넌트도 기존 term-* 팔레트만 사용(새 색 없음). |
@@ -67,9 +89,9 @@ Aidit-Code는 **게시글마다 백엔드 샌드박스에서 도는 코드 에�
 
 ---
 
-## 4. 마일스톤 로드맵 (M1 → M7)
+## 4. 마일스톤 로드맵 (M1 → M7, +M8 v2)
 
-각 마일스톤은 순서 있는 작업 패키지, 목표, 종료 기준을 나열한다. 디렉터리 정규화(구속력): 백엔드는 `backend/` 아래, 프론트엔드/스토어/스트림은 `frontend/src/` 아래. AgentRuntime 어댑터는 `backend/src/agent/*`, 샌드박스 프로비저닝은 `backend/src/sandbox/*`, 실시간은 `backend/src/realtime/*`.
+각 마일스톤은 순서 있는 작업 패키지, 목표, 종료 기준을 나열한다. **(v2)** M1~M7은 단일 세션·단일 turn 직렬 협업 골격을 닫고, **M8**이 그 위에 동시 다중 턴(병렬 추론 + 직렬 부수효과)을 얹는다. 디렉터리 정규화(구속력): 백엔드는 `backend/` 아래, 프론트엔드/스토어/스트림은 `frontend/src/` 아래. AgentRuntime 어댑터는 `backend/src/agent/*`, 샌드박스 프로비저닝은 `backend/src/sandbox/*`, 실시간은 `backend/src/realtime/*`.
 
 ### M1 — 골격 (인증, 게시글, 홈 피드)
 PRD §M1 매핑. **부모 대비 제거**: 커뮤니티 생성/검색·페르소나 편집(L8), API 키 입력 폼·키 localStorage 저장(L1).
@@ -187,6 +209,21 @@ PRD §M7 매핑. NFR + 지표 + i18n + 라이선스.
 
 **M7 종료 기준**: 모든 PRD 수용 항목이 E2E로 통과; 격리(경로 탈출+리소스+네트워크) 강제; 레이트리밋·동시 실행 제한 동작; 키 redaction green; Profile 2탭 무한 스크롤; Settings에 API Key 섹션 없음·Language/로그아웃 동작; i18n KO↔EN 전환 + 에이전트 응답 언어 추종; 지표 엔드포인트 존재; LICENSE 존재; 통합 테스트 green.
 
+### M8 — 동시 병렬 협업 에이전트 (v2: 병렬 추론 + 직렬 부수효과)
+Δ v2 매핑. **M1~M7 위의 증분** — 데이터 모델·API 골격은 유지, 워커/부모 런타임/세션 상태/스레드 UI를 멀티플렉싱한다. 목표: v0.1의 단일 활성 턴 + FIFO 직렬 큐가 만든 **HOL blocking 제거** — 단일 세션·단일 convo·단일 샌드박스를 유지한 채 N명의 질문이 동시에 추론·스트리밍되고, 파일/도구 부수효과만 샌드박스 단위로 직렬화한다.
+
+| 순서 | WP | 제목 | 종료 관련 |
+|------|----|------|-----------|
+| 0 | XC-MODE | **opt-in 게이트(선행)**: `POST /posts`에 `concurrent:boolean`(기본 false) → `Sandbox.meta.concurrentTurns` 저장. 런타임(pi.ts/turn.ts)이 플래그로 분기 — false면 v0.1 단일 활성 턴/FIFO 직렬 경로 **그대로 보존**, true면 아래 병렬 경로. CreatePost에 체크박스 + 설명/경고(i18n, term-*) 신설. 모드 생성 시 1회 확정·변경 불가. | opt-in 게이트 선행 |
+| 1 | XC-SERIAL | 샌드박스 단위 부수효과 직렬 lock: 모든 도구 실행(toolBridge/toolExec, cwd=sandboxRoot)을 **턴 간에도** 단일 직렬 실행기로 순차화 → 동시 파일 쓰기 진입 0. (turn.ts 턴 내 toolChain을 넘어 샌드박스 lock으로 격상) | 파일안전 선행 |
+| 2 | AR-PAR | 워커(piWorker) 턴 멀티플렉싱: 전역 단일 상태 제거 — currentTurn·toolAck(단일 resolver)·convo(단일 mutable)를 **턴별**로. 스트림별 독립 AbortController, 도구 ack는 callId/turnId 라우팅(Map), convo는 스냅샷 읽기 + 완료 순 직렬 커밋. 새 입력이 이전 턴을 abort하던 동작 제거 | 병렬 추론 |
+| 3 | AR-MUX | 부모 런타임 turnId 라우팅: `RuntimeHandle.activeTurn`(단일 sink)을 `Map<turnId,TurnSink>`로; stdout 라인을 turnId로 디스패치(pumpTurnLines); send가 turnId 부여, stdin 프로토콜 `{type:'input',turnId,...}` 멀티플렉싱; ackTool/interrupt도 turnId 라우팅 | 턴 격리 중계 |
+| 4 | XC-CAP | 동시성 상한 + 공정 큐: 샌드박스당 동시 inflight 턴 수 cap(`MAX_CONCURRENT_TURNS`, LLM 비용/부하 제어), 초과분은 공정(라운드로빈) 큐. **1인 1활성턴(per-user inflight=1)**: 같은 사용자의 2번째 입력은 자기 턴 완료까지 대기 → 병렬은 사용자 간에만, 동시 턴 ≤ 활성 사용자 수(자연 상한) | 비용/부하 제어·자기 직렬 |
+| 5 | RT-MULTI | 세션 상태 다중 턴: 단일 IDLE/RUNNING → **활성 턴 카운트**(RUNNING = 활성 턴 ≥1, isBusy = 활성 턴 0?). `session.status` 이벤트에 활성 턴 수 표면화 | 상태 표면 |
+| 6 | FE-MULTI | 다중 스트리밍 + 귀속 UI: Thread에 **여러 AGENT_REPLY 동시 스트리밍**(다중 타이핑 인디케이터 공존), 각 답글의 `replyToId` 1:1 시각 연결(내 질문 답글 하이라이트/앵커), 세션 배지 "N개 작업 진행 중", Composer 게이팅을 단일 streaming → **'내 턴'** 기준으로 해제 | 동시 협업 UX |
+
+**M8 종료 기준**: 한 스레드에서 두 사용자가 거의 동시에 질문하면 **각 AGENT_REPLY가 서로의 긴 작업을 기다리지 않고 동시에 스트리밍**(HOL blocking 0); 각 답글이 자기 HUMAN 질문에 `replyToId` 1:1로 귀속(배칭 0); 두 턴이 같은 샌드박스에 파일을 써도 **직렬 lock으로 순차 적용**되어 동시 파일 쓰기 진입 0; convo는 단일 공유본 유지(OpenAI `tool_calls`↔`role:tool` 짝 정합 보존, 완료 순 커밋); 동시 inflight 턴이 cap을 넘으면 공정 큐로 대기; `session.status`가 활성 턴 수를 표면화; UI에 다중 "타이핑 중" 인디케이터가 공존하고 내 질문 답글이 하이라이트; term-* 팔레트만 사용(새 색 0). **알려진 한계 명시**: 동시 N턴 = N× 토큰, convo 캡 빨리 참, 같은 파일 동시 턴 last-wins, detached 셸 라이터 직렬화 밖, convo 스냅샷 staleness. **v2 경로는 `concurrent` 체크박스로 opt-in한 글에서만** 활성화되며(XC-MODE), opt-in 안 한 기본 글은 v0.1 직렬 동작이 그대로 보존됨을 함께 검증한다.
+
 ---
 
 ## 5. 상세 작업 패키지 (Detailed Work Packages)
@@ -233,6 +270,7 @@ PRD §M7 매핑. NFR + 지표 + i18n + 라이선스.
 | RT-FILEEV | 파일 이벤트 | `file.changed`(CREATED/MODIFIED/DELETED, size?) 발행. | RT-PS | `backend/src/realtime/events.ts` | S |
 | RT-SESSEV | 세션 이벤트 | `session.status`(STARTING/IDLE/RUNNING/INTERRUPTED/STOPPED/ERROR) 발행. | RT-PS | `backend/src/realtime/events.ts` | S |
 | RT-SBXEV | 샌드박스 이벤트 | `sandbox.status`(CREATING/READY/RUNNING/SUSPENDED/ERROR, lastActiveAt) 발행. | RT-PS | `backend/src/realtime/events.ts` | S |
+| **RT-MULTI** *(v2)* | 다중 턴 세션 상태 | 단일 IDLE/RUNNING → 활성 턴 카운트(RUNNING = 활성 턴 ≥1, isBusy = 활성 턴 0?). `session.status` 이벤트에 활성 턴 수 표면화. | RT-SESSEV, AR-MUX | `backend/src/realtime/events.ts`, `backend/src/routes/session.ts` | S |
 
 ### AgentRuntime (`backend/src/agent/*`)
 
@@ -243,6 +281,8 @@ PRD §M7 매핑. NFR + 지표 + i18n + 라이선스.
 | AR-PI | pi agent 바인딩 | pi agent 프로세스 spawn(키/baseURL/model·언어힌트 주입), PID 추적, attach/resume, 종료. 컨텍스트·요약은 런타임 책임(L3). | AR-RT | `backend/src/agent/pi.ts` | L |
 | AR-TURN | 에이전트 턴 | 입력 주입 → AGENT_REPLY PENDING 게시 → `agent.token` 누적(seq) → COMPLETE/FAILED. session=RUNNING. | AR-PI, BE-MSG, RT-EV | `backend/src/agent/turn.ts` | L |
 | AR-TOOL | 도구 이벤트 캡처 | 런타임이 보고한 쉘/파일/패키지 호출을 ToolCall(BE-TOOL) + TOOL_CALL/TOOL_RESULT 버블로 매핑, tool.* 발행. | AR-PI, BE-TOOL, RT-TOOLEV | `backend/src/agent/toolBridge.ts` | M |
+| **AR-PAR** *(v2)* | 워커 턴 멀티플렉싱 | piWorker 전역 단일 상태 제거: currentTurn·toolAck(단일 resolver, ~mjs:375)·convo(단일 mutable, ~mjs:170)를 턴별로. 스트림별 독립 AbortController, 도구 ack는 callId/turnId 라우팅(Map), convo는 스냅샷 읽기 + 완료 순 직렬 커밋. 새 입력이 이전 턴 abort하던 동작(~mjs:519-524) 제거. | AR-PI, XC-SERIAL | `backend/src/agent/piWorker.mjs` | L |
+| **AR-MUX** *(v2)* | 부모 turnId 라우팅 | `RuntimeHandle.activeTurn`(단일 sink, ~pi.ts:109)을 `Map<turnId,TurnSink>`로; pumpTurnLines(~pi.ts:195-214)가 stdout 라인의 turnId로 디스패치; send가 turnId 부여, stdin `{type:'input',turnId,...}` 멀티플렉싱; ackTool/interrupt도 turnId 라우팅. | AR-PI, AR-PAR | `backend/src/agent/pi.ts` | L |
 
 ### Frontend (`frontend/src/`)
 
@@ -265,12 +305,16 @@ PRD §M7 매핑. NFR + 지표 + i18n + 라이선스.
 | FE-PROFILE | Profile(/me) | 탭 [posts \| bookmarks], usePagedList 무한 스크롤, ⚙→/me/settings. | FE-API | `frontend/src/pages/Profile.tsx`, `frontend/src/hooks/usePagedList.ts` | M |
 | FE-SETTINGS | Settings | Language(LangToggle) + 로그아웃 + (선택) `GET /runtime` read-only. **API Key 섹션 삭제**. | FE-API, GET-RUNTIME | `frontend/src/pages/Settings.tsx` | S |
 | FE-STATES | 상태 | 빈/에러/오프라인, SSE 재접속 배너, 세션/샌드박스 ERROR 안내. | FE-HOME, FE-THREAD | `frontend/src/components/states/*` | S |
+| **FE-MULTI** *(v2)* | 다중 스트리밍 + 귀속 UI | 여러 AGENT_REPLY 동시 스트리밍(다중 타이핑 인디케이터 공존), `replyToId` 1:1 시각 연결(내 질문 답글 하이라이트/앵커), 세션 배지 "N개 작업 진행 중", Composer 게이팅을 단일 streaming→'내 턴' 기준으로 해제. term-* 팔레트만(새 색 0). | FE-THREAD, FE-BUBBLE, FE-STREAM, FE-COMPOSER, RT-MULTI | `frontend/src/components/ChatBubble.tsx`, `frontend/src/components/Composer.tsx`, `frontend/src/stores/threadStore.ts`, `frontend/src/components/StatusBadge.tsx` | M |
 
 ### Cross-cutting (`backend/` + `frontend/`)
 
 | id | 제목 | 설명 | deps | files | est |
 |----|------|------|------|-------|-----|
 | XC-ISO | 격리 강화 | 리소스 제한(프로세스/메모리/CPU, cgroup-lite) + 네트워크 정책. 컨테이너 강화 Out of Scope. | BE-SBX, AR-PI | `backend/src/sandbox/limits.ts` | M |
+| **XC-MODE** *(v2)* | 동시 병렬 opt-in 게이트 | `POST /posts` `concurrent:boolean`(기본 false) → `Sandbox.meta.concurrentTurns`; 런타임이 플래그로 분기(false=v0.1 직렬 경로 보존, true=병렬). CreatePost 체크박스 + 설명/경고(i18n, term-amber/term-dim). 생성 시 1회 확정·변경 불가. | BE-POST, BE-SBX | `backend/src/routes/posts.ts`, `backend/src/sandbox/*`, `frontend/src/pages/CreatePost.tsx`, `frontend/src/i18n/dicts/*` | S |
+| **XC-SERIAL** *(v2)* | 부수효과 직렬 lock | 샌드박스 단위 단일 직렬 실행기: 모든 도구 실행(toolBridge/toolExec, cwd=sandboxRoot)을 **턴 간에도** 순차화(turn.ts 턴 내 toolChain ~turn.ts:160을 샌드박스 lock으로 격상) → 동시 파일 쓰기 진입 0. 같은 파일 동시 턴은 last-wins, 필요 시 같은 파일 턴만 직렬 폴백. | BE-SBX, BE-ISO, AR-TOOL | `backend/src/agent/sandboxLock.ts`, `backend/src/agent/turn.ts` | M |
+| **XC-CAP** *(v2)* | 동시성 상한 + 공정 큐 | 샌드박스당 동시 inflight 턴 수 cap(`MAX_CONCURRENT_TURNS`) — LLM 비용/부하 제어; 초과분은 공정(라운드로빈) 큐. | AR-MUX, XC-RATE | `backend/src/agent/turnLimiter.ts` | S |
 | XC-RATE | 레이트리밋 | 글/메시지 레이트리밋 + 샌드박스 동시 실행 수 제한. | BE-AUTH, BE-POST, BE-MSG, BE-LIMIT | `backend/src/plugins/rateLimit.ts` | S |
 | XC-REDACT | 키 redaction | 서버 로그/응답에 LLM 키 형태 payload 0건 단언 + key-blind 체크리스트 + CI grep 게이트. | AR-CFG, BE 전체 | `backend/test/security/redaction.test.ts`, `docs/checklists/key-blind.md` | S |
 | I18N | 다국어 | langStore/dicts/useT/tn 계승, 신규 버블·패널·상태 문자열 키화, 에이전트 언어 힌트(systemInstruction), 서버 세션/에이전트 오류 사전(KO/EN). | FE-SHELL, AR-PI | `frontend/src/i18n/*`, `frontend/src/stores/langStore.ts` | M |
@@ -281,22 +325,24 @@ PRD §M7 매핑. NFR + 지표 + i18n + 라이선스.
 
 ## 6. 의존성 / 순서 노트 (Dependency / Sequencing Notes)
 
-**임계 경로(Critical path)**: BE-SCAF→BE-DB→BE-AUTH→BE-POST→BE-SBX→BE-PROV→AR-CFG→AR-RT→AR-PI→BE-SESS→BE-MSG→AR-TURN→RT-STREAM→BE-TOOL→AR-TOOL→XC-T.
+**임계 경로(Critical path)**: BE-SCAF→BE-DB→BE-AUTH→BE-POST→BE-SBX→BE-PROV→AR-CFG→AR-RT→AR-PI→BE-SESS→BE-MSG→AR-TURN→RT-STREAM→BE-TOOL→AR-TOOL→XC-T. **(v2 증분 경로)**: AR-TOOL→XC-SERIAL→AR-PAR→AR-MUX→XC-CAP→RT-MULTI→FE-MULTI.
 
 **순서 노트**:
 - **프로비저닝은 세션과 분리**: BE-PROV(M2, 폴더 생성)는 AgentRuntime에 의존하지 않는다 — Sandbox는 READY까지만 가고, 실제 pi agent spawn은 BE-SESS(M3)에서 일어난다. M2는 디렉토리·상태 표면까지만 닫는다.
 - **publish seam 선행**: RT-PS(M2)가 BE-MSG/AR-TURN보다 먼저 와야 BE 쓰기 경로가 stream 엔드포인트(RT-STREAM)에 결합되지 않는다. RT-STREAM(M4)이 BE-MSG 이벤트를 *소비*한다(역방향 아님).
 - **ToolCall ↔ Message 연결**: BE-TOOL(M5)은 BE-MSG(M4) 이후에 와야 `toolCallId` 1:1 연결이 성립. AR-TOOL은 AR-PI(M3) + BE-TOOL을 모두 소비.
 - **경로 격리 공용화**: BE-ISO(M2)를 파일 API(BE-FILES, M6)와 도구 실행(AR-TOOL, M5) 양쪽이 공유 — 격리 로직 단일 출처.
+- **(v2) 직렬 lock이 멀티플렉싱보다 먼저**: XC-SERIAL(M8)이 AR-PAR/AR-MUX보다 선행해야, 워커가 동시 다중 턴을 허용하는 순간 도구 실행이 무방비로 동시 진입하지 않는다(파일안전 선결). 순서: **XC-MODE → XC-SERIAL → AR-PAR → AR-MUX → XC-CAP → RT-MULTI → FE-MULTI**(XC-MODE 게이트가 가장 먼저 — 기본 OFF로 깔아두면 이후 WP를 점진 도입하는 동안에도 기본 글은 v0.1 직렬로 안전).
+- **(v2) M8은 M5 위**: AR-PAR/AR-MUX는 AR-PI(M3)·AR-TURN(M4)·AR-TOOL(M5)을 모두 전제한다 — 단일 턴 경로가 닫힌 뒤 멀티플렉싱으로 격상. FE-MULTI는 FE-THREAD/FE-STREAM/FE-COMPOSER(M4) 위에서 단일 streaming 가정만 '내 턴' 기준으로 해제.
 
 **영역 간 의존성**:
 - FE↔BE 인터페이스: 구현 전에 `api/types.ts`(세션/Post/Message/Sandbox DTO, **키 필드 없음**, Bearer 헤더, 메시지 `clientId`) early-freeze.
 - AR↔BE: BE-SESS/BE-MSG/AR-TURN 전에 `AgentRuntime` 인터페이스(AR-RT)와 LLM config(AR-CFG) 동결.
 - RT 이벤트 스키마(RT-EV/TOOLEV/FILEEV/SESSEV/SBXEV)는 FE-STREAM 전에 동결.
 
-**병렬 레인**: M1 FE(FE-SHELL..FE-CREATE)는 FE-API 계약 동결 후 BE(BE-SCAF..BE-VOTE)와 병렬. M5 도구 버블 FE는 RT-TOOLEV 도착 후 병렬.
+**병렬 레인**: M1 FE(FE-SHELL..FE-CREATE)는 FE-API 계약 동결 후 BE(BE-SCAF..BE-VOTE)와 병렬. M5 도구 버블 FE는 RT-TOOLEV 도착 후 병렬. **(v2)** FE-MULTI(M8 UI)는 turnId/replyToId·session.status 활성-턴 스키마(AR-MUX/RT-MULTI) 동결 후 백엔드 멀티플렉싱과 병렬.
 
-**Early-freeze 항목**: `api/types.ts` 계약; RT 이벤트 스키마; `AgentRuntime` 인터페이스(AR-RT); LLM config(AR-CFG); 경로 격리 계약(BE-ISO).
+**Early-freeze 항목**: `api/types.ts` 계약; RT 이벤트 스키마; `AgentRuntime` 인터페이스(AR-RT); LLM config(AR-CFG); 경로 격리 계약(BE-ISO). **(v2 추가)** turnId 멀티플렉싱 프로토콜(stdin `{type:'input',turnId,...}` / stdout 라인 turnId / ackTool·interrupt turnId 라우팅, AR-MUX); `replyToId` 1:1 귀속 계약; `session.status` 활성-턴 카운트 스키마(RT-MULTI); 샌드박스 직렬 lock 계약(XC-SERIAL).
 
 ---
 
@@ -315,6 +361,9 @@ PRD §M7 매핑. NFR + 지표 + i18n + 라이선스.
 | 샌드박스 격리(경로 탈출+리소스+네트워크) | BE-ISO, XC-ISO, L2 |
 | 동시 생성/실행 제한 | BE-LIMIT, XC-RATE |
 | 세션 attach/시작(다중 fan-out) | BE-SESS, AR-RT, AR-PI, L6 |
+| **(v2) 동시 다중 턴(병렬 추론, HOL blocking 제거)** | AR-PAR, AR-MUX, XC-CAP, L6, Δ v2 |
+| **(v2) 부수효과 직렬화(동시 파일 쓰기 진입 0)** | XC-SERIAL, AR-PAR(convo 직렬 커밋), BE-ISO |
+| **(v2) 1:1 귀속(replyToId, 배칭 0) + 다중 스트리밍 UI** | AR-TURN(replyToId), FE-MULTI, RT-MULTI |
 | 세션 suspend/resume | BE-SUSPEND, AR-PI, sandboxLifecycle §5–6 |
 | 인터럽트/스티어링 | BE-INT, AR-PI |
 | pi agent 런타임(OpenAI-compatible 주입) | AR-CFG, AR-RT, AR-PI, L7 |
@@ -360,14 +409,19 @@ PRD §M7 매핑. NFR + 지표 + i18n + 라이선스.
 13. **대용량 도구 출력/파일** → tool.output 스트리밍 + 파일 truncate(RT-TOOLEV, BE-FILECONTENT).
 14. **에이전트 응답 언어 불일치** → 런타임 언어 힌트(I18N, L13) — best-effort.
 15. **지표 데이터 희박(PoC)** → DB 산출 best-effort(BE-METRICS).
+16. **(v2) 동시 N턴 토큰 N배 비용** → 샌드박스당 동시 inflight 턴 cap + 공정 큐(XC-CAP); 글/메시지 레이트리밋(XC-RATE).
+17. **(v2) 동시 다중 턴의 파일/도구 레이스** → 샌드박스 단위 부수효과 직렬 lock(XC-SERIAL); 같은 파일 동시 턴은 직렬 적용 last-wins, 필요 시 같은 파일 턴만 직렬 폴백.
+18. **(v2) 공유 convo 정합/staleness** → 턴별 스냅샷 읽기 + 완료 순 직렬 커밋(OpenAI `tool_calls`↔`role:tool` 짝 정합 보존, AR-PAR); 동시 발사 턴의 staleness는 수용(문서화).
+19. **(v2) convo 캡이 멀티유저로 빨리 참** → convo 상향·요약 정책(런타임 책임, L3) — best-effort, 후속 하드닝.
+20. **(v2) detached 셸 라이터가 직렬 lock 밖** → 프로세스그룹 kill 등 별도 하드닝(연기, 명시적 한계).
 
 ### 미해결 질문 (비차단; 필요 시 기본값)
 1. pi agent 런타임 바인딩 형태(라이브러리 vs 프로세스 프로토콜) — AR-RT 인터페이스 뒤로 추상화, PoC는 프로세스 spawn 기본.
-2. 샌드박스당 동시 활성 세션 — PoC 1개 권장(L6), 다중은 후속.
+2. 샌드박스당 동시 활성 세션 — **여전히 단일 세션 유지**(공유 협업). **(v2 정정)** 단, 그 단일 세션 안에서 **동시 다중 턴(병렬 추론)을 허용**한다 — v0.1의 "동시 활성 세션 1개 권장"은 단일 세션 유지로 의미가 좁혀졌고, 동시성은 세션 격리가 아니라 턴 멀티플렉싱(AR-PAR/AR-MUX) + 부수효과 직렬 lock(XC-SERIAL)으로 달성한다.
 3. 리소스 제한 강도(cgroup-lite 한계) — PoC 보수적 기본값(XC-ISO).
 4. 네트워크 정책 범위(아웃바운드 허용 여부) — PoC 제한적 허용, 정책 연기.
 5. suspend 유휴 타이머 임계 — 보수적 기본값(BE-SUSPEND).
-6. 동시 attach 시 입력 직렬화(누가 턴을 시작?) — seq 순 직렬 처리, 진행 중엔 인터럽트 권장.
+6. 동시 attach 시 입력 처리(누가 턴을 시작?) — **(v2 정정)** v0.1의 "seq 순 단일 활성 턴 직렬 처리 + 진행 중 인터럽트 권장"은 HOL blocking을 유발하므로 **폐기**. v2는 **각 입력이 독립 턴으로 동시 inflight**(병렬 추론, 배칭 0); 부수효과만 샌드박스 직렬 lock으로 순차화. 인터럽트는 이제 '내 턴'에만 적용(turnId 라우팅, AR-MUX).
 7. ToolCall 결과 보존 크기 상한 — 소프트 캡 + truncate, 연기.
 8. 컨테이너(Firecracker/gVisor/Docker) 전환 시점 — Out of Scope, 다중 테넌트 시 재검토.
 9. SQLite→Postgres 전환 — 추상화만(L10), 단일 인스턴스 데모는 SQLite 유지.
@@ -406,3 +460,4 @@ PRD §M7 매핑. NFR + 지표 + i18n + 라이선스.
 - [~] **배포**: 정적 프론트 + Node 서버 + 샌드박스 호스트 구조 확립(로컬 실행·검증). SQLite→Postgres는 추상화만(L10). (실 배포 파이프라인 미구성)
 - [~] **라이선스**: MIT LICENSE 존재 — XC-LICENSE. (per-file 소스 헤더는 동시 레인 충돌 회피로 연기)
 - [x] **테스트**: 통합 스위트 unit/contract/integration green(52 vitest); E2E(글→샌드박스→세션→AI 턴→도구→파일)는 pi 모킹 스캐폴드 레인(XC-T `test/e2e.test.ts`).
+- [ ] **(v2) 동시 병렬 협업(M8)**: 두 사용자의 동시 질문이 각자 독립 턴으로 동시 스트리밍(HOL blocking 0) — AR-PAR/AR-MUX; 각 AGENT_REPLY가 자기 HUMAN에 `replyToId` 1:1 귀속(배칭 0); 같은 샌드박스 동시 턴의 부수효과 직렬 적용(동시 파일 쓰기 진입 0) — XC-SERIAL; convo 단일 공유본 정합 보존(`tool_calls`↔`role:tool`, 완료 순 커밋); 동시 inflight 턴 cap + 공정 큐 — XC-CAP; `session.status` 활성 턴 수 표면화 — RT-MULTI; UI 다중 타이핑 인디케이터 공존 + 내 답글 하이라이트(term-* 새 색 0) — FE-MULTI. **한계 명시**: N× 토큰 / convo 캡 / 같은 파일 last-wins / detached 셸 직렬화 밖 / convo staleness.

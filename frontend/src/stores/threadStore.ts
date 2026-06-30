@@ -33,6 +33,11 @@ interface ThreadState {
   activeSession: AgentSession | null;
   sandboxStatus: SandboxStatus | null;
 
+  /** RT-MULTI(M8): session.status가 싣는 권위 동시 활성 턴 수. FE-MULTI 소비. */
+  activeSessionTurns: number;
+  /** 권위 활성 턴 수 설정(없음/레거시 이벤트면 0). */
+  setActiveSessionTurns: (n: number) => void;
+
   /** Replace all state from an initial REST load (messages seq-ascending). */
   hydrate: (initial: {
     messages: Message[];
@@ -137,6 +142,7 @@ export const useThreadStore = create<ThreadState>((set) => ({
   byId: {},
   activeSession: null,
   sandboxStatus: null,
+  activeSessionTurns: 0,
 
   hydrate: ({ messages, session, sandboxStatus }) =>
     set(() => {
@@ -241,6 +247,8 @@ export const useThreadStore = create<ThreadState>((set) => ({
 
   setSandboxStatus: (status) => set({ sandboxStatus: status }),
 
+  setActiveSessionTurns: (n) => set({ activeSessionTurns: n }),
+
   upsertToolCall: ({ toolCallId, kind, name, args, startedAt }) =>
     set((state) => {
       const byId = patchToolCall(state.byId, toolCallId, {
@@ -287,5 +295,11 @@ export const useThreadStore = create<ThreadState>((set) => ({
     }),
 
   reset: () =>
-    set({ messages: [], byId: {}, activeSession: null, sandboxStatus: null }),
+    set({
+      messages: [],
+      byId: {},
+      activeSession: null,
+      sandboxStatus: null,
+      activeSessionTurns: 0,
+    }),
 }));

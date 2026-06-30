@@ -62,6 +62,14 @@ export const thread = {
     // 점프 칩(Aidit 동일) — 스크롤 방향 추종
     jumpTopAria: '맨 위로 이동',
     jumpBottomAria: '맨 아래로 이동',
+    // FE-MULTI(M8): 동시 다중 턴 — 귀속/배지/구분 띠/내턴 게이팅
+    you: '나',
+    someoneElse: '다른 참여자',
+    myTurnBusy: '내 답변 진행 중 — 끝나면 보낼 수 있어요',
+    activeTurnsBadge: '{count}개 작업 진행 중',
+    concurrentDivider: '동시 스트리밍 중 ({count}턴)',
+    writing: '작성 중',
+    replyToAnchorAria: '이 답변의 질문으로 이동',
   },
   en: {
     composerPlaceholder: 'Type a message…',
@@ -124,5 +132,13 @@ export const thread = {
     // Jump chip (Aidit parity) — follows scroll direction
     jumpTopAria: 'Scroll to top',
     jumpBottomAria: 'Scroll to bottom',
+    // FE-MULTI(M8): concurrent multi-turn — attribution / badge / divider / self-turn gating
+    you: 'you',
+    someoneElse: 'someone',
+    myTurnBusy: 'Your reply is in progress — you can send once it finishes',
+    activeTurnsBadge: '{count} task(s) running',
+    concurrentDivider: 'streaming concurrently ({count} turns)',
+    writing: 'Writing',
+    replyToAnchorAria: 'Jump to the question for this reply',
   },
 } as const;

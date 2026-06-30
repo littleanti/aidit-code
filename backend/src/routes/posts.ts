@@ -42,9 +42,13 @@ export async function postRoutes(app: FastifyInstance): Promise<void> {
       body?: unknown;
       autoReply?: unknown;
       reasoningEffort?: unknown;
+      concurrent?: unknown;
     };
     const title = typeof body.title === 'string' ? body.title.trim() : '';
     const text = typeof body.body === 'string' ? body.body : '';
+    // XC-MODE(M8): v2 동시 병렬 협업 opt-in 플래그. 정확히 true 일 때만 true(미지정/null/비-boolean → false).
+    //   생성 시 1회 확정되어 Sandbox.meta JSON({"concurrentTurns":<bool>})에 저장된다(변경 불가).
+    const concurrent = body.concurrent === true;
 
     if (!title) {
       return reply.code(400).send({ error: 'title is required' });
@@ -78,7 +82,8 @@ export async function postRoutes(app: FastifyInstance): Promise<void> {
         data: { authorId: authUser.userId, title, body: text },
       });
       // Sandbox 1:1 자동 생성(행 + 디렉토리, status=CREATING).
-      sandbox = await createSandboxForPost(post.id);
+      //   XC-MODE: 생성 시 1회 확정되는 동시 협업 모드 플래그를 meta 에 저장(기본 false).
+      sandbox = await createSandboxForPost(post.id, { concurrentTurns: concurrent });
     } catch (err) {
       // 행 생성 실패 시 선점한 슬롯을 반납해야 누수가 없다.
       sandboxLimiter.release();

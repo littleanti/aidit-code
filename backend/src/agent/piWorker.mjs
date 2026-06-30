@@ -166,8 +166,33 @@ function toolCallToIntent(name, a, callId) {
 /** function-calling 루프의 최대 단계(런어웨이 방지). 각 단계 = 1 completion(+도구 실행). */
 const MAX_AGENT_STEPS = Number(process.env.AGENT_MAX_STEPS) || 8;
 
-/** 세션 수명 동안 유지되는 대화 history(멀티턴 기억). system + user/assistant/tool. */
+// ── AR-PAR 턴 멀티플렉싱 자료구조 ───────────────────────────────────────────
+// 레거시(turnId 없는 input)용 sentinel 키. 단일 버킷 = 오늘의 단일 전역과 동형.
+//   turnId 없는 모든 input/interrupt/tool-done 은 keyOf 로 SINGLE 하나만 쓰므로
+//   turns Map 엔트리가 임의 시점 ≤1 → currentTurn/toolAck 단일 전역과 1:1 동형.
+const SINGLE = '__single__';
+
+// 턴 레지스트리: key = turnId(string) | SINGLE → TurnState.
+//   TurnState 형태(생성 시 모든 필드 초기화):
+//     { id, key, interrupted, controller, ackResolver, pendingCallId }
+//   - id           : string(turnId) | null   ← null 이면 레거시(emit 에 turnId 미부착)
+//   - key          : string(turnId) | SINGLE ← Map 키
+//   - interrupted  : boolean
+//   - controller   : AbortController | null  ← streamOneCompletion 이 매 completion 마다 교체
+//   - ackResolver  : (result)=>void | null   ← 부모 tool-done 대기(턴당 ≤1 inflight)
+//   - pendingCallId: string | null           ← 마지막 방출 도구 intent 의 callId(방어 매칭용)
+const turns = new Map();
+
+/**
+ * 세션 단일 공유 history(멀티턴 기억). system + user/assistant/tool.
+ *   PLAN M8 의도대로 convo 는 턴별화하지 않고 단일 유지한다. 동시 턴은 같은 history 를
+ *   공유하되 commit 시점만 직렬화(committing 체인)해 OpenAI tool_calls↔role:tool 짝 정합을 보존.
+ *   읽기 = 스냅샷(convo.slice()), 쓰기 = commitToConvo 직렬 커밋(아래).
+ */
 let convo = null;
+
+/** convo 직렬 커밋 임계영역 체인. commitToConvo 가 이 위에 push 를 직렬화한다. */
+let committing = Promise.resolve();
 
 /** convo 초기화(system 메시지 1회). 이후 turn 마다 user/assistant/tool 이 누적된다. */
 function ensureConvo(lang) {
@@ -175,12 +200,35 @@ function ensureConvo(lang) {
   return convo;
 }
 
-/** history 길이 캡(system 보존 + 최근 N). 컨텍스트 폭주 방지. */
+/**
+ * history 길이 캡(system 보존 + 최근 N). 컨텍스트 폭주 방지.
+ * 짝-가드: 멀티턴에서 slice 경계가 assistant.tool_calls 와 role:tool 사이를 가르면
+ *   OpenAI 정합이 깨진다. slice 시작이 role:tool 이면 그 묶음의 assistant 까지 back-off.
+ *   레거시(history<41)에서는 가드가 no-op — 동작 무변(회귀 없음, 더 보수적으로 자를 뿐).
+ */
 function capConvo() {
   const N = 40;
-  if (convo && convo.length > N + 1) {
-    convo = [convo[0], ...convo.slice(convo.length - N)];
-  }
+  if (!convo || convo.length <= N + 1) return;
+  let start = convo.length - N; // system(0) 다음부터 최근 N.
+  while (start > 1 && convo[start] && convo[start].role === 'tool') start--;
+  convo = [convo[0], ...convo.slice(start)];
+}
+
+/**
+ * convo 에 메시지 묶음을 직렬(완료 순) 커밋한다. messages 는 한 step 의 원자 단위:
+ *   [assistant(+tool_calls)] 또는 [assistant(+tool_calls), tool, tool, ...] 또는 [userMsg].
+ * committing 체인으로 직렬화 → 동시 턴이 짝(tool_calls↔role:tool)을 인터리브로 깨지 못한다.
+ * push 자체는 동기(중간 await 없음) → 두 턴의 커밋이 서로의 짝 사이에 끼어들 수 없다.
+ * 체인이 reject 로 고착되지 않도록 콜백은 throw 하지 않는다(push/capConvo 는 단순 동기 연산).
+ */
+function commitToConvo(turn, messages) {
+  committing = committing.then(() => {
+    try {
+      for (const m of messages) convo.push(m);
+      capConvo();
+    } catch { /* noop — 체인 고착 방지(키 누출 없는 빈 catch) */ }
+  });
+  return committing;
 }
 
 /**
@@ -194,7 +242,7 @@ function capConvo() {
  *   (NOTE) 이 필드는 reasoning 모델에서만 효과가 있다. 비-reasoning 모델은 무시/거부할 수 있으며,
  *   그것은 모델/설정 선택의 문제이지 버그가 아니다.
  */
-async function streamOneCompletion(turn, reasoningEffort) {
+async function streamOneCompletion(turn, reasoningEffort, snapshot) {
   const controller = new AbortController();
   turn.controller = controller;
   const timer = setTimeout(() => {
@@ -214,7 +262,7 @@ async function streamOneCompletion(turn, reasoningEffort) {
           'content-type': 'application/json',
           authorization: `Bearer ${LLM_API_KEY}`,
         },
-        body: JSON.stringify(buildCompletionBody(convo, LLM_MODEL, TOOLS, reasoningEffort)),
+        body: JSON.stringify(buildCompletionBody(snapshot, LLM_MODEL, TOOLS, reasoningEffort)),
         signal: controller.signal,
       });
     } catch {
@@ -256,7 +304,7 @@ async function streamOneCompletion(turn, reasoningEffort) {
         const choice = j?.choices?.[0];
         const delta = choice?.delta;
         if (typeof delta?.content === 'string' && delta.content.length > 0) {
-          if (!turn.interrupted) emit({ type: 'token', delta: delta.content });
+          if (!turn.interrupted) emit({ type: 'token', delta: delta.content }, turn);
           text += delta.content;
         }
         if (Array.isArray(delta?.tool_calls)) {
@@ -294,8 +342,9 @@ async function streamOneCompletion(turn, reasoningEffort) {
 async function runLlmAgent(prompt, lang, turn, opts = {}) {
   ensureConvo(lang);
   const content = await buildUserContent(prompt, opts.image, UPLOAD_DIR);
-  convo.push({ role: 'user', content });
-  capConvo();
+  // user 메시지 1개를 원자 커밋(직렬 임계영역 — 동시 턴의 짝을 깨지 않도록).
+  await commitToConvo(turn, [{ role: 'user', content }]);
+
   // 안전 게이트: 비-reasoning 모델(예: gpt-4o-mini)엔 reasoning_effort 를 싣지 않는다(400 회귀 방지).
   const reasoningEffort = reasoningEffortApplies(
     LLM_MODEL,
@@ -307,7 +356,9 @@ async function runLlmAgent(prompt, lang, turn, opts = {}) {
 
   for (let step = 0; step < MAX_AGENT_STEPS; step++) {
     if (turn.interrupted) return;
-    const { text, toolCalls } = await streamOneCompletion(turn, reasoningEffort);
+    // 읽기 전용 스냅샷(현재 커밋된 전체 뷰). 동시 턴이 없으면 오늘 본 convo 전역과 동일 내용.
+    const snapshot = convo.slice();
+    const { text, toolCalls } = await streamOneCompletion(turn, reasoningEffort, snapshot);
     if (turn.interrupted) return;
 
     const assistant = { role: 'assistant', content: text || '' };
@@ -318,33 +369,39 @@ async function runLlmAgent(prompt, lang, turn, opts = {}) {
         function: { name: tc.name, arguments: tc.arguments || '{}' },
       }));
     }
-    convo.push(assistant);
 
-    if (!toolCalls.length) { capConvo(); return; } // 텍스트 응답 — 턴 종료.
+    if (!toolCalls.length) {
+      // 텍스트 응답 — assistant 만 원자 커밋하고 턴 종료.
+      await commitToConvo(turn, [assistant]);
+      return;
+    }
 
-    // 도구 호출들을 순차 실행하고 결과를 tool 메시지로 history 에 넣는다(부모 ack 되먹임).
+    // 도구들을 순차 실행해 tool 메시지 배열을 만든 뒤, assistant + tool 들을 한 묶음으로 원자 커밋.
+    //   ★ 짝 정합 불변식: assistant(tool_calls 포함)와 대응 role:tool 들은 반드시 같은
+    //     commitToConvo 호출의 같은 배열로 함께 push 한다(쪼개면 동시 턴이 끼어 OpenAI 400).
+    const toolMsgs = [];
     for (const tc of toolCalls) {
       if (turn.interrupted) return;
       let argsObj = {};
       try { argsObj = JSON.parse(tc.arguments || '{}'); } catch { argsObj = {}; }
       const intent = toolCallToIntent(tc.name, argsObj, tc.id);
-      let content;
+      let toolContent;
       if (!intent) {
-        content = `error: unknown tool ${tc.name}`;
+        toolContent = `error: unknown tool ${tc.name}`;
       } else {
-        const ack = await emitToolAndWait(intent);
+        const ack = await emitToolAndWait(intent, turn);
         if (turn.interrupted) return;
-        content =
+        toolContent =
           ack && typeof ack.output === 'string' && ack.output.length
             ? ack.output
             : ack && ack.ok ? 'ok' : 'failed';
       }
-      convo.push({ role: 'tool', tool_call_id: tc.id, content: String(content) });
+      toolMsgs.push({ role: 'tool', tool_call_id: tc.id, content: String(toolContent) });
     }
-    capConvo();
+    await commitToConvo(turn, [assistant, ...toolMsgs]);
   }
   // 단계 상한 도달: 사용자가 빈 응답으로 남지 않도록 짧은 안내.
-  emit({ type: 'token', delta: '\n[reached tool step limit]' });
+  emit({ type: 'token', delta: '\n[reached tool step limit]' }, turn);
 }
 
 // IDLE 유지를 위한 keepalive 타이머(모든 종료 신호에서 정리됨).
@@ -352,7 +409,7 @@ const keepAlive = setInterval(() => {}, 1 << 30);
 
 function shutdown() {
   clearInterval(keepAlive);
-  if (currentTurn) currentTurn.interrupted = true;
+  for (const t of turns.values()) t.interrupted = true;
   // 깨끗한 종료. 추가 출력 없음(키 누출 방지).
   process.exit(0);
 }
@@ -360,19 +417,23 @@ function shutdown() {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
-/** stdout 에 JSON 한 줄을 기록. */
-function emit(obj) {
+/**
+ * stdout 에 JSON 한 줄을 기록. turn.id 가 있으면(멀티플렉싱) turnId 를 echo,
+ * 레거시(turn 없음 또는 turn.id == null)면 turnId 키를 객체에 절대 추가하지 않는다 → JSON 바이트 동일.
+ * 보안: 전달된 obj 와 turnId 만 직렬화한다(env/키 echo 금지).
+ */
+function emit(obj, turn) {
+  if (turn && turn.id != null) obj.turnId = turn.id;
   process.stdout.write(JSON.stringify(obj) + '\n');
 }
 
 /** 토큰을 한 청크 흘리는 사이의 지연(ms). 짧게 두어 테스트/PoC 를 빠르게. */
 const TOKEN_DELAY_MS = Number(process.env.AGENT_TOKEN_DELAY_MS) || 8;
 
-/** 현재 진행 중인 턴 핸들(인터럽트 플래그를 공유). */
-let currentTurn = null;
-
-/** 부모가 도구 실행을 마쳤다는 ack 를 기다리는 resolver(직렬화). */
-let toolAck = null;
+/** 메시지의 turnId(비어있지 않은 문자열일 때만) → 그 값, 아니면 레거시 SINGLE 키. */
+function keyOf(msg) {
+  return (typeof msg.turnId === 'string' && msg.turnId.length > 0) ? msg.turnId : SINGLE;
+}
 
 /** 한 줄을 도구 의도로 해석한다. 도구 라인이 아니면 null. */
 function parseToolLine(line) {
@@ -410,11 +471,16 @@ function demoIntents() {
   ];
 }
 
-/** 도구 의도를 방출하고 부모의 ack 를 기다린다(직렬화). */
-function emitToolAndWait(intent) {
+/**
+ * 도구 의도를 방출하고 부모의 ack 를 기다린다. resolver 는 전역이 아니라 해당 turn 에 둔다
+ *   (per-turn ack 라우팅). 한 턴은 도구를 순차 실행하므로 턴당 동시 대기 ack 는 항상 ≤1.
+ * pendingCallId 는 tool-done 의 방어적 callId 동치 확인용.
+ */
+function emitToolAndWait(intent, turn) {
   return new Promise((resolve) => {
-    toolAck = resolve;
-    emit(intent);
+    turn.ackResolver = resolve;
+    turn.pendingCallId = (intent && typeof intent.callId === 'string') ? intent.callId : null;
+    emit(intent, turn); // turn.id 있으면 turnId echo(+ intent.callId 이미 포함).
   });
 }
 
@@ -426,7 +492,7 @@ async function streamEchoReply(plain, lang, turn) {
   const chunks = reply.match(/\S+\s*/g) ?? [reply];
   for (const delta of chunks) {
     if (turn.interrupted) return;
-    emit({ type: 'token', delta });
+    emit({ type: 'token', delta }, turn);
     await new Promise((r) => setTimeout(r, TOKEN_DELAY_MS));
   }
 }
@@ -457,7 +523,7 @@ async function runTurn(text, lang, turn, opts = {}) {
   // 1) 도구 의도를 순차 실행(부모 ack 대기 — 출력/이벤트 직렬화).
   for (const intent of intents) {
     if (turn.interrupted) return;
-    await emitToolAndWait(intent);
+    await emitToolAndWait(intent, turn);
   }
 
   // 2) 평범한 텍스트가 있으면(또는 이미지가 첨부됐으면) 응답을 흘린다.
@@ -490,38 +556,68 @@ rl.on('line', (line) => {
   }
 
   if (msg.type === 'interrupt') {
-    if (currentTurn) {
-      currentTurn.interrupted = true;
+    // turnId 있으면 그 턴, 없으면 SINGLE(레거시). 다른 turnId 턴은 불간섭.
+    const turn = turns.get(keyOf(msg));
+    if (turn) {
+      turn.interrupted = true;
       // 진행 중 LLM 스트림 fetch 를 즉시 중단한다.
-      try { currentTurn.controller?.abort(); } catch { /* noop */ }
-    }
-    // 도구 ack 대기 중이었다면 풀어 턴이 깨끗이 마감되도록 한다.
-    if (toolAck) {
-      const r = toolAck;
-      toolAck = null;
-      r();
+      try { turn.controller?.abort(); } catch { /* noop */ }
+      // 도구 ack 대기 중이었다면 풀어 턴이 깨끗이 마감되도록 한다.
+      if (turn.ackResolver) {
+        const r = turn.ackResolver;
+        turn.ackResolver = null;
+        turn.pendingCallId = null;
+        r();
+      }
     }
     return;
   }
 
   if (msg.type === 'tool-done') {
-    // 부모가 직전 도구 실행을 마침 — 결과(ok/output)를 resolver 로 넘겨 LLM 루프가 되먹이게 한다.
-    if (toolAck) {
-      const r = toolAck;
-      toolAck = null;
+    // 부모가 직전 도구 실행을 마침 — 결과(ok/output)를 해당 턴의 resolver 로 넘겨 LLM 루프가 되먹이게 한다.
+    //   라우팅 우선순위: turnId(keyOf) → callId 방어 → no-op.
+    const turn = turns.get(keyOf(msg));
+    if (turn && turn.ackResolver) {
+      // 방어적 callId 동치: 양쪽에 callId 가 있고 서로 다르면 오배달 → 드롭(키 누출 없는 무처리).
+      const ackId = msg.result && typeof msg.result.callId === 'string' ? msg.result.callId : null;
+      if (ackId && turn.pendingCallId && ackId !== turn.pendingCallId) return;
+      const r = turn.ackResolver;
+      turn.ackResolver = null;
+      turn.pendingCallId = null;
       r(msg.result); // {ok, output, callId} | undefined(수동 !경로/하위호환)
     }
     return;
   }
 
   if (msg.type === 'input') {
-    // 이전 턴이 남아있다면 인터럽트 처리(직렬화).
-    if (currentTurn) {
-      currentTurn.interrupted = true;
-      try { currentTurn.controller?.abort(); } catch { /* noop */ }
+    const turnId = (typeof msg.turnId === 'string' && msg.turnId.length > 0) ? msg.turnId : undefined;
+    const key = turnId === undefined ? SINGLE : turnId;
+
+    // ── 선점 정책 ──
+    // 레거시(SINGLE): 새 input 이 이전 SINGLE 턴 선점(오늘 동작 보존).
+    // 멀티플렉싱: 같은 turnId 재입력만 그 턴 선점(steer). 새 turnId 는 다른 턴 불간섭.
+    const existing = turns.get(key);
+    if (existing) {
+      existing.interrupted = true;
+      try { existing.controller?.abort(); } catch { /* noop */ }
+      if (existing.ackResolver) {
+        const r = existing.ackResolver;
+        existing.ackResolver = null;
+        existing.pendingCallId = null;
+        r();
+      }
     }
-    const turn = { interrupted: false, controller: null };
-    currentTurn = turn;
+
+    const turn = {
+      id: turnId ?? null, // ★ 레거시는 null → emit 이 turnId 미부착.
+      key,
+      interrupted: false,
+      controller: null,
+      ackResolver: null,
+      pendingCallId: null,
+    };
+    turns.set(key, turn);
+
     // Feature A/B: image {absPath, mime}, reasoningEffort 를 이 턴 옵션으로 전달.
     const opts = {
       image:
@@ -532,17 +628,17 @@ rl.on('line', (line) => {
     };
     runTurn(msg.text, msg.lang, turn, opts)
       .then(() => {
+        // 자기 턴만 정리(같은 키로 새 턴이 이미 들어와 있으면 그 새 턴을 지우지 않음 — 누수 방지).
+        if (turns.get(key) === turn) turns.delete(key);
         // 인터럽트된 턴은 stale done 을 방출하지 않는다(부모가 다음 큐 턴을 조기 resolve 하는 레이스 방지).
-        const interrupted = turn.interrupted;
-        if (currentTurn === turn) currentTurn = null;
-        if (!interrupted) emit({ type: 'done' });
+        if (!turn.interrupted) emit({ type: 'done' }, turn);
       })
       .catch(() => {
-        const interrupted = turn.interrupted;
-        if (currentTurn === turn) currentTurn = null;
+        if (turns.get(key) === turn) turns.delete(key);
         // 인터럽트된 턴은 stale error 도 억제. 그 외에는 일반 메시지만 — 키/원문 미노출.
-        if (!interrupted) emit({ type: 'error', message: 'agent turn failed' });
+        if (!turn.interrupted) emit({ type: 'error', message: 'agent turn failed' }, turn);
       });
+    return;
   }
 });
 

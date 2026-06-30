@@ -8,9 +8,12 @@
 // command/path JSON only. Nothing here is translated except the kind chip label.
 import { useT } from '../i18n/useT';
 import type { Message, ToolKind } from '../api/types';
+import type { AttributionEntry } from '../lib/threadSelectors';
 
 interface ToolCallBubbleProps {
   message: Message;
+  /** FE-MULTI: 소속 턴 귀속(동시 모드에서만 전달). 있을 때만 ↳@ 마이크로라벨. */
+  attribution?: AttributionEntry;
 }
 
 /**
@@ -52,7 +55,7 @@ function commandSummary(name: string, kind: ToolKind, args: string): string {
   return argText ? `${name} ${argText}` : name;
 }
 
-export default function ToolCallBubble({ message }: ToolCallBubbleProps) {
+export default function ToolCallBubble({ message, attribution }: ToolCallBubbleProps) {
   const t = useT();
   const tc = message.toolCall ?? null;
 
@@ -66,6 +69,9 @@ export default function ToolCallBubble({ message }: ToolCallBubbleProps) {
   return (
     <div className="flex justify-start">
       <div className="w-full max-w-full overflow-x-auto px-1 py-1 font-mono text-xs leading-relaxed text-term-dim">
+        {attribution && (
+          <span className="mr-2 text-term-faint">↳@{attribution.questionerName}</span>
+        )}
         <span className="select-none text-term-faint" aria-hidden="true">
           ▌${' '}
         </span>

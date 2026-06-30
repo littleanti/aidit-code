@@ -172,11 +172,14 @@ export async function getPost(id: string): Promise<Post> {
  * opts(부모 Aidit 패리티, 동작은 Aidit-Code 매핑):
  *   - autoReply: "게시 후 AI 1차 답변 받기"(기본 ON). false 면 게시만 하고 자동 에이전트 턴 생략.
  *   - reasoningEffort: 자동 첫 턴의 작업 강도(낮음/중간/높음). autoReply ON 일 때만 의미.
+ *   - concurrent: XC-MODE(M8) opt-in 게이트. true 일 때만 이 글의 Sandbox.meta 에
+ *     concurrentTurns=true 로 저장된다(생성 시 1회 확정). 미지정/false 면 기존 v0.1 직렬 동작.
+ *     백엔드 계약 필드명 `concurrent` 과 정확히 일치(true 일 때만 true).
  */
 export function createPost(
   title: string,
   body: string,
-  opts?: { autoReply?: boolean; reasoningEffort?: ReasoningEffort }
+  opts?: { autoReply?: boolean; reasoningEffort?: ReasoningEffort; concurrent?: boolean }
 ): Promise<{ post: Post; sandbox: Sandbox }> {
   return request<{ post: Post; sandbox: Sandbox }>('/posts', {
     method: 'POST',
@@ -185,6 +188,7 @@ export function createPost(
       body,
       ...(opts?.autoReply !== undefined ? { autoReply: opts.autoReply } : {}),
       ...(opts?.reasoningEffort ? { reasoningEffort: opts.reasoningEffort } : {}),
+      ...(opts?.concurrent !== undefined ? { concurrent: opts.concurrent } : {}),
     },
   });
 }

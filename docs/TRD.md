@@ -1,6 +1,6 @@
 # Aidit-Code — Technical Requirements Document (TRD)
 
-> Companion to [PRD.md](./PRD.md). Status: PoC · Version: 0.1 · Date: 2026-06-25
+> Companion to [PRD.md](./PRD.md). Status: PoC · Version: 0.2 · v2(동시 병렬 협업 에이전트) · Date: 2026-06-29
 > 핵심 설계 원칙: **백엔드가 코드 에이전트를 호스팅한다.** 게시글마다 백엔드 샌드박스에서 도는 코드 에이전트(pi agent)에 여러 사람이 attach해, AI on/off로 채팅하며 협업 코딩한다. LLM 키는 **서버 `.env`** 에만 있고 클라이언트는 모른다. 서버는 메시지/이벤트의 SoT(순서·seq) + 스레드별 SSE 릴레이 + AgentRuntime 오케스트레이션을 담당한다.
 
 > #### Δ from Aidit (부모 대비 무엇이 바뀌었는가)
@@ -12,6 +12,23 @@
 > - **클라이언트 128K 요약 엔진(contextEngine.ts)·ContextSegment 폐기.** 컨텍스트(히스토리·요약·툴 결과)는 **pi agent 런타임의 책임**. 서버는 메시지/이벤트 SoT와 SSE 릴레이만(§6).
 > - **버블 모델 확장.** `Comment` → `Message`(type=HUMAN|AGENT_REPLY|TOOL_CALL|TOOL_RESULT|SYSTEM). 신규 `Sandbox`/`AgentSession`/`ToolCall` 모델(§3).
 > - **CSP `connect-src` Google 화이트리스트·GEMINI 연결 배지·키 입력 폼·키 localStorage 저장 전부 제거.** 격리 경계는 샌드박스 디렉토리(경로 탈출 차단)·리소스·네트워크 정책으로 이동(§8).
+
+> #### Δ v2 — 동시 병렬 협업 에이전트(병렬 추론 + 직렬 부수효과)
+> **배경(v0.1 한계)**: 게시글당 단일 pi agent 세션에 N명이 attach(fan-out)하되, 동시 질문은 **단일 활성 턴 + FIFO 큐**로 직렬화된다(`pi.ts` `RuntimeHandle.activeTurn`(단일, pi.ts:109)·`queue`(pi.ts:111), worker `currentTurn`(단일, piWorker.mjs:372)). 내 질문이 남의 긴 턴 뒤로 pending 되는 **head-of-line blocking**이 생긴다. v2는 이 직렬 병목만 제거하고, **단일 세션·단일 공유 컨텍스트(convo)·단일 샌드박스**라는 협업 모델은 그대로 유지한다.
+>
+> **v2 핵심 결정(계약 수준)**:
+> 1. 게시글당 여전히 **단일 에이전트 세션 / 단일 공유 컨텍스트(convo) / 단일 샌드박스 디렉토리**. per-user 프로세스 격리가 아니다(공유 협업 유지).
+> 2. **추론(LLM completion 스트리밍)은 병렬**: N명의 메시지가 각자 독립 "턴"으로 동시 inflight. 각 사용자의 답이 남의 긴 작업과 무관하게 즉시 스트리밍(HOL blocking 제거 = 진짜 동시 협업).
+> 3. **부수효과(파일 쓰기/도구 실행/컨텍스트 커밋)는 직렬**: 샌드박스 단위 단일 직렬 실행기(lock/queue) 통과. 두 턴이 같은 파일을 써도 순차 적용 → 파일을 머지하지 않고 **쓰기를 직렬화**(충돌·머지 불필요).
+> 4. **공유 컨텍스트 보존**: 단일 convo 유지. 각 병렬 턴은 시작 시 convo 스냅샷을 읽고 완료 시 직렬 커밋(OpenAI `assistant.tool_calls` ↔ `role:tool` 짝 정합 보존, piWorker.mjs:313-343). 동시 발사된 턴들은 서로의 '그 순간' 입력을 못 볼 수 있음(staleness, 수용).
+> 5. **1:1 귀속 유지**: 각 턴 = 한 사용자 메시지 = 자기 `AGENT_REPLY`(`replyToId` 1:1, turn.ts:57). **배칭하지 않는다.**
+> 6. **결과 취합/머지는 별도 로직이 아님** — `seq` 단조 증가 Message 테이블(transcript)에서 자연 발생.
+>
+> **채택 이유(대안 기각)**: ① per-user 프로세스 격리는 공유 컨텍스트를 파괴하고 N프로세스가 같은 cwd에 lock 없이 써 파일안전 최악 + 프로세스 폭증/회수 부재. ② 입력 배칭(N→1턴)은 귀속 붕괴·무관요청 혼합·per-message `reasoningEffort`(turn.ts:46·pi.ts:40) 소실·인터럽트 윈도우 레이스 4문제 자초. → **병렬 추론 + 직렬 부수효과**가 동시성·협업·파일안전·1:1 귀속을 모두 만족하는 유일 정합. (§1·§5·§6·§7·§8에 반영)
+>
+> **opt-in 게이트(기본 OFF)**: v2 병렬 동작은 **게시글 생성 시 체크박스**로 켜야 적용된다. `POST /posts` 요청에 `concurrent: boolean`(기본 `false`)을 받아 `Sandbox.meta`(JSON, §3)에 `{ "concurrentTurns": true }`로 저장하고, 런타임(`pi.ts`/`turn.ts`)이 이 플래그로 분기한다 — `false`면 v0.1 단일 활성 턴/FIFO 경로 그대로, `true`면 위 병렬 경로. 모드는 생성 시 1회 확정(단방향). 키는 어떤 경로에도 미노출(불변식 유지).
+>
+> **알려진 한계(정직히 명시)**: 동시 N턴 = N× 토큰 비용 / convo 캡(piWorker.mjs:179 `N=40`)이 멀티유저로 빨리 참(상향·요약 필요) / 같은 파일 동시 턴의 논리적 레이스(직렬 적용 last-wins) / detached 셸 라이터는 직렬 lock 밖(프로세스그룹 kill 등 별도 하드닝) / convo 스냅샷 staleness.
 
 ---
 
@@ -43,6 +60,8 @@
 ```
 
 **백엔드가 LLM 키를 들고, 샌드박스 안의 pi agent가 LLM을 호출**하는 것이 핵심이다. 클라이언트는 LLM과 직접 통신하지 않으며 키를 절대 받지 않는다. 클라이언트가 받는 것은 서버가 SSE로 중계하는 **에이전트 토큰·도구 호출 이벤트·파일 변경 이벤트·세션/샌드박스 상태**뿐이다. 다중 클라이언트가 동일 세션에 attach하면 에이전트 출력은 **한 번 생성되어 전원에게 동일하게 fan-out**된다.
+
+> **Δ v2 — 동시성 모델**: 위 fan-out(출력 1회 생성·전원 중계)은 유지하되, 게시글당 N명의 **입력(턴)은 더 이상 직렬화되지 않는다**. v2는 게시글당 **단일 세션·단일 공유 컨텍스트(convo)·단일 샌드박스**를 유지한 채, **추론(LLM 스트리밍)은 병렬**(턴별 독립 inflight), **부수효과(도구 실행/파일 쓰기/컨텍스트 커밋)는 샌드박스 단위 직렬 lock**으로 처리한다. 즉 N개의 `AGENT_REPLY` 버블이 **동시에 STREAMING** 될 수 있고(각자 자기 `replyToId`로 1:1 귀속), 도구·파일 효과만 단일 직렬 큐를 통과한다. 상세 계약은 §5·§6·§7·§8.
 
 ### 1.1 부모(Aidit)에서 가져오는 것 / 새로 만드는 것
 
@@ -148,7 +167,9 @@ model Sandbox {
   path         String                       // 호스트 절대경로(격리 루트). 경로 탈출 차단 기준.
   status       SandboxStatus @default(CREATING)
   runtime      String        @default("pi") // 런타임 식별자(pi agent)
-  meta         String?                       // JSON: 리소스/네트워크 정책, 디스크 사용량 등
+  meta         String?                       // JSON: 리소스/네트워크 정책, 디스크 사용량 등.
+  //                                          //   (v2) concurrentTurns: boolean — 동시 병렬 협업 opt-in 플래그.
+  //                                          //   글 생성 시 POST /posts {concurrent} 로 1회 확정(기본 false=v0.1 직렬). 변경 불가.
   createdAt    DateTime      @default(now())
   lastActiveAt DateTime      @default(now())
 
@@ -159,7 +180,9 @@ model Sandbox {
 
 // ── 에이전트 세션 ──────────────────────────────────────
 // 채팅방=샌드박스에서 도는 pi agent 세션. 모든 참여자가 동일 세션에 attach(fan-out).
-// Sandbox와 분리(세션 재시작 이력 보존). 동시 활성 세션은 샌드박스당 1개 권장(PoC).
+// Sandbox와 분리(세션 재시작 이력 보존). 동시 활성 세션(=프로세스)은 샌드박스당 1개 권장(PoC).
+//   ※ v2: 이는 '세션 1개'를 뜻할 뿐 '턴 직렬'이 아니다. 단일 세션 안에서 여러 사용자 턴이
+//      동시 병렬 추론된다(§5.6). 직렬화되는 것은 부수효과뿐(샌드박스 단위 lock, §6.4).
 enum AgentSessionStatus {
   STARTING   // 프로세스 spawn/attach 중
   IDLE       // attach됨, 입력 대기(스트리밍 아님)
@@ -316,7 +339,7 @@ model Bookmark {
 | `POST /auth/guest` | **게스트 진입**(닉네임만, password 없는 경로) → `passwordHash=null` User, **`{ id, token, username }`** | - | 닉네임 ≤16자·`#` 입력 금지. 서버가 `#hex4` 부여(예 `철수#a3f9`, 충돌 시 재생성) |
 | `POST /auth/refresh` | **토큰 슬라이딩 갱신**(유효 Bearer → 새 토큰) | **Bearer** | 마지막 활동 기준 JWT_EXPIRES(기본 7일) 연장. 무효/만료 401. 게스트·회원 공통 |
 | `GET /posts?sort=hot&cursor=` | **홈 게시글 피드**(hotScore 정렬, 커서 페이지네이션) | 선택 **Bearer** | sort=hot\|new. 각 카드에 `sandbox.status` 요약 포함. 선택 인증 시 voted/bookmarked 계산 |
-| `POST /posts` | **글 작성**(title, body) → Post 등록 후 **Sandbox 1:1 자동 생성**(CREATING→READY 비동기), **`{ post, sandbox }`** | **Bearer** | 레이트리밋·샌드박스 동시 생성 수 제한. 커뮤니티 피커/페르소나 없음(§6) |
+| `POST /posts` | **글 작성**(title, body, **(v2) `concurrent?: boolean` 기본 false**) → Post 등록 후 **Sandbox 1:1 자동 생성**(CREATING→READY 비동기), **`{ post, sandbox }`** | **Bearer** | 레이트리밋·샌드박스 동시 생성 수 제한. 커뮤니티 피커/페르소나 없음(§6). **(v2) `concurrent=true`면 `Sandbox.meta.concurrentTurns=true` 저장 → 동시 병렬 협업 opt-in(기본 false=직렬, 생성 시 1회 확정·변경 불가)** |
 | `GET /posts/:id` | 게시글 + 메타 조회. `sandbox(status/runtime)`·활성 `session` 요약·`voted`·`bookmarked` 포함 | 선택 **Bearer** | (BYOK/persona 필드 없음) |
 | `PATCH /posts/:id` | **글 수정**(title/body, 작성자만) | **Bearer** | 토큰 파생 `userId`로 작성자 검증, 비작성자 403 |
 | `GET /posts/:id/messages?afterSeq=` | **버블 페이지네이션 조회** | - | type=HUMAN\|AGENT_REPLY\|TOOL_CALL\|TOOL_RESULT\|SYSTEM, `seq` 오름차순. 연결된 toolCall 요약 포함 |
@@ -348,6 +371,7 @@ model Bookmark {
 ```
 - 서버는 `type=HUMAN` Message에 **`seq` 부여** 후 즉시 **SSE `message.created` fan-out**(전원 좌/우 버블 즉시 표시).
 - `aiMode=true`면 활성 `AgentSession`에 사람 입력을 주입 → 에이전트 턴 시작. `AGENT_REPLY`(PENDING→STREAMING→COMPLETE)·`TOOL_CALL`/`TOOL_RESULT` 버블과 토큰은 모두 **SSE 스트리밍**으로 도착(§7). `aiMode=false`면 사람끼리 채팅만(에이전트 미호출).
+- **Δ v2**: 다른 사용자의 턴이 진행 중이어도 이 요청은 **대기 없이 즉시 자기 턴을 시작**한다(병렬 추론, §5.6). `MAX_CONCURRENT_TURNS` 초과 시에만 공정 큐 대기(429 아님). 부수효과(도구·파일)는 §6.4 직렬 lock을 통과.
 - 활성 세션이 없는데 `aiMode=true`면 서버가 먼저 세션을 attach/spawn(§5)하거나 `SYSTEM` 버블로 "세션을 시작하세요" 안내.
 - `clientId` 멱등: 동일 clientId 재요청은 기존 버블 반환.
 
@@ -417,6 +441,19 @@ interface AgentRuntime {
 type EmitFn = (e: RuntimeEvent) => void; // token / tool.call / tool.output / tool.result / file.changed / status
 ```
 
+> **Δ v2 — AgentRuntime 인터페이스 계약 변경점**. 실제 PoC 어댑터(`backend/src/agent/pi.ts`)의 시그니처는 위 개념 인터페이스와 달리 `messageId/seq`를 모르고 토큰 delta만 흘린다(turn.ts가 부여). v0.1과 v2의 **계약 차이**는 다음과 같다:
+>
+> | 메서드 | v0.1 (현재 코드) | v2 (병렬 추론 + 직렬 부수효과) |
+> |--------|------------------|-------------------------------|
+> | `send(session, input, lang, onToken, onTool, options)` | 같은 샌드박스 동시 호출은 **FIFO 큐로 직렬화**(`pi.ts` `pumpQueue`, pi.ts:119/417). 한 번에 활성 턴 1개. | **즉시 자기 턴을 inflight**으로 띄움(직렬화 안 함). 반환값은 turn 핸들(아래 `turnId`). 동시성 상한 초과 시에만 공정 큐 대기. |
+> | (신규) 반환/식별 | 없음(Promise<void>) | 각 호출에 서버가 **`turnId` 부여**. `onToken`/`onTool`/done/error 콜백이 이 turnId에 1:1 귀속(토큰이 어느 `AGENT_REPLY`로 갈지 라우팅). |
+> | `ackTool(session, result)` | 단일 resolver(`toolAck`, piWorker.mjs:375)로 되먹임 | **`{callId, turnId}` 라우팅**(Map). 도구 ack가 올바른 턴·올바른 tool_call로 매칭. |
+> | `interrupt(session, steer)` | 단일 활성 턴을 중단(`activeTurn=null`, pi.ts:457) | **`turnId` 지정 인터럽트**(내 턴만 중단, 남의 병렬 턴은 무관). steer는 그 턴의 새 입력. |
+> | `isBusy(session)` | 활성 턴 ≥1 또는 큐 ≥1 (pi.ts:480) | **활성 턴 수(count) ≥ 1**. 세션 IDLE 전이는 활성 턴이 0이 될 때만(turn.ts:240 패턴 일반화). |
+> | (신규) 동시성 상한 | 없음(항상 1턴) | `MAX_CONCURRENT_TURNS`(샌드박스당 동시 inflight 턴 상한). 초과분은 라운드로빈 공정 큐. LLM 비용/부하 제어. |
+>
+> EmitFn 이벤트 스키마 자체는 불변이나, 모든 이벤트에 **턴 귀속 식별자**가 따라붙는다(서버가 `messageId`로 변환·publish). 새 색/이벤트 타입 추가 없음 — §7의 `agent.token{messageId,…}`이 이미 turn-scoped라 다중 턴 동시 스트리밍을 그대로 표현한다.
+
 ### 5.2 OpenAI-compatible LLM 주입
 
 - pi agent는 **OpenAI-compatible** 백엔드로 LLM을 호출한다. 서버 `.env`(세 변수가 단일 출처):
@@ -441,11 +478,28 @@ type EmitFn = (e: RuntimeEvent) => void; // token / tool.call / tool.output / to
 ### 5.4 다중 클라이언트 fan-out
 
 - 다중 클라이언트가 동일 세션에 attach해도 **새 프로세스를 띄우지 않고 기존 세션 공유**한다. 에이전트 출력은 **한 번 생성되어** 그 post의 모든 SSE 구독자에게 동일하게 중계된다.
-- 샌드박스당 동시 활성 세션은 **1개 권장**(PoC). 입력 주입의 순서는 서버가 `seq`/주입 큐로 직렬화한다.
+- 샌드박스당 동시 활성 세션(=프로세스)은 **1개 권장**(PoC). ※ '세션 1개'일 뿐 **턴은 직렬이 아니다** — 단일 세션 내에서 사용자 턴이 동시 병렬 추론된다(§5.6). 직렬화는 부수효과뿐(§6.4).
+- ~~입력 주입의 순서는 서버가 `seq`/주입 큐로 직렬화한다.~~ → **Δ v2 정정**: 입력(턴)은 더 이상 직렬화하지 않는다. 각 사용자 입력은 즉시 자기 턴으로 inflight(병렬 추론)되며, 단일 convo에는 시작 시 스냅샷 읽기 + 완료 순 직렬 커밋으로 반영된다. **직렬화되는 것은 부수효과(도구 실행·파일 쓰기·컨텍스트 커밋)뿐**(샌드박스 단위 lock, §6.4). `seq`는 여전히 모든 버블의 단조 정렬키이나, 더 이상 입력 게이팅 용도가 아니라 transcript 순서·재생 기준으로만 쓰인다.
 
 ### 5.5 i18n 언어 힌트
 
 - 사람 메시지 전송 시 클라 UI 언어(`useLangStore.getState().lang`)를 `send`의 `lang` 인자로 전달 → 런타임이 "가능 범위에서 UI 언어를 따르도록" 시스템 지시(예: `Respond in Korean.`/`Respond in English.`)를 주입한다(§14.5). UGC(코드/파일/사람 발화)는 번역 대상 아님.
+
+### 5.6 Δ v2 — 워커/부모 멀티플렉싱 계약
+
+v0.1 코드는 워커·부모 모두 **전역 단일 상태**를 전제한다. v2는 이를 턴별로 다중화한다(코드 근거 포함):
+
+**워커(`piWorker.mjs`) 멀티플렉싱**
+- `currentTurn`(단일, piWorker.mjs:372) → `turns: Map<turnId, Turn>`. 각 턴은 자기 `interrupted` 플래그·`AbortController`(piWorker.mjs:198-199 `streamOneCompletion`의 controller를 턴별로).
+- `toolAck`(단일 resolver, piWorker.mjs:375·414-419) → `{callId|turnId}` 키 라우팅(Map). `tool-done` 라인(piWorker.mjs:507-515)이 올바른 턴의 resolver만 깨운다.
+- `convo`(단일 mutable, piWorker.mjs:170) → **단일 유지(공유 컨텍스트)**. 각 턴은 시작 시 스냅샷을 읽고, completion/도구결과 push(piWorker.mjs:297·313-343)는 **완료 순 직렬 커밋**으로 `assistant.tool_calls` ↔ `role:tool` 짝 정합을 보존. `capConvo()`(piWorker.mjs:179)는 커밋 직후 1회.
+- **제거**: 새 `input`이 이전 턴을 인터럽트하던 동작(piWorker.mjs:519-522) — v2는 동시 다중 턴을 허용하므로 이전 턴을 abort하지 않는다.
+
+**부모(`pi.ts`) 멀티플렉싱**
+- `RuntimeHandle.activeTurn`(단일 sink, pi.ts:109) → `Map<turnId, TurnSink>`. `queue`(pi.ts:111)는 동시성 상한 초과분 전용 공정 큐로 의미 축소.
+- `pumpTurnLines`(pi.ts:172-216)는 stdout 라인의 `turnId`로 sink 디스패치(현재는 단일 `activeTurn`만 참조, pi.ts:195).
+- `send`(pi.ts:399)가 `turnId` 부여, stdin 프로토콜을 `{type:'input', turnId, …}`로 멀티플렉싱(현재 단일, pi.ts:147). `ackTool`(pi.ts:427)·`interrupt`(pi.ts:443)도 `turnId` 라우팅(현재 `tool-done`/`interrupt`에 turnId 없음, pi.ts:432·450).
+- exit 핸들러(pi.ts:340-354)는 살아있는 **모든** 턴 sink와 공정 큐를 일괄 error 마감.
 
 ---
 
@@ -472,6 +526,7 @@ type EmitFn = (e: RuntimeEvent) => void; // token / tool.call / tool.output / to
    - 스트리밍: agent.token(AGENT_REPLY 누적), tool.call/tool.output/tool.result(도구 실행),
      file.changed(파일 변경)가 SSE로 전원 중계. 모든 버블은 seq SoT로 정렬.
    - 권한: 샌드박스 내부는 모든 permission 허용(§6.2).
+   - **Δ v2**: 여러 사람이 동시에 aiMode=true로 보내면 **N개의 턴이 동시 inflight**(병렬 추론). 각 턴은 자기 AGENT_REPLY(STREAMING)를 가지며 N개 버블이 동시 스트리밍될 수 있다. session=RUNNING은 "활성 턴 ≥1"을 의미하고, 활성 턴이 0이 될 때만 IDLE로 내린다(turn.ts:240 `isBusy` 패턴). 도구·파일 부수효과는 §6.4의 샌드박스 단위 직렬 lock을 통과한다.
 
 4) interrupt / steer (POST /posts/:id/interrupt)
    - 진행 중 턴 중단. session=INTERRUPTED, 진행 중 STREAMING 메시지는 COMPLETE(부분)/FAILED 확정 후 SSE 통지.
@@ -507,6 +562,24 @@ type EmitFn = (e: RuntimeEvent) => void; // token / tool.call / tool.output / to
 - **(c) 네트워크 정책**: 아웃바운드 제한(필요 도메인 화이트리스트 등). PoC 수준 정책.
 - **컨테이너(Firecracker/gVisor/Docker) 강화는 Out of Scope(후속)** — PoC는 호스트 디렉토리 격리 + 프로세스/cgroup-lite로 시작.
 
+### 6.4 Δ v2 — 부수효과 직렬 lock & 동시성 상한
+
+v2에서 **추론은 병렬, 부수효과는 직렬**이다. 직렬 경계를 어디에 두는지가 계약이다:
+
+- **샌드박스 단위 직렬 lock**: 모든 도구 실행(`toolBridge.runToolIntent` → `toolExec.executeTool`, cwd=`sandboxRoot` 단일)을 **턴 간에도** 단일 직렬 큐로 통과시킨다. v0.1은 `turn.ts`의 `toolChain`(턴 **내** 직렬, turn.ts:160-184)만 있어 서로 다른 턴의 도구가 동시 진입할 수 있다 — v2는 이 lock을 **샌드박스 단위**로 끌어올려 턴 간 동시 파일 쓰기 진입을 0으로 만든다. `executeTool`은 이미 `sandboxId`(=`sandboxRoot`) 키로 per-sandbox proc cap을 받으므로(toolBridge.ts:106-109), 같은 키에 직렬 게이트를 추가하는 형태.
+- **충돌·머지 불필요**: 두 턴이 같은 파일을 써도 lock으로 순차 적용된다(파일을 머지하지 않고 쓰기를 직렬화). 논리적 결과는 **last-wins**(아래 한계 참조).
+- **동시성 상한**: `MAX_CONCURRENT_TURNS`(샌드박스당 동시 inflight 턴 수 상한). LLM 비용/부하 제어용. 초과분은 **라운드로빈 공정 큐**로 대기(pi.ts의 `queue`(pi.ts:111)를 이 용도로 재정의). 단일 활성 세션·단일 샌드박스는 유지.
+- **세션 상태**: 단일 IDLE/RUNNING 개념을 **활성 턴 수(count)**로 일반화한다. RUNNING = 활성 턴 ≥1, IDLE 전이 = 활성 턴 0(turn.ts:240의 `isBusy` 가드가 count 기반으로 동작). `session.status` SSE는 동일 enum을 그대로 쓴다(§7).
+- **(v2) opt-in 게이트**: 위 병렬 경로(직렬 lock·턴 멀티플렉싱·동시성 상한 포함)는 `Sandbox.meta.concurrentTurns === true`일 때만 활성화된다. `false`(기본)면 런타임이 v0.1 단일 활성 턴 + FIFO 직렬 경로를 그대로 탄다. 플래그는 `POST /posts`의 `concurrent`로 글 생성 시 1회 설정되며 이후 변경 불가 — 따라서 같은 샌드박스 안에서 직렬/병렬이 섞이지 않는다.
+- **(v2) 1인 1활성턴(per-user inflight = 1)**: 한 사용자는 동시에 자기 턴 1개만 inflight 한다. 같은 사용자의 다음 입력은 자기 직전 턴이 끝날 때까지 대기(Composer가 '내 활성 턴' 기준으로 게이팅, 인터럽트도 '내 턴' 기준). 병렬은 **서로 다른 사용자** 턴 사이에서만 발생하므로 동시 inflight 턴 수 ≤ 동시 활성 사용자 수이며, `MAX_CONCURRENT_TURNS`와 함께 동시성·비용의 자연 상한이 된다. (turnId↔ownerUserId 매핑은 `send`가 보유; per-user 활성 턴 유무는 isBusy를 userId로 좁혀 판정.)
+
+**알려진 한계(이 섹션 한정, 정직히 명시)**
+- **N배 토큰 비용**: 동시 N턴 = N× LLM 토큰(동시성의 본질 비용).
+- **convo 캡**: 단일 공유 convo의 길이 캡(piWorker.mjs:179 `N=40`)이 멀티유저로 빠르게 참 → 상향 또는 요약 필요.
+- **같은 파일 논리적 레이스**: 직렬 lock은 파일 안전(쓰기 깨짐 방지)을 보장하지만 **논리적 last-wins**는 남는다. 필요 시 "같은 파일을 건드리는 턴만 직렬"로 좁히는 폴백 가능.
+- **detached 셸 라이터**: 도구가 띄운 백그라운드/detached 프로세스의 쓰기는 직렬 lock 밖이다 — 프로세스그룹 kill 등 별도 하드닝 대상.
+- **convo 스냅샷 staleness**: 동시 발사된 턴들은 서로의 '그 순간' 입력/응답을 못 볼 수 있다(스냅샷 읽기 → 완료 순 커밋이라 수용).
+
 ---
 
 ## 7. 실시간 (SSE)
@@ -516,6 +589,8 @@ type EmitFn = (e: RuntimeEvent) => void; // token / tool.call / tool.output / to
 - `GET /posts/:id/stream`: `text/event-stream`. 연결 시 **현재 버블 스냅샷(`afterSeq` 기준) 재생 후 라이브**. 다중 클라가 동일 세션 attach → 에이전트 출력 1회 생성·전원 동일 중계.
 - 재연결: `Last-Event-ID`(=마지막 `seq`)로 누락분 재생.
 - 다중 인스턴스: Redis pub/sub로 post 채널 fan-out, 또는 SSE sticky 라우팅.
+
+> **Δ v2 — 다중 턴 동시 스트리밍**: 이벤트 스키마는 그대로다. `agent.token`은 이미 `{messageId, seq, delta}`로 **메시지(턴) 단위 귀속**이라, N개의 `AGENT_REPLY` 버블이 동시에 STREAMING 되면 **여러 messageId의 `agent.token`이 인터리브되어 도착**한다(클라는 messageId로 각 버블에 누적). `message.created`(AGENT_REPLY/PENDING)도 턴마다 하나씩 발생하며 `replyToId`로 어느 HUMAN 질문의 답인지 1:1 연결된다. `tool.*`/`file.changed`는 §6.4 직렬 lock 덕에 **순차 도착**(인터리브 없음). `session.status=RUNNING`은 "활성 턴 ≥1", `IDLE`은 "활성 턴 0"을 의미한다(단일 토글이 아니라 카운트 기반).
 
 **이벤트(Foundation realtimeEvents 전재)**
 
@@ -540,6 +615,8 @@ type EmitFn = (e: RuntimeEvent) => void; // token / tool.call / tool.output / to
 - **서버 키 비노출(최우선)**: LLM `apikey`/`baseURL`은 **서버 `.env`에만** 존재한다. 클라이언트로 전송하지 않고, **서버 응답/로그/SSE 이벤트에 절대 포함하지 않는다**. AgentRuntime이 pi agent 프로세스에 환경으로만 주입한다. `GET /runtime`은 model명·baseURL 호스트 정도만 노출(키 제외). 코드리뷰 체크리스트로 강제.
 - **임의 코드 격리(샌드박스)**: 에이전트는 샌드박스 내부에서 임의 코드/쉘을 실행한다. 경계는 ① 경로 탈출 차단(파일 API·도구 실행 모두 루트 상대 강제, `..`/symlink/절대경로 차단), ② 리소스 제한(프로세스/메모리/CPU, PoC는 cgroup-lite), ③ 네트워크 정책(§6.3). 컨테이너 강화는 Out of Scope(후속).
 - **레이트/남용**: 운영자 키 비용 보호를 위해 글/메시지 게시 레이트리밋(서버) + **샌드박스 동시 생성/실행 수 제한**. 초과 시 큐잉 또는 429.
+- **Δ v2 — 부수효과 직렬 lock(파일 안전 경계)**: 병렬 추론으로 여러 턴이 동시에 도구를 호출해도, 실제 fs/shell 효과는 **샌드박스 단위 단일 직렬 lock**을 통과한다(§6.4). 같은 cwd(`sandboxRoot`)에 lock 없는 동시 쓰기가 발생하지 않아 파일 깨짐·부분 쓰기·디렉토리 레이스를 차단한다. 경로 탈출 가드(§6.3)는 턴 수와 무관하게 모든 도구 실행에 그대로 적용된다. **알려진 갭(정직히 명시)**: 도구가 띄운 detached/백그라운드 프로세스의 쓰기는 직렬 lock 밖이다 — 프로세스그룹 kill·아웃리치 차단 등 별도 하드닝이 필요하다.
+- **Δ v2 — 동시성 비용 가드**: 동시 N턴 = N× LLM 토큰이므로 `MAX_CONCURRENT_TURNS`(샌드박스당 동시 inflight 턴 상한)로 비용·부하를 캡한다. 초과분은 공정 큐 대기(429 아님). 키는 어떤 병렬 경로에서도 응답/로그/SSE에 노출되지 않는다(redactSpawnEnv 등 기존 불변식 유지, pi.ts:245).
 - **XSS / 사용자 콘텐츠**: 사용자 콘텐츠(글/메시지/터미널 출력)는 렌더 시 escape, 마크다운은 DOMPurify sanitize. **CSP**: `script-src 'self'`, `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'none'`. (BYOK가 없으므로 `connect-src` Google 화이트리스트는 **삭제** — connect는 동일 출처 API/SSE만 허용.)
 - **인증/권한**: JWT Bearer 검증으로 `userId` 파생(읽기 선택·쓰기 필수). 글 수정은 작성자만(403). 세션 attach/인터럽트는 인증 참여자.
 - **프라이버시**: 게스트는 `passwordHash=null`, 키 저장 개념 없음. 샌드박스 디렉토리는 게시글 단위로 격리·정리.
@@ -617,7 +694,7 @@ src/
 ## 13. 미해결/후속 결정
 
 - 샌드박스 격리 강화(Firecracker/gVisor/Docker) — PoC는 호스트 디렉토리+cgroup-lite, 컨테이너화는 후속.
-- 동시 활성 세션 정책(샌드박스당 1개 권장 → 다중 입력자 직렬화 큐 세부) 정교화.
+- ~~동시 활성 세션 정책(샌드박스당 1개 권장 → 다중 입력자 직렬화 큐 세부) 정교화.~~ → **Δ v2 정정**: 다중 입력자는 더 이상 입력을 직렬화하지 않는다(병렬 추론 + 직렬 부수효과, §5.6·§6.4). 샌드박스당 단일 세션은 유지. 남은 미해결: `MAX_CONCURRENT_TURNS` 임계값 튜닝, 같은 파일 동시 턴의 논리적 레이스 정책(전역 직렬 vs 같은 파일만 직렬 폴백), convo 캡(piWorker.mjs:179) 상향·요약 전략.
 - pi agent 런타임의 컨텍스트/요약 정책 튜닝(resume 시 인메모리 컨텍스트 재구성 범위).
 - 네트워크 아웃바운드 정책 화이트리스트 범위(패키지 설치 vs 임의 외부 호출).
 - 운영자 키 비용 가드(레이트리밋·동시 실행 수)의 임계값 — 사용량 데이터 후 보정.

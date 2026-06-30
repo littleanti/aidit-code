@@ -17,7 +17,7 @@ import path from 'node:path';
 import type { Sandbox } from '@prisma/client';
 import { prisma } from '../db.js';
 import { config } from '../config.js';
-import { setSandboxStatus, sandboxLimiter } from './service.js';
+import { setSandboxStatus, sandboxLimiter, getSandboxConcurrent } from './service.js';
 
 const META_FILENAME = '.sandbox-meta.json';
 
@@ -30,6 +30,11 @@ interface SandboxMeta {
    * ※ 정직한 범위: network 강제는 본 PoC 범위 밖(플래그 기록만). maxProcs 는 best-effort cap.
    */
   policy: { network: 'restricted' | 'open'; maxProcs: number };
+  /**
+   * (v2 XC-MODE) 동시 병렬 협업 opt-in 플래그. createSandboxForPost 가 생성 시 meta 에 기록한 값을
+   * 프로비저닝이 meta 를 다시 쓸 때 **보존**한다(덮어쓰면 안 됨 — 그렇지 않으면 READY 후 항상 false 가 됨).
+   */
+  concurrentTurns: boolean;
 }
 
 export interface ProvisionOptions {
@@ -48,7 +53,7 @@ export interface ProvisionOptions {
  * 어떤 경로로 실패하든 throw 하지 않고 ERROR 로 전이한 뒤 슬롯을 반납한다(fire-and-forget 안전).
  */
 export async function provisionSandbox(
-  sandbox: Pick<Sandbox, 'id' | 'path' | 'postId' | 'runtime'>,
+  sandbox: Pick<Sandbox, 'id' | 'path' | 'postId' | 'runtime' | 'meta'>,
   options: ProvisionOptions = {},
 ): Promise<void> {
   const { acquireSlot = false, releaseSlot = true } = options;
@@ -60,6 +65,10 @@ export async function provisionSandbox(
     await mkdir(sandbox.path, { recursive: true });
 
     // 2. 런타임 meta 마커 기록(파일 + DB.meta 필드 양쪽).
+    //    XC-MODE: createSandboxForPost 가 기록한 concurrentTurns opt-in 플래그를 보존한다
+    //    (이 update 가 meta 를 통째로 다시 쓰므로, 안 옮기면 READY 후 플래그가 사라진다).
+    //    호출부가 넘긴 sandbox 행에 meta 가 이미 있으므로 추가 DB 조회 없이 그대로 읽는다.
+    const concurrentTurns = getSandboxConcurrent(sandbox);
     const meta: SandboxMeta = {
       runtime: sandbox.runtime,
       provisionedAt: new Date().toISOString(),
@@ -67,6 +76,7 @@ export async function provisionSandbox(
         network: config.isolation.networkPolicy,
         maxProcs: config.isolation.maxProcsPerSandbox,
       },
+      concurrentTurns,
     };
     const metaJson = JSON.stringify(meta);
     await writeFile(path.join(sandbox.path, META_FILENAME), metaJson, 'utf8');

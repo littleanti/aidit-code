@@ -19,7 +19,8 @@ import { prisma } from '../db.js';
 import { nextSeq } from '../domain/seq.js';
 import { getAgentRuntime } from './runtime.js';
 import { runToolIntent } from './toolBridge.js';
-import { resolveSandboxDir } from '../sandbox/service.js';
+import { withSandboxLock } from './sandboxLock.js';
+import { resolveSandboxDir, getSandboxConcurrent } from '../sandbox/service.js';
 import { publishToPost } from '../realtime/publish.js';
 import {
   makeMessageCreatedEvent,
@@ -44,6 +45,8 @@ export interface RunAgentTurnArgs {
   image?: { absPath: string; mime: string };
   /** Feature B: per-message reasoning_effort('low'|'medium'|'high'). 값 있을 때만 전달. */
   reasoningEffort?: string;
+  /** XC-CAP(M8): per-user 1활성턴 게이트 식별자. 자동 인트로 턴(humanMessage 없음)은 미전달=null(게이트 면제). */
+  userId?: string | null;
 }
 
 /**
@@ -51,6 +54,10 @@ export interface RunAgentTurnArgs {
  * 예외는 내부에서 흡수해 AGENT_REPLY=FAILED + SYSTEM 버블로 표면화한다(throw 하지 않음).
  */
 export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
+  // v2 AR-MUX(구현 완료): 샌드박스 meta 의 concurrentTurns(getSandboxConcurrent)가 true 면 send 에
+  //   concurrent=true 를 넘겨 turnId 멀티플렉싱 병렬 경로(같은 샌드박스 N개 동시 inflight, 토큰 인터리브)로
+  //   분기한다. false/미지정이면 오늘과 100% 동일한 FIFO 단일 활성 턴 직렬 경로. 부수효과(도구)는 두 경로
+  //   모두 withSandboxLock 으로 직렬(XC-SERIAL) — 병렬화되는 것은 추론/토큰뿐. concurrent 판정은 아래에서.
   const { post, session, lang } = args;
   // 사람 메시지가 있으면 그 본문을, 없으면 prompt 를 입력으로 쓴다(자동 인트로 턴).
   const input = args.humanMessage?.body ?? args.prompt ?? '';
@@ -96,7 +103,13 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
   });
   publishToPost(
     post.id,
-    makeSessionStatusEvent({ sessionId: session.id, status: 'RUNNING' }),
+    makeSessionStatusEvent({
+      sessionId: session.id,
+      status: 'RUNNING',
+      // RT-MULTI: 이 턴은 아직 runtime 에 등록 전(send 호출 전)이라 self 미포함 → +1 보정.
+      //   미구현 런타임은 0+1=1(레거시 RUNNING 동치). cap 초과로 곧 큐 대기하더라도 사용자엔 RUNNING≥1 표면.
+      activeTurns: (runtime.activeTurnCount?.({ sandboxId: session.sandboxId }) ?? 0) + 1,
+    }),
   );
 
   // ── 3) 스트리밍: 토큰 delta 누적 + agent.token publish ──
@@ -152,10 +165,13 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
   //   샌드박스 루트(경로 가드/cwd 기준)를 조회. 없으면 도구를 건너뛴다(plain chat 만 진행).
   const sandbox = await prisma.sandbox.findUnique({
     where: { id: session.sandboxId },
-    select: { postId: true, path: true },
+    select: { postId: true, path: true, meta: true },
   });
   // 저장 절대경로를 그대로 믿지 않고 재계산(레포 이동/이름변경 self-heal). cwd·경로가드 기준 동일.
   const sandboxRoot = sandbox ? resolveSandboxDir(sandbox) : null;
+  // AR-MUX opt-in 게이트: meta.concurrentTurns 가 true 일 때만 병렬 디스패치. meta null/손상 → false(레거시).
+  //   기존 게시글(meta=null)·비-concurrent 게시글·테스트 샌드박스(meta 미설정)는 자동으로 FIFO 직렬 경로.
+  const concurrent = sandbox ? getSandboxConcurrent(sandbox) : false;
   // 도구 처리를 직렬 큐로 잇는다(여러 의도가 순차 ack 되도록). onTool 은 동기 콜백.
   let toolChain: Promise<void> = Promise.resolve();
   const onTool = (intent: Parameters<NonNullable<Parameters<typeof runtime.send>[4]>>[0]): void => {
@@ -168,9 +184,11 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
       };
       try {
         if (sandboxRoot) {
-          const outcome = await runToolIntent(
-            { postId: post.id, sessionId: session.id, sandboxRoot },
-            intent,
+          // XC-SERIAL(M8): 부수효과(파일 쓰기/쉘/도구 실행)를 샌드박스 단위 직렬 lock으로 감싼다.
+          //   턴 내 직렬(toolChain) 위에 '턴 간' 직렬을 격상 — AR-PAR 동시 턴에서도 동시 파일 쓰기 진입 0.
+          //   현재(단일 활성 턴)에는 경합이 없어 동작 불변(no-op).
+          const outcome = await withSandboxLock(session.sandboxId, () =>
+            runToolIntent({ postId: post.id, sessionId: session.id, sandboxRoot }, intent),
           );
           ack = { ok: outcome.ok, output: outcome.output, callId: intent.callId };
         }
@@ -178,7 +196,9 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
         /* toolBridge 내부에서 FAILED 로 흡수 — 여기서는 기본 실패 ack 유지. */
       } finally {
         // worker 를 다음 의도/토큰으로 진행시킨다(턴 직렬화). 결과를 되먹여 LLM 루프 진행.
-        runtime.ackTool?.({ sandboxId: session.sandboxId }, ack);
+        // AR-MUX: concurrent 턴이면 intent.turnId 를 ackTool 에 실어 정확한 턴의 ackResolver 로 라우팅한다.
+        //   (안 실으면 워커가 SINGLE 로 라우팅해 해당 턴을 못 찾고 hang.) 레거시는 turnId=undefined → 오늘과 동일.
+        runtime.ackTool?.({ sandboxId: session.sandboxId }, ack, intent.turnId);
       }
     });
   };
@@ -192,10 +212,17 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
       data: { status: 'STREAMING' },
     });
     // Feature A/B: 이미지/reasoning_effort 옵션을 런타임으로 전달(값 있을 때만 포함).
-    await runtime.send(session, input, lang, onToken, onTool, {
-      image: args.image,
-      reasoningEffort: args.reasoningEffort,
-    });
+    // AR-MUX: concurrent(7번째 인자)로 디스패치 모드 전달 — true 면 turnId 병렬, false 면 FIFO 직렬.
+    await runtime.send(
+      session,
+      input,
+      lang,
+      onToken,
+      onTool,
+      { image: args.image, reasoningEffort: args.reasoningEffort },
+      concurrent,
+      args.userId ?? null, // XC-CAP: per-user 게이트 식별자(8번째 positional, concurrent 다음).
+    );
     // worker 의 done 이후에도 마지막 도구 체인이 남아있을 수 있으니 마저 기다린다.
     await toolChain;
   } catch {
@@ -245,7 +272,13 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
     });
     publishToPost(
       post.id,
-      makeSessionStatusEvent({ sessionId: session.id, status: 'IDLE' }),
+      makeSessionStatusEvent({
+        sessionId: session.id,
+        status: 'IDLE',
+        // RT-MULTI: 이 턴은 pumpTurnLines 가 onDone 전에 de-count 했으므로 self 미포함(보정 없음).
+        //   stillBusy=false 게이트 안 → 잔여 활성 0 → activeTurns:0. 중간 IDLE 깜빡임은 게이트가 그대로 억제.
+        activeTurns: runtime.activeTurnCount?.({ sandboxId: session.sandboxId }) ?? 0,
+      }),
     );
   }
 }

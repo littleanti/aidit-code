@@ -25,6 +25,7 @@ import {
   type ReasoningEffort,
 } from '../api/rest';
 import type { Message } from '../api/types';
+import { hasMyActiveTurn } from '../lib/threadSelectors';
 
 // Feature A: 클라 측 1차 검증(서버가 권위). MIME 화이트리스트 + 5MB 캡 = 백엔드와 일치.
 const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
@@ -72,6 +73,9 @@ export default function Composer({ postId }: ComposerProps) {
       (m) => m.type === 'AGENT_REPLY' && (m.status === 'STREAMING' || m.status === 'PENDING')
     )
   );
+  // FE-MULTI: '내 턴' 게이팅(self-concurrency=1). 내 활성 턴이 inflight 인 동안만
+  // 내 Composer 를 잠근다. 남의 활성 턴은 비차단(HOL blocking 제거).
+  const myTurnBusy = useThreadStore((s) => hasMyActiveTurn(s.messages, userId));
 
   const [body, setBody] = useState('');
   const [aiMode, setAiMode] = useState(true);
@@ -151,7 +155,7 @@ export default function Composer({ postId }: ComposerProps) {
   async function handleSend() {
     const trimmed = body.trim();
     // 이미지-only 전송 허용: 텍스트가 비어도 첨부가 있으면 보낸다(둘 다 없으면 무시).
-    if ((!trimmed && !imageFile) || sending) return;
+    if ((!trimmed && !imageFile) || sending || myTurnBusy) return;
     if (!token || !userId) {
       openLogin();
       return;
@@ -241,13 +245,20 @@ export default function Composer({ postId }: ComposerProps) {
     }
   }
 
-  const canSend = (body.trim().length > 0 || imageFile != null) && !sending;
+  const canSend = (body.trim().length > 0 || imageFile != null) && !sending && !myTurnBusy;
 
   return (
     <div className="shrink-0 border-t border-term-border bg-term-bg font-mono">
       {error && (
         <p className="mx-3 mb-1 mt-2 font-mono text-xs text-term-red" role="alert">
           {error}
+        </p>
+      )}
+
+      {/* FE-MULTI: 내 활성 턴 진행 중 안내(self-concurrency=1). 남의 턴은 비차단. */}
+      {myTurnBusy && (
+        <p role="status" className="mx-3 mb-1 mt-2 font-mono text-xs text-term-dim">
+          {t('thread.myTurnBusy')}
         </p>
       )}
 

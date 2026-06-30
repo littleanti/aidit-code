@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>특허 명세서 — 병렬 추론 및 부수효과 직렬화 기반 협업 코딩 시스템 및 그 동작 방법</title>
+<style>
+  :root{ --ink:#111; --muted:#333; --rule:#000; --body:10.2pt; --lead:1.55; }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:#eceae6;color:var(--ink);}
+  body{
+    font-family:"Batang","바탕","Noto Serif KR",Georgia,"Times New Roman",serif;
+    line-height:var(--lead);
+  }
+  .page{
+    width:100%; max-width:880px; margin:24px auto; background:#fff;
+    padding:56px 60px 72px; box-shadow:0 1px 8px rgba(0,0,0,.18);
+  }
+  header.doc{ text-align:center; margin:0 0 6px; }
+  .doc .kind{ font-size:10pt; letter-spacing:3px; color:var(--muted); margin:0 0 10px; }
+  header.doc h1{
+    font-size:16.5pt; font-weight:700; line-height:1.45; margin:0 auto 14px;
+    max-width:42em;
+  }
+  .meta{ font-size:9pt; color:var(--muted); margin:2px 0; }
+  .meta .mono{ font-family:"Courier New",monospace; }
+  hr.rule{ border:none; border-top:1.5px solid var(--rule); margin:16px 0 6px; }
+  hr.thin{ border:none; border-top:1px solid #999; margin:22px 0; }
+
+  .field{ font-weight:700; font-size:11.5pt; margin:26px 0 8px; padding:3px 0 4px;
+    border-bottom:1px solid #000; letter-spacing:.5px; }
+  .field .en{ font-weight:400; font-size:8.6pt; color:var(--muted); margin-left:8px; font-family:Georgia,serif; }
+  .subfield{ font-weight:700; font-size:10.6pt; margin:18px 0 6px; }
+  .pnum{ font-weight:700; }
+
+  p{ margin:0 0 9px; text-align:justify; }
+  p.para{ text-indent:0; }
+  .lead0{ font-weight:700; }
+
+  ul,ol{ margin:6px 0 12px 22px; padding:0; }
+  li{ margin:0 0 6px; text-align:justify; }
+  ul.tight li{ margin:0 0 3px; }
+
+  code,.mono{ font-family:"Courier New",monospace; font-size:9pt; background:#f4f4f1; padding:0 2px; border-radius:2px; }
+  .mono.block{ display:block; background:#f6f6f3; border:1px solid #ddd; padding:8px 10px; margin:8px 0 12px; white-space:pre-wrap; line-height:1.4; font-size:8.8pt; }
+
+  figure{ margin:18px 0 14px; break-inside:avoid; text-align:center; }
+  figure svg{ display:block; width:100%; max-width:760px; height:auto; margin:0 auto; border:1px solid #e2e2dd; background:#fff; }
+  figcaption{ font-size:9pt; text-align:center; margin-top:8px; color:#222; }
+  figcaption b{ font-weight:700; }
+
+  table.tbl{ border-collapse:collapse; width:100%; font-size:9pt; margin:10px 0 16px; }
+  table.tbl caption{ caption-side:top; text-align:left; font-size:9pt; font-weight:700; margin-bottom:6px; }
+  table.tbl th,table.tbl td{ border:1px solid #000; padding:5px 8px; vertical-align:top; text-align:left; }
+  table.tbl thead th{ background:#ededed; text-align:center; }
+  table.tbl td.c{ text-align:center; }
+
+  .claim{ margin:0 0 13px; text-align:justify; }
+  .claim .cn{ font-weight:700; }
+  .claim.dep{ margin-left:14px; }
+
+  .abs{ background:#faf9f6; border:1px solid #ddd; padding:14px 18px; margin:10px 0; }
+  .note{ font-size:8.8pt; color:var(--muted); font-style:italic; }
+  .repflag{ font-style:italic; color:#444; }
+
+  @media print{
+    html,body{ background:#fff; }
+    .page{ box-shadow:none; margin:0; max-width:none; width:auto; padding:16mm 14mm; }
+    figure,table.tbl{ break-inside:avoid; }
+  }
+  @media (max-width:640px){
+    .page{ padding:24px 18px; }
+  }
+</style>
+</head>
+<body>
+<main class="page">
+
+  <header class="doc">
+    <div class="kind">특 허 출 원 명 세 서 (대한민국)</div>
+    <h1>병렬 추론 및 부수효과 직렬화 기반 협업 코딩 시스템 및 그 동작 방법</h1>
+    <div class="meta" style="font-style:italic;">Collaborative Coding System and Method Based on Parallel Inference and Serialized Side Effects</div>
+    <div class="meta">발명자: (심사용 비공개) · 출원인: (심사용 비공개)</div>
+    <div class="meta">관련 출원(선행 모출원): <span class="mono">Aidit</span> — “다중 사용자 AI 워크스페이스를 위한 제공자측 추론비용 0 아키텍처(클라이언트 직접 호출 및 지연 요약)”의 <b>후속(연속·개량) 출원</b></div>
+    <div class="meta">문서 형식: HTML 명세서(PoC 기반) · 작성일: 2026-06-29</div>
+  </header>
+
+  <hr class="rule">
+
+  <p class="note repflag">※ 본 명세서는 개념증명(PoC) 구현을 토대로 작성되었다. 수치·성능값은 별도로 도출되었다고 명시하지 않는 한 예시적·기대값이며, 신규성·진보성의 근거는 “과제의 해결 수단”에 기재한 <b>특정 결합 구성</b> 및 <b>동시성 계약(병렬 추론 + 직렬 부수효과)</b>과 청구범위에 한정된다. 개별 구성요소(백엔드 코드 실행 샌드박스, 코드 인터프리터형 에이전트, 협업 클라우드 IDE, 단일 AI 세션의 다중 시청 fan-out, 서버-전송 이벤트(SSE), 동시성 상한·작업 큐 일반론)는 각각 공지 기술임을 인정한다. 본 명세서가 기재하는 <b>알려진 한계</b>(N배 토큰 비용, 단일 공유 컨텍스트 용량 포화, 동일 파일 동시 턴의 논리적 last-wins 레이스, 도구가 분리(detach)·백그라운드로 띄운 프로세스 쓰기는 직렬 lock 밖에 있음, 컨텍스트 스냅샷의 부분 비최신성(staleness))는 정직한 개시를 위한 것이며, 청구범위를 한정하는 근거로 사용되지 아니한다.</p>
+
+  <!-- ============================ 발명의 명칭 ============================ -->
+  <div class="field">【발명의 명칭】<span class="en">Title of Invention</span></div>
+  <p class="para">병렬 추론 및 부수효과 직렬화 기반 협업 코딩 시스템 및 그 동작 방법</p>
+  <p class="para" style="color:#333;">(영문 명칭) Collaborative Coding System and Method Based on Parallel Inference and Serialized Side Effects</p>
+
+  <!-- ============================ 기술분야 ============================ -->
+  <div class="field">【기술분야】<span class="en">Technical Field</span></div>
+  <p class="para"><span class="pnum">[0001]</span> 본 발명은 거대언어모델(LLM)을 도구로 활용하는 협업 소프트웨어 개발 플랫폼에 관한 것으로, 보다 구체적으로는 커뮤니티형 게시글(150) 각각에 <b>1:1로 자동 생성·할당되는 격리 실행 샌드박스(130)</b>를 결합하고, 그 샌드박스 안에서 구동되는 <b>단일 공유 코드 에이전트 세션</b>(단일 공유 컨텍스트(134) 및 단일 샌드박스 디렉토리)에 복수의 상호 독립적인 사용자가 <b>동시에 접속(attach)</b>하되, 각 사용자의 입력을 <b>독립한 추론 단위인 턴(turn)(153)으로 동시에 병렬 추론</b>하여 서로 다른 답을 동시에 스트리밍(fan-out)하는 한편, 그로 인해 발생하는 파일 쓰기·도구 실행·컨텍스트 커밋 등 <b>부수효과(side-effect)는 샌드박스 단위 단일 직렬 실행기(133)를 통해 순차로만</b> 적용하여 동일 작업 디렉토리에 대한 잠금 없는 동시 쓰기를 0으로 만드는, <b>병렬 추론(parallel inference) + 직렬 부수효과(serial side-effects)</b>를 핵심 동시성 계약으로 하는 시스템 및 그 동작 방법에 관한 것이다.</p>
+
+  <!-- ============================ 배경기술 ============================ -->
+  <div class="field">【배경기술】<span class="en">Background Art</span></div>
+
+  <div class="subfield">가. 선행 모출원(Aidit)과 그 한계</div>
+  <p class="para"><span class="pnum">[0002]</span> 본 출원의 선행 모출원(이하 “선행발명”)은 레딧형 모바일 커뮤니티에서 각 게시글이 채팅방형 댓글 스레드를 열고, 복수 사용자가 하나의 누적 AI 대화 컨텍스트를 공동으로 쌓는 구성을 개시한다. 선행발명의 핵심은 서버를 <b>키-블라인드(key-blind)</b>로 두어 LLM 추론을 <b>각 클라이언트가 자신의 키로 제공자에 직접 호출</b>(proxyless BYOK)하게 하고, 컨텍스트가 정책 한계를 넘으면 다음 <code>@AI</code> 호출 클라이언트가 <b>지연 요약(lazy summarization)</b>을 수행하되, 상호 불신하는 복수 클라이언트가 같은 스레드를 동시에 요약할 때 <b>활성 세그먼트당 정확히 하나의 요약</b>만 인정하는 멱등 가드(승자 201 / 패자 409)로 조정함으로써 <b>제공자측 추론 비용을 0</b>으로 만들고 비용을 각 클라이언트 키 쿼터로 외부화하는 데에 있다.</p>
+  <p class="para"><span class="pnum">[0003]</span> 그러나 선행발명은 산출물이 <b>텍스트 대화에 한정</b>되어, AI가 실제로 파일을 만들고 셸을 실행하며 패키지를 설치하는 <b>실행 가능한 코드 작업 공간</b>을 제공하지 못한다. 또한 추론이 각 클라이언트의 키·모델로 <b>분산</b>되므로 “여러 사람이 <i>하나의 동일한</i> 작업 산출(코드·파일·터미널 출력)을 실시간으로 함께 보며 협업한다”는 요구를 구조적으로 만족시키지 못한다(각자 다른 키·모델로 따로 추론하면 산출이 분기한다). 본 발명은 선행발명의 “분산·키블라인드·비용외부화” 토폴로지를 <b>정반대로 역전</b>시켜, 서버를 코드 에이전트 호스트로 삼고 키·비용을 서버가 내부화하는 한편, 그로 인해 새로 떠오르는 <b>단일 공유 세션의 다중 사용자 동시성 문제</b>를 정면으로 해결한다.</p>
+
+  <div class="subfield">나. 백엔드 코드 실행 에이전트·샌드박스(공지 기술)</div>
+  <p class="para"><span class="pnum">[0004]</span> LLM이 셸·파일 도구를 직접 호출해 코드를 작성·실행하는 “코드 에이전트”와, 그 코드를 격리해 실행하는 서버측 샌드박스(코드 인터프리터, 원격 개발 컨테이너 등)는 공지되어 있다. 그러나 이들은 통상 <b>단일 사용자·단일 활성 작업(turn)</b>을 가정하므로, 하나의 실행 세션을 다수의 상호 독립적 사용자가 동시에 점유·조향하는 협업 의미론과, 그때 같은 작업 디렉토리에 대한 <b>동시 파일 쓰기 경합</b> 및 추론과 부수효과를 분리해 다중화하는 방법을 다루지 않는다. 한편 임의 코드를 격리 실행하는 샌드박스 기술 자체는, 악성 코드 분석(디토네이션)을 위해 단일 운영환경에서 복수 버전 애플리케이션을 동시에 실행하는 <b>위협 탐지용</b>으로도 공지되어 있으나, 이는 단일 분석자의 위협 탐지를 목적으로 할 뿐 다중 사용자가 하나의 공유 작업 공간을 함께 편집하는 협업이나 그 동시 쓰기 안전을 다루지 않는다. 또한 다수의 작업을 병렬 실행·추적하는 <b>기계학습 실험 관리 도구</b>가 공지되어 있으나, 이는 서로 독립한 실험 run을 병렬 기록할 뿐 단일 공유 대화 컨텍스트나 부수효과의 직렬화 경계를 제공하지 않는다.</p>
+
+  <div class="subfield">다. 협업 클라우드 IDE 및 단일 AI 세션의 다중 시청(공지 기술)</div>
+  <p class="para"><span class="pnum">[0005]</span> 복수 사용자가 코드를 공동 편집하는 협업 클라우드 IDE, 그리고 하나의 살아있는 AI 세션을 여러 뷰어가 공유·개입(fan-out)하는 흐름이 공지되어 있다. 후자는 본 발명 및 선행발명이 공통으로 영감을 받은 바이나, 이들은 (i) 단일 프로세스·<b>단일 활성 턴</b>을 전제하여 한 시점에 하나의 작업만 진행하고, (ii) 다중 게시글이 각자의 격리 실행 공간을 1:1로 갖는 <b>멀티테넌트 커뮤니티</b> 구조가 아니며, (iii) 도구 호출·터미널 출력을 <b>커뮤니티 스레드의 시퀀스(seq) 정렬 채팅 버블</b>로 영속화하지 않고, (iv) 무엇보다 하나의 공유 세션에 들어온 <b>여러 사용자 입력을 각각 독립 턴으로 동시에 병렬 추론</b>하면서 그 부수효과만 직렬화하는 계약을 제시하지 않는다. 나아가 근래에는 (가) 통신 세션에서 복수 사용자의 화면을 순차가 아닌 <b>동시에 공유</b>하는 기술, (나) 자율 코딩 에이전트가 다수 작업을 각각 <b>별도의 클라우드 가상머신</b>에서 동시 수행하는 작업별 격리 방식, (다) 다중 사용자·다중 세션을 <b>사용자 단위로 격리</b>하는 멀티테넌트 에이전트 플랫폼, (라) <b>에이전트 간 위임</b>으로 병렬화하는 개인용 자율 에이전트, (마) 빠른 연속 입력을 <b>단일 턴으로 배칭</b>하는 다중 사용자 챗봇, (바) 서로 다른 주체의 다중 에이전트가 공유 상태를 <b>낙관적 동시성 제어</b>(충돌 검출·rebase·재시도)로 조정하는 멀티-프린시펄 협조 프로토콜 등이 제안되었다. 그러나 이들은 모두 (i) 작업·사용자·에이전트 단위의 <b>격리</b>를 두어 공유 컨텍스트를 포기하거나, (ii) 입력을 <b>배칭</b>하여 1:1 귀속을 무너뜨리거나, (iii) 충돌을 <b>사후에 검출·해소</b>(rebase)할 뿐, 단일 공유 세션·단일 공유 컨텍스트를 유지한 채 다중 사용자 입력을 병렬 추론하면서 그 부수효과를 단일 직렬 실행기로 통과시켜 <b>동시 쓰기 충돌 자체를 발생시키지 않는</b> 본 발명의 구성을 제시하지 못한다.</p>
+
+  <div class="subfield">라. 단일 공유 세션 동시 입력의 직렬화에 따른 머리-막힘(head-of-line blocking) — 본 발명이 푸는 미해결 과제</div>
+  <p class="para"><span class="pnum">[0006]</span> 단일의 살아있는 코드 에이전트 세션에 복수 사용자가 동시에 접속·조향하는 종래의 협업 모델(본 출원의 구버전 v0.1을 그 대표적 예로 포함한다. 후술하는 표 1의 “구버전” 열 참조)은, 동시 입력을 처리하기 위하여 통상 두 가지 직렬화 수단 중 하나에 의존한다. 첫째는 입력을 <b>선입선출(FIFO) 큐로 직렬화</b>하여 한 번에 하나의 입력만 처리하고 나머지는 대기시키는 방식이고, 둘째는 세션이 작업 중이면 새 입력을 막거나(거부) 진행 중 작업을 <b>선점·중단(잘림)</b>시키는 <b>바쁨(busy) 게이트</b> 방식이다. 어느 쪽이든 한 시점에 <b>활성 턴은 오직 하나</b>이며, 출력 또한 <b>사실상 단일 스트림</b>으로 묶인다.</p>
+  <p class="para"><span class="pnum">[0007]</span> 이 직렬화 전제는 멀티유저 협업에서 <b>머리-막힘(head-of-line blocking, HOL)</b>이라는 구조적 병목을 낳는다. 즉, 어떤 사용자가 수십 초·수 분에 이르는 긴 작업(대용량 빌드, 다단계 도구 실행, 장문 추론)을 먼저 점유하면, 그 뒤에 “한 줄짜리 질문”을 던진 다른 사용자의 답은 앞 작업이 끝날 때까지 <b>전혀 흐르지 못하고 큐 뒤에서 막힌다</b>. 협업의 본질이 “각자가 자기 답을 동시에 받는 것”임에도, 직렬화 모델에서는 <b>한 사람의 작업이 전체 방을 정지시키는</b> 셈이다. 더 나아가, busy 게이트로 선점을 허용하면 진행 중이던 응답·파일 수정이 도중에 잘려 산출이 깨지고, 직렬 처리 도중 세션 상태 표시가 활성과 유휴 사이에서 깜빡이는 부수 문제까지 동반한다. 요컨대 종래의 “동시 입력 = 직렬 1개 활성 턴 + 단일 출력 스트림” 계약은 <b>다중 사용자 병렬성과 본질적으로 충돌</b>한다.</p>
+  <p class="para"><span class="pnum">[0008]</span> 본 발명은 바로 이 지점을 <b>정반대로 역전</b>한다. 본 발명은 입력(추론)을 직렬화하지 아니하고, 게시글당 단일 공유 세션·단일 공유 컨텍스트·단일 샌드박스 디렉토리를 그대로 유지하면서도 <b>각 사용자 입력을 서로 독립한 턴으로 동시에 병렬 추론</b>하여, N명의 답이 서로의 작업과 무관하게 즉시 각각 스트리밍되도록 한다(머리-막힘 제거). 그 대신, 병렬 추론이 같은 작업 디렉토리·같은 컨텍스트에 일으키는 <b>부수효과(파일 쓰기·도구 실행·컨텍스트 커밋)만을 샌드박스 단위 단일 직렬 실행기(133)로 순차 적용</b>하여, 파일을 머지하지 아니하고 <b>쓰기 자체를 직렬화</b>함으로써 잠금 없는 동시 쓰기에 따른 파일 깨짐·부분 쓰기·디렉토리 레이스를 차단한다(파일 안전 경계, 논리 결과는 last-wins). 이때 종래의 FIFO 큐는 “모든 동시 입력의 직렬화 수단”이라는 지위를 잃고, 동시 진행 턴 수가 샌드박스당 상한(<code>MAX_CONCURRENT_TURNS</code>)을 초과할 때 그 초과분만 라운드로빈으로 받는 <b>공정 큐(135)로 의미가 축소</b>된다. 이러한 <b>병렬 추론 + 직렬 부수효과</b> 계약이 본 발명이 종래기술 대비 새롭게 해결하는 미해결 과제이자 그 해결 수단의 정수이다.</p>
+
+  <!-- ============================ 선행기술문헌 ============================ -->
+  <div class="field">【선행기술문헌】<span class="en">Citation List</span></div>
+  <div class="subfield">【특허문헌】</div>
+  <ul class="tight">
+    <li>(특허문헌 1) 본 출원의 선행 모출원 명세서(Aidit) — 다중 사용자 공유 AI 컨텍스트, 키-블라인드 서버, 클라이언트 직접 호출(BYOK), 지연 요약, 활성 세그먼트당 요약 멱등 가드(201/409).</li>
+    <li>(특허문헌 2) 다중 사용자 온라인 회의의 클라이언트측 요약 및 서버를 요약 저장소로 축소하는 구성에 관한 특허문헌(본 출원의 선행 모출원이 최근접 선행문헌으로 인용한 부류).</li>
+    <li>(특허문헌 3) US 11,330,026 B1 — 통신 세션에서 복수 사용자의 <b>동시 화면 공유</b>(순차 공유를 동시 공유로 전환). 공유 대상은 기성 화면 영상이며, 공유 작업 디렉토리에 대한 코드 에이전트의 병렬 추론·부수효과 직렬화·턴 1:1 귀속을 개시하지 않는다.</li>
+    <li>(특허문헌 4) US 9,626,509 B1 — 단일 운영환경 내 <b>다중 버전 애플리케이션 동시 실행을 통한 악성 콘텐츠 분석</b>(샌드박스 디토네이션). 단일 분석자의 위협 탐지를 목적으로 하며, 다중 사용자 협업·단일 공유 컨텍스트·부수효과 직렬 lock을 개시하지 않는다.</li>
+  </ul>
+  <div class="subfield">【비특허문헌】</div>
+  <ul class="tight">
+    <li>(비특허문헌 1) 셸·파일 도구를 호출하는 코드 인터프리터형 LLM 에이전트 및 서버측 실행 샌드박스에 관한 일반 문헌.</li>
+    <li>(비특허문헌 2) 복수 사용자 공동 편집 협업 클라우드 IDE 및 원격 개발 컨테이너에 관한 일반 문헌.</li>
+    <li>(비특허문헌 3) 하나의 살아있는 AI 세션을 다수 뷰어가 공유·개입(fan-out)하고 컨텍스트를 자동 압축하는 오픈소스 흐름(MIT) — 본 발명 및 선행발명의 공통 영감원이나, <b>단일 활성 턴·직렬 처리</b>를 전제한다.</li>
+    <li>(비특허문헌 4) 서버-전송 이벤트(Server-Sent Events) 단방향 fan-out 및 <code>Last-Event-ID</code> 재생에 관한 문헌.</li>
+    <li>(비특허문헌 5) 동시성 상한(concurrency limit)·작업 큐·라운드로빈 공정 스케줄링 및 잠금(lock)에 의한 임계영역 직렬화에 관한 일반 문헌.</li>
+    <li>(비특허문헌 6) Multi-Principal Agent Coordination Protocol(MPAC), arXiv 2604.09744(2026) — <b>서로 다른 주체(principal)의 다중 에이전트</b>가 공유 상태를 조정하는 응용계층 프로토콜. Session/Intent/Operation/Conflict/Governance 5계층, 의도 선언 선행, 충돌의 1급 객체화, Lamport 시계, <b>낙관적 동시성 제어(OCC)</b>(stale 상태 거부·rebase·재시도)를 사용한다. <b>본 발명과의 차이</b>: 본 발명은 주체별 다중 에이전트가 아니라 <b>단일 공유 에이전트 세션·단일 공유 컨텍스트</b>에 다중 사용자 입력을 병렬 턴으로 주입하며, 충돌을 사후 검출·rebase하는 대신 <b>부수효과를 단일 직렬 실행기로 통과시켜 충돌을 미연에 방지</b>(비관적 직렬화)한다.</li>
+    <li>(비특허문헌 7) 자율 코딩 에이전트(예: Google Jules/Gemini) — 다수 작업을 각각 <b>별도 클라우드 가상머신에서 동시 수행</b>(작업별 격리). 본 발명은 작업·사용자별 별도 VM·프로세스·에이전트를 두지 않고 단일 공유 세션에서 처리한다.</li>
+    <li>(비특허문헌 8) 멀티테넌트 에이전트 플랫폼(예: Qyclaw) — 다중 사용자·다중 세션을 <b>사용자/세션 단위로 격리</b>하고 고위험 도구 실행만 컨테이너 샌드박스로 분리. 본 발명은 격리가 아니라 단일 공유 세션의 협업을 지향한다.</li>
+    <li>(비특허문헌 9) 개인용 자율 에이전트(예: Frona) — 샌드박스별·에이전트별 격리 + <b>에이전트 간 위임</b>으로 병렬화(MAX_CONCURRENT_TASKS). 병렬성이 에이전트 위임에서 비롯되고 각 대화가 단일 에이전트에 귀속되어, 다중 사용자 병렬 턴·단일 공유 세션과 상이하다.</li>
+    <li>(비특허문헌 10) 다중 사용자 채팅 에이전트(예: sBot/Spacebot류) — 다중 사용자 동시 대화를 지원하나 빠른 연속 입력을 <b>단일 턴으로 배칭(coalesce)</b>하고 작업을 독립 워커 프로세스로 처리. 본 발명은 입력을 배칭하지 아니하고 각 입력을 1:1 귀속 독립 턴으로 처리한다.</li>
+    <li>(비특허문헌 11) 기계학습 실험 추적 플랫폼(예: MLflow) — 다중 프로세스/중첩 run으로 병렬 실행을 추적. 그러나 단일 공유 대화 컨텍스트·부수효과 직렬 lock·실시간 다중 사용자 fan-out이 없는 독립 실험 로깅이다.</li>
+  </ul>
+
+  <!-- ============================ 발명의 내용 ============================ -->
+  <div class="field">【발명의 내용】<span class="en">Summary of Invention</span></div>
+
+  <div class="subfield">【해결하려는 과제】<span class="en">Technical Problem</span></div>
+  <p class="para"><span class="pnum">[0009]</span> 본 발명은 게시글마다 1:1로 결속된 격리 샌드박스(130) 안에서 구동되는 <b>단일 공유 코드 에이전트 세션</b>에 복수의 사용자가 동시에 접속·조향하는 협업 구조를 전제로 하되, 그 단일 공유 세션에 입력이 동시에 도착할 때 발생하는 다음의 미해결 과제를 해결하는 것을 목적으로 한다.</p>
+  <ul class="tight">
+    <li><b>가. 머리-막힘(head-of-line blocking)의 제거.</b> 단일 공유 세션에서 동시 입력을 <b>FIFO로 직렬화하고 바쁨(busy) 게이트로 단일 활성 턴만 허용</b>하면, 늦게 도착한 사용자의 짧은 질문이 먼저 진행 중인 타인의 장시간 작업(예: 대규모 빌드·설치)이 끝날 때까지 대기열에 갇힌다. 본 발명은 <b>각 사용자 입력의 추론이 타인의 작업 길이와 무관하게 즉시 시작·스트리밍</b>되도록 하여 이 머리-막힘을 제거하는 것을 과제로 한다.</li>
+    <li><b>나. 동일 작업공간에 대한 파일 쓰기 충돌(file-write conflict)의 방지.</b> 여러 입력을 동시에 추론하면, 두 추론이 같은 샌드박스 디렉토리(<code>sandboxRoot</code>)의 같은 파일을 거의 동시에 쓰려 할 때 부분 쓰기·파일 깨짐·디렉토리 레이스가 발생한다. 본 발명은 <b>추론을 병렬화하면서도 파일·도구·컨텍스트 갱신 등 부수효과만은 충돌 없이 안전하게 적용</b>하는 것을 과제로 한다.</li>
+    <li><b>다. 공유 컨텍스트의 정합 보존.</b> 게시글당 단일 공유 대화 컨텍스트(convo, 134)를 유지하면서 복수 추론을 병렬로 진행하면, 각 추론이 만든 <code>assistant.tool_calls</code>와 그에 대응하는 <code>role:tool</code> 결과의 짝이 뒤섞여 LLM이 요구하는 메시지 정합이 깨질 수 있다. 본 발명은 <b>병렬 추론 중에도 공유 컨텍스트의 메시지 짝 정합을 보존</b>하는 것을 과제로 한다.</li>
+    <li><b>라. 입력–응답의 1:1 귀속 보존.</b> 동시 도착 입력을 하나의 추론으로 배칭(batching)하면 누구의 질문에 대한 답인지가 흐려지고, 입력별 추론강도(<code>reasoningEffort</code>)·중단(interrupt) 윈도우가 소실된다. 본 발명은 <b>각 사용자 메시지가 자신의 응답으로 1:1 귀속</b>되도록 보존하는 것을 과제로 한다.</li>
+    <li><b>마. 비용·부하의 제어 및 공정성.</b> 추론을 무제한 병렬화하면 LLM 토큰 비용과 서버 부하가 폭증한다. 본 발명은 <b>샌드박스당 동시 추론 수의 상한을 두되 초과분을 거부하지 않고 공정하게 대기</b>시키는 것을 과제로 한다.</li>
+    <li><b>바. 선행발명 토대의 보존.</b> 위 동시성 문제를 해결하되, 게시글–샌드박스 1:1 자동 프로비저닝, 단일 생성–전원 중계(fan-out), seq 정렬 버블화, 서버 키 모델(키 비노출), 경로 탈출 차단·리소스·네트워크 격리, 라이프사이클(suspend/resume) 등 <b>기존 협업·격리·보안 토대를 함께 유지</b>하는 것을 과제로 한다.</li>
+  </ul>
+
+  <div class="subfield">【과제의 해결 수단】<span class="en">Solution to Problem</span></div>
+  <p class="para"><span class="pnum">[0010]</span> 상기 과제를 해결하기 위하여 본 발명은, 게시글(150)마다 1:1로 결속된 격리 샌드박스(130)와 그 안에서 구동되는 <b>단일 코드 에이전트 프로세스(131)·단일 공유 대화 컨텍스트(134)·단일 작업 디렉토리</b>를 유지하는 한편, 복수 사용자의 입력을 <b>병렬로 추론(parallel inference)</b>하고 그 추론에 수반되는 파일 쓰기·도구 실행·컨텍스트 커밋 등 <b>부수효과는 샌드박스 단위로 직렬화(serial side-effects)</b>하는 것을 핵심 결합 구성으로 한다. 즉 <b>추론은 병렬, 부수효과는 직렬</b>이라는 이원적 동시성 계약을 통해, 추론 경로에서는 머리-막힘을 제거하고 부수효과 경로에서는 파일 쓰기 충돌을 차단한다. 이때 사용자별 프로세스 격리를 채택하지 아니하므로 단일 공유 컨텍스트에 의한 협업 의미론이 보존된다.</p>
+
+  <p class="para"><span class="pnum">[0011]</span> <b>(수단 1: 독립 턴 단위의 병렬 추론)</b> 각 사용자 메시지는 하나의 독립한 <b>턴(turn, 153)</b>으로 취급되어, 타인의 진행 중인 턴과 무관하게 즉시 자신의 LLM 추론을 개시하고 토큰을 스트리밍한다. 그 결과 복수의 응답 버블(AGENT_REPLY)이 <b>동시에(STREAMING) 생성</b>되어 접속한 전원에게 일괄 중계(fan-out)된다. 이로써 단일 출력 스트림으로 직렬화하던 종전 계약과 달리, N명의 답이 동시에 흐르며 머리-막힘이 제거된다.</p>
+
+  <p class="para"><span class="pnum">[0012]</span> <b>(수단 2: 부수효과의 샌드박스 단위 직렬 실행기)</b> 병렬 추론된 각 턴이 발생시키는 파일 쓰기·도구(셸) 실행·컨텍스트 커밋 등 모든 부수효과는 샌드박스 단위 <b>부수효과 직렬 실행기(133)</b>의 단일 락(lock)/큐를 통과하여 <b>완료된 순서대로 순차 적용</b>된다. 따라서 두 턴이 같은 파일을 쓰더라도 파일을 머지하지 않고 <b>쓰기 자체를 직렬화</b>하므로(논리적 결과는 마지막 쓰기 승, last-wins), 같은 작업 디렉토리에 락 없는 동시 쓰기가 0이 되어 부분 쓰기·파일 깨짐·디렉토리 레이스가 차단된다. 이것이 본 발명의 <b>파일 안전 경계</b>이다.</p>
+
+  <p class="para"><span class="pnum">[0013]</span> <b>(수단 3: 공유 컨텍스트의 스냅샷 읽기 + 완료 순 직렬 커밋)</b> 각 병렬 턴은 시작 시점에 공유 컨텍스트(134)의 <b>스냅샷을 읽어</b> 추론 입력으로 삼고, 완료된 추론 결과·도구 결과는 부수효과 직렬 실행기(133)를 통해 <b>완료 순으로 컨텍스트에 직렬 커밋</b>된다. 이로써 <code>assistant.tool_calls</code>와 대응 <code>role:tool</code> 결과의 짝 정합이 보존된다. 동시에 발사된 턴들이 서로의 직전 입력을 보지 못할 수 있는 신선도 한계(staleness)는 협업 즉시성을 위한 수용된 trade-off로서 명시된다.</p>
+
+  <p class="para"><span class="pnum">[0014]</span> <b>(수단 4: 입력–응답 1:1 귀속)</b> 각 턴은 정확히 하나의 사용자 메시지(151)에 대응하고, 그 응답 버블은 해당 입력을 <code>replyToId</code>로 지목하여 <b>1:1 귀속</b>된다. 동시 입력을 하나의 추론으로 배칭하지 아니하므로, 입력별 추론강도(<code>reasoningEffort</code>)와 중단 윈도우가 개별 보존된다. 별도의 결과 취합·머지 로직 없이, 단조 증가하는 시퀀스 번호(seq)를 갖는 메시지 테이블(transcript)에서 정렬과 재생이 자연 발생한다.</p>
+
+  <p class="para"><span class="pnum">[0015]</span> <b>(수단 5: turnId 멀티플렉싱과 턴 지정 인터럽트)</b> 샌드박스 내부에는 <b>턴 멀티플렉서(132)</b>가 두어져, 진행 중인 턴들을 <code>turns: Map&lt;turnId, Turn&gt;</code>로 다중화하고 각 턴마다 고유한 중단 플래그와 <code>AbortController</code>를 둔다. 도구 호출의 확인응답(ack)은 <code>{callId, turnId}</code>로 라우팅되어 올바른 턴의 올바른 도구 호출에 매칭되고, 어댑터(124)는 <code>Map&lt;turnId, TurnSink&gt;</code>로 프로세스 출력을 턴별 싱크에 디스패치한다. 중단(interrupt)은 <b>turnId를 지정</b>하여 자기 턴만 중단하고 타인의 병렬 턴에는 영향을 주지 아니하며, 조향(steer) 텍스트는 해당 턴의 새 입력으로 주입된다.</p>
+
+  <p class="para"><span class="pnum">[0016]</span> <b>(수단 6: 활성 턴 카운트 기반 세션 상태)</b> 세션 상태는 단일 토글이 아니라 <b>활성 턴 수의 카운트</b>로 정의되어, 활성 턴이 1개 이상이면 RUNNING, 0개이면 IDLE로 산출된다. 이 상태는 종전과 동일한 <code>session.status</code> SSE enum으로 전원에게 중계되되, 복수 턴의 동시 진행을 정확히 반영한다.</p>
+
+  <p class="para"><span class="pnum">[0017]</span> <b>(수단 7: 동시성 상한과 공정 큐)</b> 샌드박스당 동시 추론 턴의 상한(<code>MAX_CONCURRENT_TURNS</code>)을 두어 LLM 비용·부하를 제어하되, 상한 초과분은 거부(예: 429)하지 아니하고 <b>동시성 상한 공정 큐(135)</b>에서 라운드로빈 방식으로 공정하게 대기시킨다. 또한 한 사용자는 자신의 활성 턴을 동시에 1개만 진행하므로(per-user inflight = 1), 동시 진행 턴 수는 동시 활성 사용자 수를 넘지 아니한다. 이로써 병렬성은 서로 다른 사용자 사이에서만 발생한다.</p>
+
+  <p class="para"><span class="pnum">[0018]</span> <b>(수단 8: opt-in 게이트와 단일 토폴로지 보장)</b> 상기 병렬 경로는 <b>기본 비활성(OFF)</b>이며, 샌드박스 메타데이터의 동시성 플래그(<code>Sandbox.meta.concurrentTurns === true</code>)가 참일 때에만 활성화된다. 이 플래그는 게시글 생성(<code>POST /posts</code>)의 <code>concurrent</code> 파라미터(기본 false)로 <b>1회 확정되며 이후 변경되지 아니한다</b>. 거짓이면 종전의 단일 활성 턴/FIFO 경로로 동작하므로, 같은 샌드박스 안에서 직렬 경로와 병렬 경로가 혼재하지 아니한다.</p>
+
+  <p class="para"><span class="pnum">[0019]</span> <b>(수단 9: 서버 키 모델 및 단일 생성–전원 중계)</b> LLM 호출의 <code>API_KEY</code>·<code>BASE_URL</code>·<code>MODEL</code>은 서버 비밀(.env, 160)에만 두어 응답·로그·SSE에 노출하지 아니하며(<code>GET /runtime</code>은 모델명과 baseURL 호스트만 반환), 추론 비용을 서버가 내부 부담한다. 다중 클라이언트가 동일 세션에 접속하면 새 프로세스 생성 없이 기존 세션을 재사용하고, 산출은 1회 생성 후 전원에게 동일하게 중계(fan-out)된다. AI on 상태에서도 사람 메시지는 먼저 <code>type=HUMAN</code> 버블로 seq를 부여받아 즉시 전원에게 중계된 뒤 세션에 주입되어 무유실을 보장한다.</p>
+
+  <p class="para"><span class="pnum">[0020]</span> <b>(수단 10: 격리 경계 및 라이프사이클)</b> 샌드박스는 (가) 파일 API와 도구 실행 모두 <code>Sandbox.path</code> 루트 상대 경로를 강제하고 realpath 정규화 후 루트 prefix를 검사하여 <code>..</code>·심볼릭링크·절대경로 주입에 의한 경로 탈출을 차단하고(위반 시 거부), (나) 프로세스·메모리·CPU·동시 수의 상한으로 리소스를 제한하며, (다) 네트워크 정책을 적용한다. 게시글–샌드박스 1:1 자동 프로비저닝과 상태기계(CREATING→READY→RUNNING→SUSPENDED→(resume)RUNNING→cleanup, +ERROR)가 유지되며, suspend는 프로세스를 내리되 디렉토리를 보존하고 resume은 디렉토리를 보존한 채 프로세스를 재기동한다(인메모리 컨텍스트는 런타임 정책으로 재구성). 상기 수단 1 내지 10은 상호 결합하여 하나의 멀티테넌트 협업 동작 모델을 이루되, 그 구체적 표현(특정 식별자·기법·정책)은 바람직한 일 실시예의 예시로서 청구범위를 한정하지 아니한다.</p>
+
+  <div class="subfield">【발명의 효과】<span class="en">Advantageous Effects</span></div>
+  <ul class="tight">
+    <li><b>격리 없는 공유 협업:</b> 작업·사용자·에이전트 단위로 별도 프로세스·가상머신을 두는 격리 방식(작업별 VM, 멀티테넌트 격리, 에이전트 위임)과 달리, 단일 공유 세션·단일 공유 컨텍스트를 유지한 채 다중 사용자가 병렬로 협업하므로 공유 컨텍스트가 보존되고 프로세스 폭증이 없다.</li>
+    <li><b>충돌 미연 방지(비관적 직렬화):</b> 충돌을 사후 검출·재시도(rebase)하는 낙관적 동시성 제어와 달리, 부수효과를 단일 직렬 실행기로 통과시켜 동시 쓰기 진입 자체를 차단하므로 충돌·머지가 원천적으로 발생하지 않는다.</li>
+    <li><b>머리-막힘 제거:</b> 각 사용자 입력이 독립 턴으로 즉시 병렬 추론·스트리밍되므로, 짧은 질문이 타인의 장시간 작업 뒤로 밀리지 않고 응답 지연이 타인의 작업 길이에서 분리된다.</li>
+    <li><b>파일 쓰기 충돌 방지:</b> 부수효과를 샌드박스 단위 단일 락으로 직렬화하여 같은 작업 디렉토리에 락 없는 동시 쓰기를 0으로 만들고, 부분 쓰기·파일 깨짐·디렉토리 레이스를 차단한다(파일 머지 불필요, 논리적으로 last-wins).</li>
+    <li><b>협업 의미론 보존:</b> 사용자별 프로세스 격리 대신 단일 공유 컨텍스트·단일 작업 디렉토리를 유지하므로, 전원이 동일한 산출을 함께 보고 조향하는 협업이 병렬화에도 불구하고 유지된다.</li>
+    <li><b>컨텍스트 정합 보존:</b> 스냅샷 읽기 + 완료 순 직렬 커밋으로 <code>assistant.tool_calls</code>↔<code>role:tool</code> 짝 정합이 보존되어, 병렬 추론 중에도 단일 공유 대화가 깨지지 않는다.</li>
+    <li><b>1:1 귀속과 개별 제어:</b> 각 응답이 자신의 입력에 1:1 귀속되어 누구의 답인지 명확하며, 입력별 추론강도·턴 지정 인터럽트가 개별 보존되어 자기 턴만 중단·조향할 수 있다.</li>
+    <li><b>비용·부하 제어와 공정성:</b> 동시성 상한으로 토큰 비용·부하를 제어하면서 초과분을 거부 대신 공정 큐로 대기시켜, 병렬성과 운영 안정성을 양립한다.</li>
+    <li><b>안전한 점진 도입:</b> 병렬 경로가 기본 OFF이고 글 생성 시 1회 확정되는 opt-in 게이트로 활성화되므로, 같은 샌드박스에서 직렬/병렬이 혼재하지 않아 기존 단일 활성 턴 동작과의 호환·안전한 단계적 도입이 보장된다.</li>
+    <li><b>키 비노출·비용 내부화 및 토대 계승:</b> 서버 키 모델로 클라이언트의 키 부담을 제거하고 키를 응답·로그·SSE에서 차단하며, 게시글–샌드박스 1:1, 단일 생성–전원 중계, seq 정렬 버블화, 경로 탈출 차단·리소스·네트워크 격리, suspend/resume 라이프사이클 등 선행 토대를 그대로 계승한다.</li>
+  </ul>
+  <p class="note">상기 효과 중 정량 진술은 PoC 단위의 예시적·기대값이며, 동시성 관련 효과는 본 명세서가 기술한 동작 특성의 범위에서 이해되어야 한다.</p>
+
+  <!-- ============================ 도면의 간단한 설명 ============================ -->
+  <div class="field">【도면의 간단한 설명】<span class="en">Brief Description of Drawings</span></div>
+  <ul class="tight">
+    <li><b>도 1</b>은 본 발명 시스템(100)의 전체 구성도로서, 클라이언트(110)·서버(120)·게시글당 1:1 샌드박스(130)와 그 내부의 턴 멀티플렉서(132)·부수효과 직렬 실행기(133)·공유 컨텍스트(134)·동시성 상한 공정 큐(135), 서버 비밀(160) 주입의 OpenAI-호환 LLM(140)의 관계를 나타낸다.</li>
+    <li><b>도 2</b>는 게시글–샌드박스 1:1 자동 생성과 <code>concurrent</code> 플래그의 1회 확정, 그리고 샌드박스 라이프사이클 및 <b>활성 턴 수(count) 기반</b> 세션 상태를 나타낸다.</li>
+    <li><b>도 3</b>은 복수 사용자가 단일 공유 세션에 접속하여 <b>여러 턴이 동시 병렬 추론</b>되고 <b>여러 AGENT_REPLY가 동시에 STREAMING</b>되어 전원에게 turnId별로 fan-out되는 모습(각 답글 <code>replyToId</code> 1:1)을 나타낸다.</li>
+    <li><b>도 4</b>는 AI on 메시지의 처리 흐름(사람 메시지 선등록 → 자기 턴 즉시 inflight → 토큰·도구·파일 스트리밍 → 부수효과 직렬화 → 확정·완료 순 커밋)을 나타낸 순서도이다.</li>
+    <li><b>도 5</b>는 본 발명의 핵심인 <b>병렬 추론 + 직렬 부수효과</b> 시퀀스도로서, 사용자 A·B의 두 턴이 동시 추론(토큰 인터리브)되고 파일·도구 부수효과는 부수효과 직렬 실행기(133)의 단일 lock을 순차 통과하며, turnId 지정 인터럽트와 동시성 상한 공정 큐(135)를 나타낸다.</li>
+    <li><b>도 6</b>은 보안·격리 모델로서, 서버 키 비노출, 경로 탈출 차단·리소스·네트워크 정책, 그리고 v2 파일 안전 경계(부수효과 직렬 lock)를 나타낸다.</li>
+  </ul>
+
+  <!-- ============================ 도면 ============================ -->
+
+  <!-- 도 1 -->
+  <figure>
+    <svg viewBox="0 0 880 440" role="img" aria-label="시스템 전체 구성 — 병렬 추론과 직렬 부수효과">
+      <defs>
+        <marker id="f1a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#000"/></marker>
+        <marker id="f1b" markerWidth="12" markerHeight="12" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 Z" fill="#000"/></marker>
+      </defs>
+
+      <!-- 클라이언트(110) -->
+      <rect x="12" y="40" width="196" height="372" fill="none" stroke="#000" stroke-width="1.3"/>
+      <text x="110" y="58" text-anchor="middle" font-size="11" font-weight="bold">클라이언트(110)</text>
+      <rect x="28" y="74" width="164" height="28" fill="#f2f2f2" stroke="#000"/><text x="110" y="92" text-anchor="middle" font-size="10">UI (React/PWA)</text>
+      <rect x="28" y="108" width="164" height="34" fill="#f2f2f2" stroke="#000"/><text x="110" y="124" text-anchor="middle" font-size="9.6">인증 스토어(111)</text><text x="110" y="136" text-anchor="middle" font-size="8.2">토큰만(키 저장 없음)</text>
+      <rect x="28" y="148" width="164" height="28" fill="#f2f2f2" stroke="#000"/><text x="110" y="166" text-anchor="middle" font-size="10">REST 클라이언트(112)</text>
+      <rect x="28" y="182" width="164" height="36" fill="#f2f2f2" stroke="#000"/><text x="110" y="199" text-anchor="middle" font-size="9.6">ThreadStream/SSE(113)</text><text x="110" y="211" text-anchor="middle" font-size="8.2">turnId별 동시 다중 스트림</text>
+      <rect x="28" y="224" width="164" height="28" fill="#f2f2f2" stroke="#000"/><text x="110" y="242" text-anchor="middle" font-size="10">워크스페이스 패널(114)</text>
+
+      <!-- 서버(120) -->
+      <rect x="248" y="40" width="332" height="372" fill="none" stroke="#000" stroke-width="1.3"/>
+      <text x="414" y="58" text-anchor="middle" font-size="11" font-weight="bold">서버(120)</text>
+      <rect x="266" y="74" width="142" height="40" fill="#fff" stroke="#000"/><text x="337" y="92" text-anchor="middle" font-size="10">REST API(121)</text><text x="337" y="106" text-anchor="middle" font-size="8">메시지·턴·인터럽트·파일</text>
+      <rect x="428" y="74" width="138" height="40" fill="#fff" stroke="#000"/><text x="497" y="92" text-anchor="middle" font-size="10">SSE 허브(122)</text><text x="497" y="106" text-anchor="middle" font-size="8">단일 생성·전원 fan-out</text>
+      <rect x="266" y="124" width="142" height="42" fill="#fff" stroke="#000"/><text x="337" y="143" text-anchor="middle" font-size="10">도메인(123)</text><text x="337" y="156" text-anchor="middle" font-size="8">seq SoT · 1:1 귀속</text>
+      <rect x="428" y="124" width="138" height="42" fill="#fff" stroke="#000"/><text x="497" y="143" text-anchor="middle" font-size="10">AgentRuntime(124)</text><text x="497" y="156" text-anchor="middle" font-size="8">turnId별 Sink 디스패치</text>
+      <rect x="266" y="178" width="300" height="34" fill="#fff" stroke="#000" stroke-dasharray="4 3"/><text x="416" y="194" text-anchor="middle" font-size="9.5">서버 비밀(160) .env: API_KEY · BASE_URL · MODEL</text><text x="416" y="206" text-anchor="middle" font-size="8" font-style="italic">응답/로그/SSE에 키 미포함</text>
+      <ellipse cx="416" cy="248" rx="64" ry="11" fill="#f7f7f7" stroke="#000"/><path d="M352 248 v36 a64 11 0 0 0 128 0 v-36" fill="#ececec" stroke="#000"/><text x="416" y="274" text-anchor="middle" font-size="9.5">DB(125): Message(seq SoT)</text>
+
+      <!-- 샌드박스(130) -->
+      <rect x="620" y="40" width="248" height="372" fill="none" stroke="#000" stroke-width="1.3"/>
+      <text x="744" y="58" text-anchor="middle" font-size="11" font-weight="bold">격리 샌드박스(130)</text>
+      <rect x="636" y="70" width="216" height="40" fill="#f2f2f2" stroke="#000"/><text x="744" y="88" text-anchor="middle" font-size="10">코드 에이전트(131) — pᵢ</text><text x="744" y="101" text-anchor="middle" font-size="8.2">단일 세션 · 단일 cwd</text>
+      <rect x="636" y="118" width="216" height="44" fill="#e8f0e8" stroke="#000"/><text x="744" y="135" text-anchor="middle" font-size="9.6">턴 멀티플렉서(132)</text><text x="744" y="148" text-anchor="middle" font-size="8.2">turns: Map&lt;turnId,Turn&gt; 병렬 추론</text><text x="744" y="158" text-anchor="middle" font-size="8.2">↳ 동시 inflight 턴(153)</text>
+      <rect x="636" y="168" width="216" height="42" fill="#fbf7e8" stroke="#000"/><text x="744" y="185" text-anchor="middle" font-size="9.6">부수효과 직렬 실행기(133)</text><text x="744" y="198" text-anchor="middle" font-size="8.2">샌드박스 단위 단일 lock/queue</text>
+      <rect x="636" y="216" width="216" height="38" fill="#fff" stroke="#000"/><text x="744" y="232" text-anchor="middle" font-size="9.6">공유 컨텍스트(134) convo</text><text x="744" y="245" text-anchor="middle" font-size="8.2">스냅샷 읽기 + 완료 순 직렬 커밋</text>
+      <rect x="636" y="260" width="216" height="34" fill="#fff" stroke="#000"/><text x="744" y="276" text-anchor="middle" font-size="9.6">동시성 상한 공정 큐(135)</text><text x="744" y="288" text-anchor="middle" font-size="8">MAX_CONCURRENT_TURNS 초과분</text>
+      <rect x="636" y="300" width="216" height="28" fill="#ececec" stroke="#000"/><text x="744" y="318" text-anchor="middle" font-size="9">sandboxRoot(격리 루트)</text>
+
+      <!-- LLM(140) -->
+      <rect x="266" y="350" width="300" height="46" fill="#fff" stroke="#000" stroke-width="1.3"/><text x="416" y="370" text-anchor="middle" font-size="10">OpenAI-호환 LLM 엔드포인트(140)</text><text x="416" y="385" text-anchor="middle" font-size="8.2">서버가 비용 부담 · N턴 동시 completion 스트림</text>
+
+      <!-- links -->
+      <line x1="208" y1="160" x2="248" y2="100" stroke="#000" stroke-width="1.2" marker-end="url(#f1a)" marker-start="url(#f1a)"/><text x="228" y="108" text-anchor="middle" font-size="8">REST</text>
+      <line x1="248" y1="200" x2="208" y2="206" stroke="#000" stroke-width="1.2" marker-end="url(#f1a)"/><text x="226" y="220" text-anchor="middle" font-size="8">SSE(다중)</text>
+      <line x1="566" y1="140" x2="620" y2="135" stroke="#000" stroke-width="1.6" marker-end="url(#f1b)" marker-start="url(#f1b)"/>
+      <line x1="566" y1="372" x2="620" y2="180" stroke="#000" stroke-width="1.6" marker-end="url(#f1b)" marker-start="url(#f1b)"/><text x="600" y="300" text-anchor="middle" font-size="8" transform="rotate(-66 600 300)">병렬 completion</text>
+      <line x1="408" y1="195" x2="636" y2="190" stroke="#000" stroke-width="1.6" stroke-dasharray="3 3" marker-end="url(#f1b)"/><text x="540" y="184" text-anchor="middle" font-size="8">키 주입(.env)</text>
+    </svg>
+    <figcaption><b>도 1.</b> 시스템 전체 구성. 클라이언트(110)는 토큰만 보관하고, 서버(120)가 LLM(140)을 서버 비밀(160)의 키로 호출하여 비용을 외부화한다. 샌드박스(130) 내부에서 턴 멀티플렉서(132)가 다중 사용자 입력을 <b>병렬 추론</b>하고, 부수효과 직렬 실행기(133)가 파일 쓰기·도구 실행·컨텍스트 커밋을 <b>단일 lock으로 직렬화</b>한다. 출력은 1회 생성되어 SSE 허브(122)로 전원에게 turnId별로 동시 중계된다.</figcaption>
+  </figure>
+
+  <!-- 도 2 -->
+  <figure>
+    <svg viewBox="0 0 880 300" role="img" aria-label="게시글-샌드박스 1:1 및 라이프사이클(활성 턴 카운트 기반)">
+      <defs><marker id="f2a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#000"/></marker></defs>
+      <rect x="20" y="28" width="150" height="40" rx="6" fill="#eee" stroke="#000"/><text x="95" y="46" text-anchor="middle" font-size="10">POST /posts</text><text x="95" y="60" text-anchor="middle" font-size="8.6">게시글(150) 등록</text>
+      <line x1="170" y1="48" x2="210" y2="48" stroke="#000" marker-end="url(#f2a)"/>
+      <rect x="210" y="28" width="170" height="40" rx="6" fill="#f2f2f2" stroke="#000"/><text x="295" y="46" text-anchor="middle" font-size="10">샌드박스(130) 1:1 생성</text><text x="295" y="60" text-anchor="middle" font-size="8.6">@unique 결속</text>
+      <line x1="380" y1="48" x2="420" y2="48" stroke="#000" marker-end="url(#f2a)"/>
+      <rect x="420" y="28" width="200" height="40" rx="6" fill="#fbf7e8" stroke="#000"/><text x="520" y="46" text-anchor="middle" font-size="9.5">concurrent 플래그 1회 확정</text><text x="520" y="60" text-anchor="middle" font-size="8.2">meta.concurrentTurns(기본 false·변경 불가)</text>
+      <rect x="640" y="28" width="220" height="40" rx="6" fill="#fff" stroke="#000"/><text x="750" y="46" text-anchor="middle" font-size="8.8">true→병렬 경로 / false→v0.1 단일활성턴</text><text x="750" y="60" text-anchor="middle" font-size="8.2">한 샌드박스 내 직렬·병렬 불혼합</text>
+
+      <text x="440" y="104" text-anchor="middle" font-size="11" font-weight="bold">샌드박스 라이프사이클(상태기계)</text>
+      <g font-size="9.5">
+        <rect x="30" y="120" width="92" height="34" rx="4" fill="#f7f7f7" stroke="#000"/><text x="76" y="141" text-anchor="middle">CREATING</text>
+        <rect x="150" y="120" width="80" height="34" rx="4" fill="#f7f7f7" stroke="#000"/><text x="190" y="141" text-anchor="middle">READY</text>
+        <rect x="258" y="120" width="92" height="34" rx="4" fill="#e8f0e8" stroke="#000"/><text x="304" y="141" text-anchor="middle">RUNNING</text>
+        <rect x="378" y="120" width="104" height="34" rx="4" fill="#f7f7f7" stroke="#000"/><text x="430" y="141" text-anchor="middle">SUSPENDED</text>
+        <rect x="512" y="120" width="92" height="34" rx="4" fill="#fff" stroke="#000"/><text x="558" y="141" text-anchor="middle">cleanup</text>
+        <rect x="640" y="120" width="80" height="34" rx="4" fill="#fbeaea" stroke="#000"/><text x="680" y="141" text-anchor="middle">ERROR</text>
+      </g>
+      <line x1="122" y1="137" x2="150" y2="137" stroke="#000" marker-end="url(#f2a)"/>
+      <line x1="230" y1="137" x2="258" y2="137" stroke="#000" marker-end="url(#f2a)"/><text x="244" y="130" text-anchor="middle" font-size="8">attach</text>
+      <line x1="350" y1="137" x2="378" y2="137" stroke="#000" marker-end="url(#f2a)"/><text x="364" y="130" text-anchor="middle" font-size="8">유휴</text>
+      <path d="M430 120 C 430 92, 304 92, 304 118" fill="none" stroke="#000" marker-end="url(#f2a)"/><text x="367" y="92" text-anchor="middle" font-size="8">resume(디렉토리 보존)</text>
+      <line x1="482" y1="137" x2="512" y2="137" stroke="#000" marker-end="url(#f2a)"/>
+      <line x1="604" y1="137" x2="640" y2="137" stroke="#000" stroke-dasharray="3 3" marker-end="url(#f2a)"/><text x="622" y="130" text-anchor="middle" font-size="8">실패</text>
+
+      <text x="440" y="194" text-anchor="middle" font-size="11" font-weight="bold">에이전트 세션 상태 = 활성 턴 수(count)</text>
+      <g font-size="9.5">
+        <rect x="120" y="210" width="160" height="36" rx="4" fill="#f7f7f7" stroke="#000"/><text x="200" y="227" text-anchor="middle">IDLE</text><text x="200" y="240" text-anchor="middle" font-size="8">활성 턴 = 0</text>
+        <rect x="440" y="210" width="180" height="36" rx="4" fill="#e8f0e8" stroke="#000"/><text x="530" y="227" text-anchor="middle">RUNNING</text><text x="530" y="240" text-anchor="middle" font-size="8">활성 턴 ≥ 1</text>
+      </g>
+      <path d="M280 220 C 350 204, 380 204, 440 220" fill="none" stroke="#000" marker-end="url(#f2a)"/><text x="360" y="200" text-anchor="middle" font-size="8">턴 발사(count++)</text>
+      <path d="M440 238 C 380 256, 350 256, 280 240" fill="none" stroke="#000" marker-end="url(#f2a)"/><text x="360" y="262" text-anchor="middle" font-size="8">턴 종료(count--), 0이면 IDLE</text>
+      <text x="710" y="231" text-anchor="middle" font-size="8.4">단일 토글 아님(카운트 기반)</text>
+    </svg>
+    <figcaption><b>도 2.</b> 게시글 생성 시 샌드박스(130)가 1:1(@unique)로 자동 생성되며, 이때 <code>concurrent</code> 플래그가 <b>1회 확정(기본 false, 변경 불가)</b>되어 병렬 경로 활성 여부가 정해진다. 세션 상태는 단일 busy 토글이 아니라 <b>활성 턴 수(count)</b>로 정의되어, 활성 턴이 1개 이상이면 RUNNING, 0이면 IDLE이다. suspend는 디렉토리를 보존하고 resume는 디렉토리를 그대로 둔 채 프로세스를 재기동한다.</figcaption>
+  </figure>
+
+  <!-- 도 3 -->
+  <figure>
+    <svg viewBox="0 0 880 330" role="img" aria-label="단일 세션 다중 attach — 여러 턴이 동시 병렬 추론되어 여러 AGENT_REPLY가 동시 스트리밍">
+      <defs><marker id="f3a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#000"/></marker></defs>
+      <!-- users -->
+      <rect x="16" y="44" width="120" height="34" rx="4" fill="#f2f2f2" stroke="#000"/><text x="76" y="65" text-anchor="middle" font-size="10">사용자 A</text>
+      <rect x="16" y="148" width="120" height="34" rx="4" fill="#f2f2f2" stroke="#000"/><text x="76" y="169" text-anchor="middle" font-size="10">사용자 B</text>
+      <rect x="16" y="252" width="120" height="34" rx="4" fill="#f2f2f2" stroke="#000"/><text x="76" y="273" text-anchor="middle" font-size="10">사용자 C(관전)</text>
+
+      <!-- single session -->
+      <rect x="300" y="40" width="246" height="250" rx="6" fill="#e8f0e8" stroke="#000" stroke-width="1.4"/>
+      <text x="423" y="62" text-anchor="middle" font-size="12" font-weight="bold">단일 공유 세션(131)</text>
+      <text x="423" y="78" text-anchor="middle" font-size="8.6" font-style="italic">단일 convo(134) · 단일 cwd</text>
+      <text x="423" y="98" text-anchor="middle" font-size="9.5">턴 멀티플렉서(132): turns Map</text>
+      <!-- concurrent turns -->
+      <rect x="320" y="112" width="206" height="40" rx="4" fill="#fff" stroke="#000"/><text x="423" y="129" text-anchor="middle" font-size="9.4">턴 t_A (turnId=A) — 추론중</text><text x="423" y="142" text-anchor="middle" font-size="8" font-style="italic">replyToId → A의 메시지</text>
+      <rect x="320" y="160" width="206" height="40" rx="4" fill="#fff" stroke="#000"/><text x="423" y="177" text-anchor="middle" font-size="9.4">턴 t_B (turnId=B) — 추론중</text><text x="423" y="190" text-anchor="middle" font-size="8" font-style="italic">replyToId → B의 메시지</text>
+      <text x="423" y="222" text-anchor="middle" font-size="8.6">두 턴 동시 inflight(병렬 completion)</text>
+      <text x="423" y="238" text-anchor="middle" font-size="8.6" font-style="italic">토큰 인터리브 — 단일 출력 아님</text>
+
+      <!-- send arrows (A,B drive turns; C only watches) -->
+      <line x1="136" y1="60" x2="300" y2="128" stroke="#000" marker-end="url(#f3a)"/><text x="218" y="84" text-anchor="middle" font-size="8">send→턴 발사</text>
+      <line x1="136" y1="166" x2="300" y2="178" stroke="#000" marker-end="url(#f3a)"/><text x="218" y="160" text-anchor="middle" font-size="8">send→턴 발사</text>
+      <line x1="136" y1="266" x2="300" y2="232" stroke="#000" stroke-dasharray="2 2" marker-end="url(#f3a)"/><text x="214" y="262" text-anchor="middle" font-size="8">attach만(관전)</text>
+
+      <!-- hub -->
+      <rect x="600" y="140" width="110" height="52" rx="4" fill="#fff" stroke="#000"/><text x="655" y="162" text-anchor="middle" font-size="10">SSE 허브(122)</text><text x="655" y="178" text-anchor="middle" font-size="8.2">turnId별 fan-out</text>
+      <line x1="546" y1="132" x2="600" y2="156" stroke="#000" stroke-width="1.6" marker-end="url(#f3a)"/><text x="572" y="128" text-anchor="middle" font-size="8">STREAM t_A</text>
+      <line x1="546" y1="180" x2="600" y2="172" stroke="#000" stroke-width="1.6" marker-end="url(#f3a)"/><text x="572" y="196" text-anchor="middle" font-size="8">STREAM t_B</text>
+
+      <!-- fan-out: each user receives BOTH reply bubbles concurrently -->
+      <g font-size="8.6">
+        <rect x="744" y="30" width="124" height="74" rx="4" fill="#f2f2f2" stroke="#000"/><text x="806" y="46" text-anchor="middle" font-weight="bold">사용자 A 화면</text>
+        <rect x="752" y="52" width="108" height="20" fill="#e8f0e8" stroke="#000"/><text x="806" y="66" text-anchor="middle" font-size="8">AGENT_REPLY(A) ▮stream</text>
+        <rect x="752" y="76" width="108" height="20" fill="#e8f0e8" stroke="#000"/><text x="806" y="90" text-anchor="middle" font-size="8">AGENT_REPLY(B) ▮stream</text>
+
+        <rect x="744" y="128" width="124" height="74" rx="4" fill="#f2f2f2" stroke="#000"/><text x="806" y="144" text-anchor="middle" font-weight="bold">사용자 B 화면</text>
+        <rect x="752" y="150" width="108" height="20" fill="#e8f0e8" stroke="#000"/><text x="806" y="164" text-anchor="middle" font-size="8">AGENT_REPLY(A) ▮stream</text>
+        <rect x="752" y="174" width="108" height="20" fill="#e8f0e8" stroke="#000"/><text x="806" y="188" text-anchor="middle" font-size="8">AGENT_REPLY(B) ▮stream</text>
+
+        <rect x="744" y="226" width="124" height="74" rx="4" fill="#f2f2f2" stroke="#000"/><text x="806" y="242" text-anchor="middle" font-weight="bold">사용자 C 화면</text>
+        <rect x="752" y="248" width="108" height="20" fill="#e8f0e8" stroke="#000"/><text x="806" y="262" text-anchor="middle" font-size="8">AGENT_REPLY(A) ▮stream</text>
+        <rect x="752" y="272" width="108" height="20" fill="#e8f0e8" stroke="#000"/><text x="806" y="286" text-anchor="middle" font-size="8">AGENT_REPLY(B) ▮stream</text>
+      </g>
+      <line x1="710" y1="158" x2="744" y2="66" stroke="#000" stroke-dasharray="2 2" marker-end="url(#f3a)"/>
+      <line x1="710" y1="166" x2="744" y2="164" stroke="#000" stroke-dasharray="2 2" marker-end="url(#f3a)"/>
+      <line x1="710" y1="176" x2="744" y2="262" stroke="#000" stroke-dasharray="2 2" marker-end="url(#f3a)"/>
+    </svg>
+    <figcaption><b>도 3.</b> 복수 사용자가 하나의 공유 세션(131)에 접속하면 새 프로세스 없이 기존 세션을 재사용하되, A·B의 입력은 각각 독립 턴(turnId=A, turnId=B)으로 <b>동시 병렬 추론</b>된다. 결과적으로 <b>여러 AGENT_REPLY 버블이 동시에 STREAMING</b>되어 SSE 허브(122)가 turnId별로 전원에게 fan-out하며(관전자 C 포함), 각 답글은 자신을 유발한 메시지에 <code>replyToId</code>로 1:1 귀속된다. 단일 출력이 아닌 동시 다중 출력이라는 점에서 v0.1의 단일 스트림 모델과 정반대다.</figcaption>
+  </figure>
+
+  <!-- 도 4 -->
+  <figure>
+    <svg viewBox="0 0 440 480" role="img" aria-label="AI on 메시지 처리 흐름 — 즉시 자기 턴 inflight">
+      <defs><marker id="f4a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#000"/></marker></defs>
+      <rect x="130" y="12" width="180" height="34" rx="17" fill="#eee" stroke="#000"/><text x="220" y="33" text-anchor="middle" font-size="10">① 사람 메시지(AI on) 전송</text>
+      <line x1="220" y1="46" x2="220" y2="62" stroke="#000" marker-end="url(#f4a)"/>
+      <rect x="90" y="62" width="260" height="42" fill="#fff" stroke="#000"/><text x="220" y="80" text-anchor="middle" font-size="9.5">② HUMAN 버블 선등록·seq 부여 → 즉시 중계</text><text x="220" y="95" text-anchor="middle" font-size="8.4">clientId 멱등키(중복 게시 방지) · 무유실</text>
+      <line x1="220" y1="104" x2="220" y2="120" stroke="#000" marker-end="url(#f4a)"/>
+      <polygon points="220,120 312,158 220,196 128,158" fill="#f2f2f2" stroke="#000"/><text x="220" y="154" text-anchor="middle" font-size="9.2">동시성 상한 여유?</text><text x="220" y="168" text-anchor="middle" font-size="7.8">per-user inflight=1 확인</text>
+      <text x="330" y="150" text-anchor="middle" font-size="9" font-weight="bold">예</text>
+      <line x1="312" y1="158" x2="392" y2="158" stroke="#000" marker-end="url(#f4a)"/>
+      <rect x="356" y="200" width="80" height="48" rx="4" fill="#fff" stroke="#000"/><text x="396" y="220" text-anchor="middle" font-size="8.4">공정 큐(135)</text><text x="396" y="233" text-anchor="middle" font-size="7.6">초과분 RR 대기</text><text x="396" y="244" text-anchor="middle" font-size="7.4">(429 아님)</text>
+      <line x1="396" y1="200" x2="396" y2="158" stroke="#000" stroke-dasharray="3 3"/><text x="378" y="180" text-anchor="middle" font-size="8" font-weight="bold">초과</text>
+      <path d="M356 224 C 300 224, 260 210, 224 196" fill="none" stroke="#000" stroke-dasharray="3 3" marker-end="url(#f4a)"/>
+      <line x1="220" y1="196" x2="220" y2="214" stroke="#000" marker-end="url(#f4a)"/>
+      <rect x="90" y="214" width="260" height="44" fill="#e8f0e8" stroke="#000"/><text x="220" y="232" text-anchor="middle" font-size="9.5">③ 자기 턴(153) 즉시 발사 — inflight</text><text x="220" y="246" text-anchor="middle" font-size="8.2">남의 병렬 턴과 무관(머리-막힘 없음)</text>
+      <line x1="220" y1="258" x2="220" y2="274" stroke="#000" marker-end="url(#f4a)"/>
+      <rect x="90" y="274" width="260" height="58" fill="#fff" stroke="#000"/><text x="220" y="292" text-anchor="middle" font-size="9.5">④ 스트리밍 fan-out(turnId별)</text><text x="220" y="307" text-anchor="middle" font-size="8.2">agent.token → AGENT_REPLY 누적</text><text x="220" y="321" text-anchor="middle" font-size="8.2">tool.call/result · file.changed</text>
+      <line x1="220" y1="332" x2="220" y2="348" stroke="#000" marker-end="url(#f4a)"/>
+      <rect x="90" y="348" width="260" height="48" fill="#fbf7e8" stroke="#000"/><text x="220" y="366" text-anchor="middle" font-size="9.5">⑤ 부수효과(파일/도구/커밋)는</text><text x="220" y="381" text-anchor="middle" font-size="8.6">직렬 실행기(133) 단일 lock 통과(도 5)</text>
+      <line x1="220" y1="396" x2="220" y2="412" stroke="#000" marker-end="url(#f4a)"/>
+      <rect x="100" y="412" width="240" height="54" rx="17" fill="#eee" stroke="#000"/><text x="220" y="431" text-anchor="middle" font-size="9.5">⑥ 메시지 확정(COMPLETE/FAILED)</text><text x="220" y="446" text-anchor="middle" font-size="8.2">완료 순 convo 직렬 커밋(tool_calls↔tool 정합)</text><text x="220" y="459" text-anchor="middle" font-size="8.2">⑦ 활성 턴 count-- ; 0이면 IDLE</text>
+    </svg>
+    <figcaption><b>도 4.</b> AI on 메시지 처리 흐름. 사람 메시지가 먼저 seq를 받아 전원에게 표시(선등록·무유실)된 뒤, 동시성 상한과 per-user inflight=1을 확인하여 곧바로 <b>자기 턴이 inflight로 발사</b>된다(남의 작업 뒤로 밀리지 않음). 토큰·도구·파일 이벤트가 turnId별로 스트리밍되며, 부수효과는 직렬 실행기(133)를 통과하고, 완료 시 convo에 완료 순으로 직렬 커밋된 뒤 활성 턴 카운트가 감소한다. 상한 초과분만 공정 큐(135)가 라운드로빈으로 대기시킨다.</figcaption>
+  </figure>
+
+  <!-- 도 5 -->
+  <figure>
+    <svg viewBox="0 0 880 440" role="img" aria-label="병렬 추론 + 직렬 부수효과 시퀀스도">
+      <defs><marker id="f5a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#000"/></marker></defs>
+      <!-- lifelines -->
+      <text x="70" y="22" text-anchor="middle" font-size="10.5" font-weight="bold">사용자 A</text>
+      <text x="240" y="22" text-anchor="middle" font-size="10.5" font-weight="bold">턴 t_A(추론)</text>
+      <text x="430" y="22" text-anchor="middle" font-size="10.5" font-weight="bold">부수효과 직렬<tspan font-size="9"> 실행기(133)</tspan></text>
+      <text x="620" y="22" text-anchor="middle" font-size="10.5" font-weight="bold">턴 t_B(추론)</text>
+      <text x="800" y="22" text-anchor="middle" font-size="10.5" font-weight="bold">사용자 B</text>
+      <line x1="70" y1="30" x2="70" y2="420" stroke="#000" stroke-dasharray="3 3"/>
+      <line x1="240" y1="30" x2="240" y2="420" stroke="#000" stroke-dasharray="3 3"/>
+      <line x1="430" y1="30" x2="430" y2="420" stroke="#000" stroke-width="1.4"/>
+      <line x1="620" y1="30" x2="620" y2="420" stroke="#000" stroke-dasharray="3 3"/>
+      <line x1="800" y1="30" x2="800" y2="420" stroke="#000" stroke-dasharray="3 3"/>
+
+      <!-- single lock guard band on 133 -->
+      <rect x="422" y="36" width="16" height="384" fill="#fbf7e8" stroke="#000"/><text x="430" y="412" text-anchor="middle" font-size="7.6">단일 lock</text>
+
+      <!-- concurrent send -->
+      <line x1="70" y1="50" x2="240" y2="50" stroke="#000" marker-end="url(#f5a)"/><text x="155" y="44" text-anchor="middle" font-size="8.6">send(msgA) — 동시 발사</text>
+      <line x1="800" y1="58" x2="620" y2="58" stroke="#000" marker-end="url(#f5a)"/><text x="710" y="52" text-anchor="middle" font-size="8.6">send(msgB) — 동시 발사</text>
+
+      <!-- parallel inference (interleaved token streaming) -->
+      <rect x="222" y="66" width="36" height="120" fill="#e8f0e8" stroke="#000"/><text x="240" y="128" text-anchor="middle" font-size="8" transform="rotate(-90 240 128)">병렬 추론(토큰)</text>
+      <rect x="602" y="74" width="36" height="120" fill="#e8f0e8" stroke="#000"/><text x="620" y="136" text-anchor="middle" font-size="8" transform="rotate(-90 620 136)">병렬 추론(토큰)</text>
+      <!-- interleaved token fan-out to both users -->
+      <line x1="222" y1="80" x2="72" y2="80" stroke="#000" stroke-dasharray="2 2" marker-end="url(#f5a)"/><text x="150" y="76" text-anchor="middle" font-size="7.6">token A→전원</text>
+      <line x1="638" y1="92" x2="798" y2="92" stroke="#000" stroke-dasharray="2 2" marker-end="url(#f5a)"/><text x="718" y="88" text-anchor="middle" font-size="7.6">token B→전원</text>
+      <line x1="222" y1="110" x2="72" y2="110" stroke="#000" stroke-dasharray="2 2" marker-end="url(#f5a)"/>
+      <line x1="638" y1="124" x2="798" y2="124" stroke="#000" stroke-dasharray="2 2" marker-end="url(#f5a)"/>
+      <text x="440" y="58" text-anchor="middle" font-size="8" font-style="italic">(추론은 인터리브 — 서로 막지 않음)</text>
+
+      <!-- side effects serialized: A acquires lock first -->
+      <line x1="258" y1="200" x2="422" y2="200" stroke="#000" marker-end="url(#f5a)"/><text x="340" y="194" text-anchor="middle" font-size="8.4">writeFile(x) 요청</text>
+      <rect x="424" y="200" width="12" height="46" fill="#ececec" stroke="#000"/><text x="490" y="218" text-anchor="middle" font-size="8.2">① lock 획득 → write 적용</text>
+      <line x1="422" y1="240" x2="258" y2="240" stroke="#000" stroke-dasharray="2 2" marker-end="url(#f5a)"/><text x="340" y="234" text-anchor="middle" font-size="8">ack{callId,turnId=A}</text>
+
+      <!-- B requests same file but waits for lock -->
+      <line x1="602" y1="214" x2="438" y2="214" stroke="#000" marker-end="url(#f5a)"/><text x="520" y="208" text-anchor="middle" font-size="8.4">writeFile(x) 요청</text>
+      <rect x="438" y="214" width="120" height="44" fill="#fbeaea" stroke="#000" stroke-dasharray="3 2"/><text x="498" y="232" text-anchor="middle" font-size="7.8">lock 대기(블록)</text><text x="498" y="244" text-anchor="middle" font-size="7.4">동시 쓰기 0 보장</text>
+      <rect x="424" y="262" width="12" height="44" fill="#ececec" stroke="#000"/><text x="498" y="284" text-anchor="middle" font-size="8.2">② lock 인계 → write 적용(last-wins)</text>
+      <line x1="422" y1="300" x2="602" y2="300" stroke="#000" stroke-dasharray="2 2" marker-end="url(#f5a)"/><text x="520" y="294" text-anchor="middle" font-size="8">ack{callId,turnId=B}</text>
+
+      <!-- turnId-scoped interrupt -->
+      <line x1="800" y1="334" x2="620" y2="334" stroke="#000" marker-end="url(#f5a)"/><text x="712" y="328" text-anchor="middle" font-size="8.4">interrupt(turnId=B) + steer</text>
+      <rect x="602" y="334" width="36" height="22" fill="#fbeaea" stroke="#000"/><text x="620" y="349" text-anchor="middle" font-size="7.6">t_B만 중단</text>
+      <text x="240" y="349" text-anchor="middle" font-size="8" font-style="italic">t_A 무관(계속)</text>
+
+      <!-- serial commit to convo + MAX_CONCURRENT note -->
+      <line x1="240" y1="378" x2="430" y2="378" stroke="#000" marker-end="url(#f5a)"/><text x="335" y="372" text-anchor="middle" font-size="8">완료 순 convo(134) 직렬 커밋</text>
+      <line x1="620" y1="396" x2="430" y2="396" stroke="#000" marker-end="url(#f5a)"/><text x="525" y="390" text-anchor="middle" font-size="8">tool_calls↔tool 짝 정합 보존</text>
+      <rect x="20" y="360" width="180" height="48" fill="#fff" stroke="#000"/><text x="110" y="378" text-anchor="middle" font-size="7.8">동시 inflight ≤ MAX_CONCURRENT_TURNS</text><text x="110" y="390" text-anchor="middle" font-size="7.6">초과분 → 공정 큐(135) RR</text><text x="110" y="402" text-anchor="middle" font-size="7.6">per-user inflight = 1</text>
+    </svg>
+    <figcaption><b>도 5 (핵심).</b> 병렬 추론 + 직렬 부수효과 시퀀스도. 사용자 A·B가 동시에 발사한 두 턴(t_A, t_B)의 <b>추론(토큰)은 인터리브되어 병렬</b>로 진행되고 전원에게 동시 스트리밍된다. 그러나 파일 쓰기·도구 실행·컨텍스트 커밋 같은 <b>부수효과는 부수효과 직렬 실행기(133)의 단일 lock</b>을 통과해야 하므로, 같은 파일 x에 대한 두 쓰기는 머지 없이 순차 적용된다(논리 결과 last-wins, 같은 cwd에 lock 없는 동시 쓰기 0). 도구 ack는 <code>{callId, turnId}</code>로 라우팅되고, 인터럽트는 turnId를 지정하여 해당 턴만 중단하며(t_A 무관), completion·도구결과는 완료 순으로 convo(134)에 직렬 커밋되어 <code>tool_calls↔tool</code> 짝 정합을 보존한다. 동시 inflight 턴은 MAX_CONCURRENT_TURNS로 상한되고 초과분만 공정 큐(135)가 라운드로빈 대기시킨다.</figcaption>
+  </figure>
+
+  <!-- 도 6 -->
+  <figure>
+    <svg viewBox="0 0 880 360" role="img" aria-label="보안·격리 경계 — 서버 키 비노출 + 경로탈출 차단 + v2 파일안전(부수효과 직렬 lock)">
+      <defs><marker id="f6a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#000"/></marker></defs>
+
+      <!-- key boundary -->
+      <rect x="16" y="34" width="270" height="150" rx="6" fill="#fff" stroke="#000" stroke-width="1.3"/>
+      <text x="151" y="54" text-anchor="middle" font-size="11" font-weight="bold">(가) 서버 키 비노출</text>
+      <rect x="34" y="66" width="234" height="34" fill="#fff" stroke="#000" stroke-dasharray="4 3"/><text x="151" y="82" text-anchor="middle" font-size="9.2">서버 비밀(160) .env</text><text x="151" y="94" text-anchor="middle" font-size="8">API_KEY · BASE_URL · MODEL</text>
+      <rect x="34" y="106" width="234" height="30" fill="#f2f2f2" stroke="#000"/><text x="151" y="125" text-anchor="middle" font-size="8.6">GET /runtime → 모델명·baseURL 호스트만</text>
+      <rect x="34" y="142" width="234" height="32" fill="#fbeaea" stroke="#000"/><text x="151" y="158" text-anchor="middle" font-size="8.6">응답 · 로그 · SSE에 키 미포함</text><text x="151" y="169" text-anchor="middle" font-size="8">(클라이언트는 토큰만 보유, BYOK 폐지)</text>
+
+      <!-- path-escape / resource / network -->
+      <rect x="306" y="34" width="280" height="150" rx="6" fill="#fff" stroke="#000" stroke-width="1.3"/>
+      <text x="446" y="54" text-anchor="middle" font-size="11" font-weight="bold">(나) 경로탈출·리소스·네트워크</text>
+      <rect x="324" y="66" width="244" height="38" fill="#f2f2f2" stroke="#000"/><text x="446" y="82" text-anchor="middle" font-size="8.8">경로탈출 차단: Sandbox.path 루트 상대 강제</text><text x="446" y="95" text-anchor="middle" font-size="8">realpath 정규화 후 prefix 검사(.. ·심볼릭·절대경로 거부→400)</text>
+      <rect x="324" y="110" width="244" height="30" fill="#f2f2f2" stroke="#000"/><text x="446" y="129" text-anchor="middle" font-size="8.8">리소스 제한: 프로세스/메모리/CPU·동시 수 상한</text>
+      <rect x="324" y="146" width="244" height="28" fill="#f2f2f2" stroke="#000"/><text x="446" y="164" text-anchor="middle" font-size="8.8">네트워크 정책 · 내부는 전권(파일CRUD·venv·셸)</text>
+
+      <!-- v2 file safety = serial lock -->
+      <rect x="606" y="34" width="262" height="150" rx="6" fill="#fbf7e8" stroke="#000" stroke-width="1.4"/>
+      <text x="737" y="54" text-anchor="middle" font-size="11" font-weight="bold">(다) v2 파일안전 경계</text>
+      <text x="737" y="70" text-anchor="middle" font-size="8.6" font-style="italic">= 부수효과 직렬 lock(133)</text>
+      <rect x="624" y="80" width="226" height="44" fill="#e8f0e8" stroke="#000"/><text x="737" y="98" text-anchor="middle" font-size="8.8">같은 sandboxRoot에 lock 없는</text><text x="737" y="111" text-anchor="middle" font-size="8.8">동시 쓰기 = 0</text>
+      <rect x="624" y="130" width="226" height="44" fill="#fff" stroke="#000"/><text x="737" y="147" text-anchor="middle" font-size="8.4">파일 깨짐·부분 쓰기·디렉토리 레이스 차단</text><text x="737" y="160" text-anchor="middle" font-size="8">머지 불필요(쓰기 직렬화, 논리 last-wins)</text><text x="737" y="170" text-anchor="middle" font-size="7.6">한계: detached/백그라운드 프로세스 쓰기는 lock 밖</text>
+
+      <!-- sandbox root with concurrent turns funneling through lock -->
+      <rect x="120" y="218" width="640" height="124" rx="6" fill="none" stroke="#000" stroke-width="1.3"/>
+      <text x="440" y="238" text-anchor="middle" font-size="10.5" font-weight="bold">격리 샌드박스(130) — sandboxRoot</text>
+      <rect x="150" y="252" width="120" height="34" rx="4" fill="#e8f0e8" stroke="#000"/><text x="210" y="273" text-anchor="middle" font-size="9">턴 t_A(병렬)</text>
+      <rect x="150" y="296" width="120" height="34" rx="4" fill="#e8f0e8" stroke="#000"/><text x="210" y="317" text-anchor="middle" font-size="9">턴 t_B(병렬)</text>
+      <rect x="400" y="274" width="120" height="44" rx="4" fill="#fbf7e8" stroke="#000" stroke-width="1.4"/><text x="460" y="292" text-anchor="middle" font-size="9">직렬 실행기(133)</text><text x="460" y="305" text-anchor="middle" font-size="8">단일 lock/queue</text>
+      <rect x="600" y="274" width="130" height="44" rx="4" fill="#ececec" stroke="#000"/><text x="665" y="292" text-anchor="middle" font-size="9">파일시스템</text><text x="665" y="305" text-anchor="middle" font-size="8">순차 적용(직렬화)</text>
+      <line x1="270" y1="269" x2="400" y2="288" stroke="#000" marker-end="url(#f6a)"/>
+      <line x1="270" y1="313" x2="400" y2="304" stroke="#000" marker-end="url(#f6a)"/>
+      <text x="335" y="262" text-anchor="middle" font-size="8" font-style="italic">동시 write 요청</text>
+      <line x1="520" y1="296" x2="600" y2="296" stroke="#000" stroke-width="1.6" marker-end="url(#f6a)"/><text x="560" y="290" text-anchor="middle" font-size="8">직렬 1건씩</text>
+    </svg>
+    <figcaption><b>도 6.</b> 보안·격리 경계. (가) 서버 키는 서버 비밀(160) <code>.env</code>에만 두고 응답·로그·SSE에 노출하지 않으며 <code>GET /runtime</code>은 모델명·baseURL 호스트만 반환한다(BYOK 폐지). (나) 모든 파일 API·도구 실행은 <code>Sandbox.path</code> 루트 상대로 강제되어 realpath 정규화 후 prefix 검사로 경로탈출(<code>..</code>·심볼릭링크·절대경로 주입)을 거부하고, 리소스·동시 수·네트워크가 제한된다. (다) v2의 파일안전 경계는 곧 부수효과 직렬 lock(133)으로, 같은 <code>sandboxRoot</code>에 lock 없는 동시 쓰기를 0으로 만들어 파일 깨짐·부분 쓰기·디렉토리 레이스를 차단한다(머지 불필요·논리 last-wins). 다만 도구가 띄운 detached·백그라운드 프로세스의 쓰기는 lock 밖이라 별도 하드닝이 필요하다.</figcaption>
+  </figure>
+
+  <!-- ============================ 발명을 실시하기 위한 구체적인 내용 ============================ -->
+  <div class="field">【발명을 실시하기 위한 구체적인 내용】<span class="en">Detailed Description of Embodiments</span></div>
+
+  <p class="note">이하의 상세한 설명은 본 발명의 <b>일 실시예(예시)</b>로서 기재된 것이다. 본 명세서에서 예시로 사용하는 특정 식별자·기법·정책 — 예컨대 거대언어모델을 OpenAI-호환 인터페이스로 호출하는 점, 부수효과 직렬화 수단(133)을 단일 락(lock)/큐 형태의 직렬 실행기로 구현하는 점, 키를 환경 또는 설정으로 주입하는 점, 동시성 상한을 <code>MAX_CONCURRENT_TURNS</code>로 두고 초과분을 라운드로빈 공정 큐로 처리하는 점, 정렬·재생을 단조 증가 시퀀스 번호(<code>seq</code>)로 수행하는 점, 병렬 경로를 <code>Sandbox.meta.concurrentTurns</code> 플래그로 게시글 생성 시 1회 확정하고 그 기본값을 비활성(OFF)으로 두는 점, 한 사용자의 동시 활성 턴을 1로 제한하는 점, 턴을 <code>turnId</code>·<code>AbortController</code> 등으로 다중화하는 점, 그리고 API 경로·열거형·이벤트명 등 — 은 모두 구현을 돕기 위한 <b>예시일 뿐이며 청구범위를 한정하지 아니한다</b>. 청구범위는 오로지 【특허청구범위】의 기재에 의하여 정해지고, 상기 예시적 구성은 그 균등 범위 내에서 다른 수단으로 치환될 수 있다.</p>
+
+  <div class="subfield">1. 시스템 개요 및 데이터 모델</div>
+  <p class="para"><span class="pnum">[0021]</span> 일 실시예에서 클라이언트(110)는 React/PWA로 구현되고, 서버(120)는 Node/Fastify와 Prisma ORM(데이터베이스(125)는 PoC에서 SQLite, 확장 시 PostgreSQL)으로 구현된다. 실시간 전송은 단방향 서버→클라이언트의 SSE(EventSource)로, 쓰기(사람 메시지·세션 제어·인터럽트·파일 조회)는 REST로 처리한다. 서버(120)는 REST API(121), SSE 허브(122), seq를 단일 진실 출처(SoT)로 삼는 도메인 로직(123), 에이전트 런타임 어댑터(124), 데이터베이스(125)로 구성된다. 각 격리 샌드박스(130)는 코드 에이전트 프로세스(131), 그 내부의 턴 멀티플렉서(132), 부수효과 직렬 실행기(133), 공유 컨텍스트(134), 동시성 상한 공정 큐(135)를 포함하거나 이들과 결합된다. LLM 추론은 외부 OpenAI-호환 LLM 엔드포인트(140)로 위임되고, 키는 전적으로 서버 비밀(160)에만 존재한다.</p>
+  <p class="para"><span class="pnum">[0022]</span> 데이터 모델은 다음을 포함한다. <b>사용자(User)</b>: 회원/게스트를 구분하되 LLM 키 필드를 두지 않으며 게스트는 <code>passwordHash=null</code>이다. <b>게시글(Post)</b>: 스레드의 루트로서 본 실시예에서 <code>communityId</code>를 두지 않는다. <b>샌드박스(Sandbox)</b>: <code>postId @unique</code>로 게시글과 1:1 결속되고, 호스트 루트 경로 <code>path</code>, 상태 <code>status</code>, 런타임 메타 <code>runtime</code>, 그리고 동시성 정책 <code>meta.concurrentTurns</code>(불리언, 기본 <code>false</code>)를 가진다. <b>에이전트 세션(AgentSession)</b>: 사용 모델명 <code>model</code>을 저장하되 키는 저장하지 않는다. <b>메시지(Message)</b>: 모든 채팅 버블의 단일 표(transcript)로서 <code>type∈{HUMAN, AGENT_REPLY, TOOL_CALL, TOOL_RESULT, SYSTEM}</code>의 5종, 진행 상태 <code>status∈{PENDING, STREAMING, COMPLETE, FAILED}</code>, 서버가 부여하는 단조 증가 정수 <code>seq</code>, 사람 메시지 멱등키 <code>clientId</code>, 도구 버블 연결 <code>toolCallId</code>, 그리고 어느 사람 메시지에 대한 응답인지를 1:1로 가리키는 <code>replyToId</code>를 가진다. <b>도구 호출(ToolCall)</b>: 종류 <code>kind</code>, 이름 <code>name</code>, 인자 <code>args</code>, 결과 <code>result</code>, 종료코드 <code>exitCode</code>, 상태 <code>status</code>를 가진다. 추천(Vote)·북마크(Bookmark) 등 보조 모델을 더 포함할 수 있다.</p>
+  <p class="para"><span class="pnum">[0023]</span> 정렬·재생·멱등의 단일 출처를 보장하기 위해 메시지에는 <code>@@unique([postId, seq])</code> 제약을 두어 게시글 범위 내에서 <code>seq</code>의 유일성과 단조성을 강제한다. 후술하는 병렬 추론에서 복수의 턴이 동시에 진행되더라도, 모든 버블(HUMAN·AGENT_REPLY·TOOL_CALL·TOOL_RESULT·SYSTEM)은 결국 단일 <code>seq</code> 축에 직렬로 자리매김되므로, 클라이언트는 <code>seq</code> 오름차순 정렬만으로 전체 스레드(transcript)를 결정적으로 재구성한다. 즉 “결과의 취합·머지”는 별도 병합 로직이 아니라 <code>seq</code> 단조 증가 메시지 표에서 자연 발생하는 성질이다.</p>
+
+  <div class="subfield">2. 게시글–샌드박스 1:1 자동 프로비저닝(도 2)</div>
+  <p class="para"><span class="pnum">[0024]</span> <code>POST /posts</code> 처리 시 서버는 게시글을 먼저 등록하고 <code>{ post, sandbox }</code>를 반환한다. 이어 서비스 레이어가 호스트 디렉토리를 만들어 <code>Sandbox.postId</code>에 <code>@unique</code>로 결속하고 상태를 <code>CREATING</code>으로 둔다. 이때 본문의 <code>concurrent</code> 필드(기본 <code>false</code>)가 <code>Sandbox.meta.concurrentTurns</code>로 <b>1회 확정</b>되며, 글 생성 이후에는 변경되지 않는다. 디렉토리·런타임 메타 준비가 끝나면 <code>READY</code>로 전이하고 <code>sandbox.status</code> 이벤트로 통지하며, 실패 시 <code>ERROR</code>로 둔다. 샌드박스 상태기계는 <code>CREATING→READY→RUNNING→SUSPENDED→(resume)RUNNING→cleanup</code>의 전이를 가지며 임의 단계에서 <code>ERROR</code>로 분기할 수 있다. 운영자 비용·리소스 보호를 위해 동시 생성 수를 제한하고, 초과 시 큐잉 또는 429를 반환한다.</p>
+
+  <div class="subfield">3. 세션 시작·접속 및 단일 생성–전원 중계(도 3)</div>
+  <p class="para"><span class="pnum">[0025]</span> <code>POST /posts/:id/session</code> 시, 샌드박스가 <code>READY</code>/<code>SUSPENDED</code>이면 에이전트 런타임 어댑터(124)가 서버 비밀(160)의 OpenAI-호환 설정(<code>API_KEY/BASE_URL/MODEL</code>)을 자식 프로세스의 환경/설정으로 주입하여 코드 에이전트 프로세스(131)를 spawn하고 세션을 <code>STARTING→IDLE</code>로 둔다. 이미 활성 세션이 있으면 새 프로세스를 띄우지 않고 기존 세션에 attach한다. 다중 클라이언트가 동일 세션에 접속하더라도 출력은 한 번만 생성되어 SSE 허브(122)를 통해 전원에게 동일하게 중계(fan-out)된다. 어댑터는 개념적으로 <code>spawn / attach / send(session, input, lang, meta, emit) / interrupt(turnId, steer?) / suspend</code> 인터페이스를 가지며, <code>emit</code> 콜백이 내보내는 런타임 이벤트(<code>token / tool.call / tool.output / tool.result / file.changed / status</code>)를 서버가 받아 Message/ToolCall로 영속하고 fan-out한다. 재접속 시 클라이언트는 <code>Last-Event-ID</code>(=마지막으로 받은 <code>seq</code>)로 누락분을 결정적으로 재생받는다.</p>
+
+  <div class="subfield">4. AI on/off 메시지 계약(도 4)</div>
+  <p class="para"><span class="pnum">[0026]</span> <code>POST /posts/:id/messages</code>는 본문 <code>{ body, aiMode, clientId, reasoningEffort? }</code>(키 없음)를 받는다. 서버는 우선 <code>type=HUMAN</code> 메시지에 <code>seq</code>를 부여해 <code>message.created</code>로 <b>즉시</b> fan-out한다(사람 메시지 무유실 보장). 그 후 <code>aiMode=true</code>이면 해당 사람 메시지를 활성 세션에 주입하여 그 사용자에게 1:1로 귀속되는 에이전트 <b>턴(turn)(153)</b>을 개시한다. 응답 버블 <code>AGENT_REPLY</code>는 자기 사람 메시지를 <code>replyToId</code>로 가리키며 <code>PENDING→STREAMING→COMPLETE/FAILED</code>로 확정되고, 토큰은 <code>agent.token</code>으로 누적된다. <code>aiMode=false</code>이면 사람끼리의 메시지 게시만 한다. <code>clientId</code>는 멱등키로, 동일 <code>clientId</code> 재요청은 새 버블을 만들지 않고 기존 버블을 반환한다. per-message <code>reasoningEffort</code> 등 사용자별 파라미터는 각 턴에 개별 적용되며 다른 사용자의 턴과 혼합되지 않는다.</p>
+
+  <div class="subfield">5. 도구 호출·터미널 출력의 버블화(도 4 ⑤)</div>
+  <p class="para"><span class="pnum">[0027]</span> 에이전트의 도구 호출은 <code>tool.call</code>(상태 <code>RUNNING</code>, <code>$ &lt;cmd&gt;</code> 형태의 <code>TOOL_CALL</code> 버블) → <code>tool.output</code>(표준출력/표준오류 청크를 동일 <code>TOOL_RESULT</code> 버블에 누적) → <code>tool.result</code>(종료코드와 함께 <code>SUCCEEDED/FAILED</code> 확정)의 3단으로 표현된다. 각 도구 버블은 <code>toolCallId</code>로 그 원천 도구 호출(152)과 연결되고, 도구 ack·결과는 <code>{ callId, turnId }</code> 쌍으로 라우팅되어 올바른 턴의 올바른 tool_call에 매칭된다. 파일 변경은 <code>file.changed</code>(CREATED/MODIFIED/DELETED)로 통지되어 워크스페이스 패널(114)을 갱신한다. 모든 버블이 <code>seq</code>로 정렬·재생되므로 어느 시점에 재접속하더라도 동일한 스레드 화면이 결정적으로 복원된다.</p>
+
+  <div class="subfield">6. (핵심) 병렬 추론 + 직렬 부수효과 동시성 계약(도 5)</div>
+  <p class="para"><span class="pnum">[0028]</span> <b>발명의 정수.</b> 본 실시예의 핵심은 동일 게시글의 <b>단일</b> 코드 에이전트 세션·단일 공유 컨텍스트(134)·단일 샌드박스 디렉토리를 유지하면서도, 복수 사용자의 입력에 대한 <b>추론(LLM completion 스트리밍)은 병렬</b>로 진행하고, <b>부수효과(파일 쓰기·도구 실행·컨텍스트 커밋)는 직렬</b>로 적용하는 데 있다. 즉 N명의 사용자 메시지는 각자 독립된 턴(153)으로 동시에 inflight 상태가 되어 즉시 스트리밍을 시작하고, 그 결과 복수의 <code>AGENT_REPLY</code> 버블이 <b>동시에 STREAMING</b>되어 전원에게 fan-out된다. 어느 사용자의 답도 다른 사용자의 긴 작업 뒤로 밀리지 않으므로, 단일 공유 세션에서 발생하던 머리-막힘(head-of-line blocking)이 제거된다.</p>
+  <p class="para"><span class="pnum">[0029]</span> <b>turnId 멀티플렉싱.</b> 코드 에이전트 프로세스(131) 내부의 턴 멀티플렉서(132)는 진행 중인 턴을 <code>turns: Map&lt;turnId, Turn&gt;</code>로 다중화한다. 각 <code>Turn</code>은 고유한 <code>interrupted</code> 플래그와 전용 <code>AbortController</code>를 가진다. LLM 도구 호출에 대한 ack는 <code>{ callId, turnId }</code>로 라우팅되어 올바른 턴의 올바른 <code>tool_call</code>에 정확히 짝지어진다. 부모측 어댑터(124)는 자식의 stdout 라인을 <code>Map&lt;turnId, TurnSink&gt;</code>로 디스패치하여, 인터리브되어 도착하는 토큰·이벤트를 각 턴의 sink로 정확히 분배한다.</p>
+  <p class="para"><span class="pnum">[0030]</span> <b>부수효과 직렬 실행기(133).</b> 추론은 병렬이되, 파일 쓰기·도구 실행·컨텍스트 커밋 등 외부 상태를 바꾸는 모든 부수효과는 샌드박스 단위의 <b>단일 직렬 실행기(lock/queue)</b>를 통과한다. 두 턴이 같은 파일을 쓰더라도 부수효과 직렬 실행기(133)가 이를 순차로 적용하므로, 파일을 라인 단위로 머지할 필요가 없고 <b>쓰기 자체를 직렬화</b>한다(충돌·머지 불필요, 논리적 결과는 last-wins). 그 결과 동일한 작업 디렉토리(sandboxRoot)에 lock 없는 동시 쓰기가 0이 되어 파일 깨짐·부분 쓰기·디렉토리 레이스가 차단된다. 이것이 본 실시예가 제공하는 <b>파일 안전 경계</b>이다.</p>
+  <p class="para"><span class="pnum">[0031]</span> <b>공유 컨텍스트의 스냅샷 읽기 + 완료 순 직렬 커밋(134).</b> 게시글당 대화 컨텍스트(convo)는 하나만 유지된다. 동시에 발사된 각 병렬 턴은 시작 시점에 convo의 <b>스냅샷</b>을 읽어 자신의 추론 입력으로 삼고, 그 completion·도구 결과는 <b>완료 순으로 직렬 커밋</b>된다. 직렬 커밋은 OpenAI-호환 메시지 규약의 <code>assistant.tool_calls</code> ↔ <code>role:tool</code> 짝 정합(pairing)을 보존하여, 병렬 진행에도 컨텍스트가 깨지지 않게 한다. 동시에 발사된 턴들은 서로의 그 순간 입력을 보지 못할 수 있는데(스냅샷 staleness), 이는 협업·파일안전·즉시성을 얻기 위해 수용된 한계이다.</p>
+  <p class="para"><span class="pnum">[0032]</span> <b>turnId 지정 인터럽트.</b> 인터럽트는 <code>interrupt(turnId, steer?)</code>로 특정 턴만을 대상으로 한다. 따라서 한 사용자가 자기 턴을 중단·조향(steer)하더라도 다른 사용자의 병렬 턴에는 영향을 주지 않는다. 전달된 조향 텍스트는 해당 턴의 새로운 입력으로 취급된다.</p>
+  <p class="para"><span class="pnum">[0033]</span> <b>활성 턴 카운트 기반 세션 상태.</b> 세션 상태는 단일 토글이 아니라 <b>활성 턴 수의 카운트</b>로 정의된다. 즉 활성 턴이 1개 이상이면 <code>RUNNING</code>, 0이면 <code>IDLE</code>이다. <code>session.status</code> SSE 이벤트의 enum 표현은 동일하게 유지되며, 어느 한 턴이 끝나도 다른 활성 턴이 남아 있으면 세션은 <code>RUNNING</code>을 유지한다.</p>
+  <p class="para"><span class="pnum">[0034]</span> <b>동시성 상한과 공정 큐(135).</b> 샌드박스당 동시 inflight 턴 수에는 상한 <code>MAX_CONCURRENT_TURNS</code>가 적용되어 LLM 비용·부하를 제어한다. 상한을 초과하는 입력은 거부(429)되지 않고, 동시성 상한 공정 큐(135)에서 <b>라운드로빈 공정 방식</b>으로 대기하다가 자리가 나는 순서대로 턴으로 승격된다. 여기서 공정 큐는 “모든 동시 입력의 직렬화 수단”이 아니라 상한 초과분만을 받는 대기열이라는 점에 유의한다.</p>
+  <p class="para"><span class="pnum">[0035]</span> <b>1인 1활성턴.</b> 한 사용자는 동시에 자기 턴 1개만 진행할 수 있다(per-user inflight = 1). 따라서 병렬성은 서로 다른 사용자들 <b>사이에서만</b> 발생하며, 동시 진행 턴 수는 동시 활성 사용자 수를 넘지 않는다(동시 턴 수 ≤ 동시 활성 사용자 수).</p>
+  <p class="para"><span class="pnum">[0036]</span> <b>opt-in 게이트(기본 OFF).</b> 위 병렬 경로는 <code>Sandbox.meta.concurrentTurns === true</code>일 때에만 활성화된다. 이 값은 <code>POST /posts</code>의 <code>concurrent</code>(기본 <code>false</code>)로 글 생성 시 1회 확정되어 이후 변경되지 않는다. <code>false</code>이면 동일 샌드박스는 v0.1의 단일 활성 턴/FIFO 경로로 동작한다. 같은 샌드박스 안에서 직렬 경로와 병렬 경로가 혼재하지 않으므로, 한 게시글의 동시성 의미론은 생성 시점에 결정적으로 고정된다.</p>
+  <p class="para"><span class="pnum">[0037]</span> <b>채택 이유(대안 기각).</b> (i) <i>per-user 프로세스 격리</i>는 단일 공유 컨텍스트를 파괴하고, N개의 프로세스가 동일 cwd에 lock 없이 써서 파일 안전을 최악으로 만들며, 프로세스 폭증·회수 부재 문제를 낳으므로 기각한다. (ii) <i>입력 배칭(N개 질문→1턴)</i>은 1:1 귀속(<code>replyToId</code>)을 붕괴시키고, 무관한 요청을 한 추론에 혼합하며, per-message <code>reasoningEffort</code>를 소실시키고, 인터럽트 윈도우에 레이스를 만들므로 기각한다. 결국 <b>병렬 추론 + 직렬 부수효과</b>만이 동시성·공유 협업·파일 안전·1:1 귀속을 동시에 만족시키는 유일한 정합적 구성이다.</p>
+  <p class="para"><span class="pnum">[0038]</span> <b>알려진 한계(정직한 명시).</b> 본 실시예는 다음 한계를 가진다(이는 청구범위 한정의 근거로 삼지 않는다): 동시 N턴은 약 N배의 토큰 비용을 유발할 수 있다; 단일 공유 convo의 용량 한도가 멀티유저에서 더 빨리 도달된다; 동일 파일을 동시에 쓰는 두 턴은 논리적으로 last-wins 레이스를 가진다; 도구가 띄운 detached·백그라운드 프로세스의 쓰기는 직렬 lock 밖에 있어 프로세스그룹 종료 등 별도 하드닝이 필요하다; convo 스냅샷에는 staleness가 존재한다.</p>
+
+  <div class="subfield">7. 보안·격리(도 6)</div>
+  <p class="para"><span class="pnum">[0039]</span> <b>키 비노출.</b> 런타임은 서버 비밀(160)을 자식 프로세스의 환경/설정으로만 주입하고 어떤 응답·로그·SSE 이벤트에도 키를 포함하지 않으며, 이를 코드리뷰 체크리스트와 회귀 테스트로 강제한다. <code>GET /runtime</code>은 모델명과 baseURL 호스트만 노출하고 키는 노출하지 않는다. 비용은 서버가 부담한다. <b>임의 코드 격리.</b> 파일 API(<code>GET /posts/:id/files</code>, <code>.../content</code>)와 도구 실행 모두 <code>Sandbox.path</code>를 루트로 한 상대 경로를 강제하고, realpath 정규화 후 루트 접두 검사로 <code>..</code>·심볼릭 링크·절대경로 주입을 차단한다(위반 시 파일 API는 400, 도구 실행은 거부). 리소스 제한(프로세스/메모리/CPU·동시 수 상한)과 네트워크 정책을 두며, 샌드박스 내부에서는 파일 CRUD·가상환경·패키지·셸 등 모든 권한을 허용한다. <b>v2 파일안전 경계.</b> 부수효과 직렬 실행기(133)의 단일 lock에 의해 동일 cwd에 대한 lock 없는 동시 쓰기가 0이 되는 것이 v2가 추가하는 격리 경계이며, 이는 경로 탈출 차단·리소스·네트워크 정책과 결합되어 동시성 환경의 파일 안전을 완성한다.</p>
+
+  <div class="subfield">8. 라이프사이클·국제화·인증(보조)</div>
+  <p class="para"><span class="pnum">[0040]</span> <b>라이프사이클.</b> 유휴 시 <code>POST /posts/:id/session/suspend</code> 또는 유휴 타이머가 프로세스를 내리고 디렉토리를 보존(<code>SUSPENDED</code>)하며, 재접속 시 디렉토리를 그대로 두고 프로세스를 재기동(resume)한다. 인메모리 컨텍스트·히스토리·요약의 재구성은 전적으로 에이전트 런타임의 정책에 맡긴다. <b>국제화(i18n).</b> 사용자 노출 문자열은 하드코딩하지 않고 <code>t('namespace.key')</code> 형태의 키로 처리하며, 사람 메시지 전송 시 UI 언어(ko/en) 힌트를 런타임에 전달해 에이전트 응답 언어를 가능 범위에서 UI 언어에 맞추되 코드·명령·파일 내용은 번역하지 않는다. <b>인증.</b> 회원(아이디·비밀번호)과 게스트(닉네임 뒤 <code>#</code>+16진수 4자리 식별자)의 듀얼 모드를 JWT(<code>Authorization: Bearer</code>)로 처리하고, 사람 메시지는 <code>clientId</code> 멱등키로 중복 게시를 방지한다.</p>
+
+  <div class="subfield">9. 선행발명·구버전과의 대비(요지)</div>
+  <table class="tbl">
+    <caption>표 1. 선행발명(Aidit) / 구버전(v0.1) / 본 발명(v2)의 동시성·협업 구성 대비(PoC; 일부 항목 예시적·기대값)</caption>
+    <thead><tr><th>축</th><th>선행발명(Aidit)</th><th>구버전(v0.1)</th><th>본 발명(v2)</th></tr></thead>
+    <tbody>
+      <tr><td>추론 위치</td><td>클라이언트 분산(BYOK 직접 호출)</td><td>서버 샌드박스 코드 에이전트</td><td><b>서버 샌드박스 코드 에이전트(동일)</b></td></tr>
+      <tr><td>LLM 키·비용</td><td>사용자 키, 사용자 부담</td><td>서버 <code>.env</code> 키, 서버 부담</td><td><b>서버 <code>.env</code> 키, 서버 부담(동일)</b></td></tr>
+      <tr><td>공유 단위</td><td>공유 대화 컨텍스트(텍스트)</td><td>단일 코드 에이전트 세션(실행)</td><td><b>단일 세션·단일 convo·단일 디렉토리(유지)</b></td></tr>
+      <tr><td>동시 입력 추론</td><td>각 클라가 개별 추론(분기)</td><td>FIFO 직렬화(단일 활성 턴)</td><td class="c"><b>독립 턴으로 병렬 추론(동시 inflight)</b></td></tr>
+      <tr><td>머리-막힘(HOL)</td><td>해당 없음(분산)</td><td>발생(남의 긴 작업 뒤로 밀림)</td><td class="c"><b>제거(즉시 각자 스트리밍)</b></td></tr>
+      <tr><td>출력</td><td>각자 개별 생성</td><td>단일 스트림(1회 생성·전원 중계)</td><td class="c"><b>동시 다중 스트림 fan-out(복수 STREAMING)</b></td></tr>
+      <tr><td>부수효과(파일·도구)</td><td>해당 없음</td><td>단일 활성 턴이라 자연 직렬</td><td class="c"><b>부수효과 직렬 실행기(133) lock으로 직렬화</b></td></tr>
+      <tr><td>파일 충돌 처리</td><td>해당 없음</td><td>해당 없음(단일 활성)</td><td class="c"><b>머지 없이 쓰기 직렬화(last-wins)</b></td></tr>
+      <tr><td>FIFO 큐 의미</td><td>해당 없음</td><td>모든 동시 입력의 직렬화 수단</td><td class="c"><b>상한(<code>MAX_CONCURRENT_TURNS</code>) 초과분 공정 큐(135)</b></td></tr>
+      <tr><td>세션 상태</td><td>해당 없음</td><td>단일 busy 토글(IDLE/RUNNING)</td><td class="c"><b>활성 턴 수 카운트(≥1 RUNNING, 0 IDLE)</b></td></tr>
+      <tr><td>인터럽트</td><td>해당 없음</td><td>세션 단위(현재 턴)</td><td class="c"><b><code>turnId</code> 지정(내 턴만, 남의 턴 무관)</b></td></tr>
+      <tr><td>1:1 귀속</td><td>해당 없음</td><td>단일 활성이라 자명</td><td class="c"><b>턴=사람 메시지=<code>AGENT_REPLY</code>(<code>replyToId</code>)</b></td></tr>
+      <tr><td>활성화 게이트</td><td>해당 없음</td><td>해당 없음(항상 직렬)</td><td class="c"><b>opt-in <code>concurrentTurns</code>(기본 OFF, 1회 확정)</b></td></tr>
+    </tbody>
+  </table>
+
+  <div class="subfield">10. 근접 선행기술과의 구별(요지)</div>
+  <p class="para"><span class="pnum">[0041]</span> 본 발명은 다음 두 축에서 근접 선행기술과 구별된다. <b>(축 1) 격리 대신 공유.</b> 자율 코딩 에이전트가 작업마다 별도 가상머신을 두거나(작업별 격리), 멀티테넌트 플랫폼이 사용자·세션을 분리하거나, 개인용 에이전트가 에이전트 간 위임으로 병렬화하는 종래 접근은 모두 <b>격리</b>를 통해 동시성을 얻으므로 단일 공유 컨텍스트에 의한 협업이 성립하지 않는다. 본 발명은 작업·사용자·에이전트별 별도 프로세스·가상머신·에이전트를 두지 아니하고 <b>단일 공유 에이전트 세션·단일 공유 컨텍스트·단일 샌드박스</b>를 유지한 채 다중 사용자 입력만을 병렬 턴으로 다중화한다. <b>(축 2) 충돌 검출 대신 충돌 미연 방지.</b> 서로 다른 주체의 다중 에이전트가 공유 상태를 조정하는 멀티-프린시펄 협조 프로토콜(최근접 문헌)은 의도 선언·충돌 객체·<b>낙관적 동시성 제어</b>(stale 상태 거부 후 rebase·재시도)로 사후에 충돌을 <b>검출·해소</b>한다. 반면 본 발명은 모든 부수효과를 <b>샌드박스 단위 단일 직렬 실행기(133)</b>로 통과시켜 동시 쓰기의 진입 자체를 직렬화함으로써, 검출·재시도·머지 없이 <b>충돌을 미연에 방지</b>(비관적 직렬화)한다. 즉 “추론은 병렬로 허용하되 부수효과는 단일 직렬 게이트로 환원”하는 비대칭 설계가 본 발명의 구별적 정수이다.</p>
+  <table class="tbl">
+    <caption>표 2. 근접 선행기술과 본 발명의 구별(예시적 분류)</caption>
+    <thead><tr><th>선행기술(유형/예)</th><th>핵심 구성</th><th>본 발명과의 차이</th></tr></thead>
+    <tbody>
+      <tr><td>동시 화면 공유(통신 세션, US 11,330,026 B1)</td><td>복수 사용자가 화면을 순차 아닌 동시에 공유·표시</td><td>기성 화면 <b>영상의 표시</b>일 뿐, 공유 작업 디렉토리에 대한 코드 에이전트의 병렬 추론·부수효과 직렬화·턴 1:1 귀속이 없음</td></tr>
+      <tr><td>악성코드 샌드박스(US 9,626,509 B1 등)</td><td>단일 운영환경에서 다중 버전 앱 동시 실행으로 위협 탐지</td><td>단일 분석자의 <b>위협 탐지</b>용 격리이며, 다중 사용자 협업·공유 컨텍스트·동시 쓰기 안전 경계가 없음</td></tr>
+      <tr><td>ML 실험 추적(예: MLflow)</td><td>다중 프로세스/중첩 run의 병렬 실행 기록</td><td>서로 <b>독립한 실험의 병렬 로깅</b>일 뿐, 단일 공유 컨텍스트·부수효과 직렬 lock·실시간 다중 사용자 fan-out이 없음</td></tr>
+      <tr><td>자율 코딩 에이전트(예: Jules)</td><td>다수 작업을 각각 별도 클라우드 VM에서 동시 수행</td><td><b>작업별 VM 격리</b> — 단일 공유 세션·컨텍스트를 두지 않음(공유 협업 부재)</td></tr>
+      <tr><td>멀티테넌트 에이전트 플랫폼(예: Qyclaw)</td><td>다중 사용자·세션을 사용자 단위로 격리 + 도구 실행 컨테이너</td><td><b>테넌트 격리</b>가 목적 — 단일 공유 세션의 협업·부수효과 직렬화가 아님</td></tr>
+      <tr><td>개인용 자율 에이전트(예: Frona)</td><td>에이전트별 샌드박스 + 에이전트 간 위임으로 병렬화</td><td>병렬성이 <b>에이전트 위임</b>에서 옴(대화는 단일 에이전트 귀속) — 다중 사용자 병렬 턴·공유 세션이 아님</td></tr>
+      <tr><td>다중 사용자 챗봇(예: sBot/Spacebot류)</td><td>다중 사용자 동시 대화, 연속 입력을 단일 턴으로 배칭, 워커 프로세스 처리</td><td>입력 <b>배칭(coalesce)</b>으로 1:1 귀속이 무너짐 — 본 발명은 배칭 없이 입력별 독립 턴 1:1 귀속</td></tr>
+      <tr><td>멀티-프린시펄 협조 프로토콜(MPAC, arXiv 2604.09744)</td><td>주체별 다중 에이전트가 공유 상태를 의도 선언·충돌 객체·<b>낙관적 동시성 제어</b>(rebase·재시도)로 조정</td><td class="c"><b>단일 공유 에이전트·단일 컨텍스트</b>(다중 에이전트 아님) + <b>단일 직렬 실행기로 충돌 미연 방지</b>(OCC·검출·rebase 아님)</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============================ 부호의 설명 ============================ -->
+  <div class="field">【부호의 설명】<span class="en">Explanation of Reference Numerals</span></div>
+  <table class="tbl">
+    <caption>표 3. 도면 부호 레지스트리</caption>
+    <thead><tr><th>부호</th><th>명칭</th><th>부호</th><th>명칭</th></tr></thead>
+    <tbody>
+      <tr><td>100</td><td>시스템</td><td>131</td><td>코드 에이전트 프로세스(pᵢ)</td></tr>
+      <tr><td>110</td><td>클라이언트(브라우저)</td><td>132</td><td>턴 멀티플렉서(turnId별 Turn/Sink 레지스트리, 병렬 턴 관리)</td></tr>
+      <tr><td>111</td><td>인증 스토어(토큰, 키 저장 없음)</td><td>133</td><td>부수효과 직렬화 수단(일 예로 샌드박스 단위 단일 lock/queue인 직렬 실행기)</td></tr>
+      <tr><td>112</td><td>REST 클라이언트</td><td>134</td><td>공유 컨텍스트(convo: 스냅샷 읽기 + 완료 순 직렬 커밋)</td></tr>
+      <tr><td>113</td><td>스레드 스트림(SSE 소비자)</td><td>135</td><td>동시성 상한 공정 큐(MAX_CONCURRENT_TURNS 초과분 라운드로빈)</td></tr>
+      <tr><td>114</td><td>워크스페이스 패널</td><td>140</td><td>거대언어모델 엔드포인트(일 예로 OpenAI-호환)</td></tr>
+      <tr><td>120</td><td>서버</td><td>150</td><td>게시글(Post)</td></tr>
+      <tr><td>121</td><td>REST API</td><td>151</td><td>메시지/버블(Message)</td></tr>
+      <tr><td>122</td><td>SSE 허브(fan-out)</td><td>152</td><td>도구 호출(ToolCall)</td></tr>
+      <tr><td>123</td><td>도메인 로직(seq SoT)</td><td>153</td><td>턴(turn; 한 사용자 메시지에 1:1 귀속되는 독립 추론 단위, replyToId)</td></tr>
+      <tr><td>124</td><td>에이전트 런타임 어댑터(AgentRuntime)</td><td>160</td><td>서버 비밀(.env: API_KEY/BASE_URL/MODEL)</td></tr>
+      <tr><td>125</td><td>데이터베이스</td><td></td><td></td></tr>
+      <tr><td>130</td><td>격리 샌드박스</td><td></td><td></td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============================ 특허청구범위 ============================ -->
+  <div class="field">【특허청구범위】<span class="en">Claims</span></div>
+
+  <div class="claim"><span class="cn">【청구항 1】</span> 협업 코딩 시스템으로서,
+  복수의 게시글(150)을 제공하는 서버(120);
+  상기 복수의 게시글 각각에 대하여 1:1로 자동 생성·결속되는 격리 샌드박스(130);
+  상기 격리 샌드박스 내에서 단일 공유 코드 에이전트 세션으로 구동되며, 하나 이상의 도구를 호출하여 코드를 작성·실행하는 코드 에이전트(131); 및
+  서버 비밀(160)에 저장된 키로 거대언어모델(140)을 호출하는 상기 코드 에이전트를 구동하는 에이전트 런타임 어댑터(124);를 포함하고,
+  상기 서버는, 하나의 게시글에 대응하는 상기 단일 공유 코드 에이전트 세션을 복수의 상호 독립적인 클라이언트(110)가 공유하도록 하고, 상기 코드 에이전트의 출력을 정렬된 이벤트로 상기 게시글의 모든 구독 클라이언트에게 일괄 중계(fan-out)하며,
+  상기 에이전트 런타임 어댑터는, 동일 게시글에 대하여 동시에 도착하는 복수의 사용자 입력을 각각 독립한 턴(153)으로 동시에 병렬 추론하여 복수의 답변을 동시에 생성·제공하도록 하되, 도구 실행 및 파일 쓰기를 포함하는 부수효과는 상기 샌드박스 단위의 직렬화 수단(133)을 통과시켜 순차적으로 적용되도록 함으로써, 한 사용자의 답변이 다른 사용자의 작업 완료를 기다리는 머리-막힘(head-of-line blocking)을 제거하면서 동일 작업 디렉토리에 대한 동시 파일 쓰기 충돌을 방지하는 것을 특징으로 하는 시스템.</div>
+
+  <div class="claim dep"><span class="cn">【청구항 2】</span> 제1항에 있어서, 상기 직렬화 수단(133)은 상기 샌드박스를 단위로 하는 단일 락 또는 큐로서, 동시에 진행 중인 복수의 턴이 발생시키는 부수효과를 하나씩 직렬로 통과시켜, 동일 작업 디렉토리에 대한 락 없는 동시 파일 쓰기의 진입을 0이 되도록 하며, 두 턴이 동일 파일에 쓰더라도 파일을 병합하지 아니하고 쓰기 자체를 직렬화하여 마지막 쓰기 우선(last-wins)의 논리 결과로 순차 적용하되, 상기 부수효과의 충돌을 사후에 검출하여 재시도(rebase)하는 낙관적 동시성 제어(optimistic concurrency control)에 의하지 아니하고 동시 쓰기의 진입 자체를 직렬화하여 충돌을 미연에 방지하는 것을 특징으로 하는 시스템.</div>
+
+  <div class="claim dep"><span class="cn">【청구항 3】</span> 제1항에 있어서, 상기 복수의 답변 각각은 그를 유발한 한 사용자의 사람 메시지(151)에 1:1로 귀속되는 답변 식별 관계(replyToId)를 가지며, 상기 에이전트 런타임 어댑터는 동시 수신된 복수의 사용자 입력을 하나의 턴으로 묶어 배칭(batching)하지 아니하고 각 사용자 메시지마다 하나의 독립 턴을 생성하는 것을 특징으로 하는 시스템.</div>
+
+  <div class="claim dep"><span class="cn">【청구항 4】</span> 제1항에 있어서, 상기 격리 샌드박스는 진행 중인 복수의 턴을 턴 식별자(turnId)별 항목으로 다중화하여 관리하는 턴 멀티플렉서(132)를 포함하고, 각 턴은 고유한 중단 플래그 및 취소 수단을 가지며, 도구 호출의 응답은 호출 식별자(callId)와 상기 턴 식별자의 조합으로 해당 턴의 해당 도구 호출에 라우팅되고, 특정 턴 식별자를 지정한 인터럽트 요청은 해당 턴만 중단시키고 동시에 진행 중인 다른 턴에는 영향을 주지 않는 것을 특징으로 하는 시스템.</div>
+
+  <div class="claim dep"><span class="cn">【청구항 5】</span> 제4항에 있어서, 상기 에이전트 런타임 어댑터의 부모 측은 상기 코드 에이전트의 출력 라인을 턴 식별자별 싱크(sink)로 디스패치하고, 상기 턴 식별자를 지정한 인터럽트 요청에 조향 텍스트가 동반되는 경우 상기 조향 텍스트를 해당 턴의 새 입력으로 처리하는 것을 특징으로 하는 시스템.</div>
+
+  <div class="claim dep"><span class="cn">【청구항 6】</span> 제1항에 있어서, 상기 단일 공유 코드 에이전트 세션의 상태는 활성 턴의 개수를 기준으로 결정되어, 활성 턴이 1 이상이면 실행(RUNNING) 상태로, 활성 턴이 0이면 유휴(IDLE) 상태로 전이·통지됨으로써, 단일 토글이 아닌 카운트 기반으로 동시 처리 중 유휴 상태의 잘못된 통지를 방지하는 것을 특징으로 하는 시스템.</div>
+
+  <div class="claim dep"><span class="cn">【청구항 7】</span> 제1항에 있어서, 상기 에이전트 런타임 어댑터는 상기 샌드박스당 동시에 진행 가능한 턴의 상한값(MAX_CONCURRENT_TURNS)을 두고, 상기 상한값을 초과하는 입력은 거부하지 아니하고 공정 큐(135)에 적재하여 라운드로빈 방식으로 대기시킨 후 진행 중인 턴의 완료에 따라 순차적으로 기동하되, 상기 공정 큐는 모든 동시 입력을 직렬화하는 수단이 아니라 상기 상한값을 초과하는 입력만을 적재하는 것을 특징으로 하는 시스템.</div>
+
+  <div class="claim dep"><span class="cn">【청구항 8】</span> 제1항에 있어서, 상기 단일 공유 코드 에이전트 세션은 단일 공유 컨텍스트(134)를 유지하고, 동시에 진행되는 각 턴은 시작 시 상기 공유 컨텍스트의 스냅샷을 읽어 추론하되, 각 턴의 완료 결과 및 도구 결과는 완료된 순서로 상기 공유 컨텍스트에 직렬로 커밋되어 어시스턴트 메시지의 도구 호출(tool_calls)과 그에 대응하는 도구 역할(role:tool) 메시지의 짝 정합성을 보존하는 것을 특징으로 하는 시스템.</div>
+
+  <div class="claim dep"><span class="cn">【청구항 9】</span> 제1항에 있어서, 한 사용자에 대하여 동시에 진행되는 활성 턴의 수는 1로 제한되어, 상기 병렬 추론은 서로 다른 사용자의 턴 사이에서만 발생하고, 그에 따라 동시 진행 턴의 수는 동시 활성 사용자의 수 이하인 것을 특징으로 하는 시스템.</div>
+
+  <div class="claim dep"><span class="cn">【청구항 10】</span> 제1항에 있어서, 상기 병렬 추론 및 상기 부수효과의 직렬화 경로는 옵트인(opt-in) 게이트에 의하여 활성화되되, 상기 게이트는 게시글 생성 요청 시 동시성 옵션이 참인 경우에 한하여 상기 샌드박스의 메타데이터(Sandbox.meta.concurrentTurns)에 1회 확정되어 이후 변경되지 아니하며, 거짓인 경우 동일 샌드박스 내에서는 단일 활성 턴 경로로 동작하여 동일 샌드박스 내에서 직렬 경로와 병렬 경로가 혼재하지 않도록 하는 것을 특징으로 하는 시스템.</div>
+
+  <div class="claim dep"><span class="cn">【청구항 11】</span> 제1항에 있어서, 상기 복수의 상호 독립적인 클라이언트가 상기 단일 공유 코드 에이전트 세션을 공유하는 것은, 각 사용자마다 또는 각 턴마다 별도의 프로세스·가상머신 또는 별도의 에이전트를 생성하지 아니하고 단일 공유 에이전트 런타임이 단일 공유 컨텍스트 상에서 모든 사용자의 턴을 처리하면서 기존 세션에 접속(attach)함으로써 이루어지고, 상기 코드 에이전트의 출력은 한 번만 생성되어 상기 게시글의 모든 구독 클라이언트에게 토큰 단위로 스트리밍되어 동일하게 중계되며, 상기 서버는 상기 코드 에이전트의 도구 호출에 대응하여 도구 호출 버블(152)을, 실행 중 표준출력 또는 표준오류의 누적에 대응하여 도구 결과 버블을 각각 게시글 범위에서 단조 증가하는 시퀀스 번호(seq)로 정렬되도록 생성하고 종료 시 종료코드와 함께 확정하며, 사람 메시지 버블·답변 버블을 포함하는 모든 버블이 상기 시퀀스 번호를 정렬·재생·멱등의 단일 출처(SoT)로 하여 하나의 공유 채팅 스레드에 영속되는 것을 특징으로 하는 시스템.</div>
+
+  <div class="claim dep"><span class="cn">【청구항 12】</span> 제1항에 있어서, 상기 키는 상기 서버 비밀(160)에만 존재하고, 상기 서버의 응답, 로그, 및 상기 일괄 중계 이벤트 중 어디에도 포함되지 아니하며, 읽기 전용 런타임 정보 요청에 대해서는 모델명 및 베이스 URL의 호스트 부분만 노출하고 상기 키는 노출하지 아니하며, 상기 거대언어모델(140)은 OpenAI-호환 인터페이스로 호출되고 상기 키, 베이스 URL 및 모델명은 상기 서버 비밀(160)에 저장되어 상기 코드 에이전트의 환경 또는 설정으로만 주입되는 것을 특징으로 하는 시스템.</div>
+
+  <div class="claim dep"><span class="cn">【청구항 13】</span> 제1항에 있어서, 상기 격리 샌드박스의 파일 접근 인터페이스 및 상기 도구 실행은 모두 상기 샌드박스의 루트 경로에 대한 상대 경로를 강제하고, 경로 정규화 후 루트 접두 검사를 통해 상위 디렉토리 탈출 표기, 심볼릭 링크, 및 절대경로 주입을 차단하되, 상기 샌드박스 내부에서는 파일 생성·삭제, 가상환경 설정, 패키지 설치, 및 셸 실행을 허용하는 것을 특징으로 하는 시스템.</div>
+
+  <div class="claim dep"><span class="cn">【청구항 14】</span> 제1항에 있어서, 상기 격리 샌드박스는 생성(CREATING)·준비(READY)·실행(RUNNING)·일시중단(SUSPENDED)·오류(ERROR)를 포함하는 상태기계를 가지며, 일시중단 시 상기 코드 에이전트의 프로세스를 종료하되 상기 샌드박스의 디렉토리 및 파일을 보존하고, 재개 시 상기 디렉토리를 보존한 채 프로세스를 재기동하는 것을 특징으로 하는 시스템.</div>
+
+  <div class="claim"><span class="cn">【청구항 15】</span> 서버가 수행하는 협업 코딩 방법으로서,
+  게시글의 생성 요청에 응답하여 상기 게시글을 등록하고 상기 게시글에 1:1로 결속되는 격리 샌드박스를 자동 생성하는 단계;
+  상기 격리 샌드박스 내에서 단일 공유 코드 에이전트 세션으로 코드 에이전트를 구동하되, 서버 비밀에 저장된 키로 상기 코드 에이전트가 거대언어모델을 호출하도록 하는 단계;
+  하나의 게시글에 대응하는 상기 단일 공유 코드 에이전트 세션을 복수의 상호 독립적인 클라이언트가 공유하도록 하는 단계;
+  동일 게시글에 대하여 동시에 도착하는 복수의 사용자 입력을 각각 독립한 턴으로 동시에 병렬 추론하여 복수의 답변을 동시에 생성·제공함으로써, 한 사용자의 답변이 다른 사용자의 작업 완료를 기다리는 머리-막힘(head-of-line blocking)을 제거하는 단계;
+  상기 복수의 턴이 발생시키는 도구 실행 및 파일 쓰기를 포함하는 부수효과를, 상기 샌드박스 단위의 직렬화 수단을 통과시켜 순차적으로 적용하는 단계; 및
+  상기 복수의 답변 및 부수효과를 정렬된 이벤트로 상기 게시글의 모든 구독 클라이언트에게 일괄 중계하는 단계;를 포함하는 방법.</div>
+
+  <div class="claim dep"><span class="cn">【청구항 16】</span> 제15항에 있어서, 상기 부수효과를 순차적으로 적용하는 단계는, 두 턴이 동일 파일에 쓰더라도 파일을 병합하지 아니하고 쓰기를 직렬화하여 동일 작업 디렉토리에 대한 락 없는 동시 쓰기의 진입을 0이 되도록 하는 단계를 포함하고, 상기 단일 공유 코드 에이전트 세션의 상태를 활성 턴의 개수가 1 이상이면 실행으로, 0이면 유휴로 전이·통지하는 단계를 더 포함하는 방법.</div>
+
+  <div class="claim dep"><span class="cn">【청구항 17】</span> 제15항에 있어서, 상기 복수의 답변 각각을 그를 유발한 사람 메시지에 1:1로 귀속시키되 복수의 입력을 하나의 턴으로 배칭하지 아니하는 단계; 및 진행 중인 각 턴을 턴 식별자별로 다중화하여, 특정 턴 식별자를 지정한 인터럽트 요청에 대하여 해당 턴만 중단시키고 동시에 진행 중인 다른 턴은 유지하는 단계;를 더 포함하는 방법.</div>
+
+  <div class="claim"><span class="cn">【청구항 18】</span> 컴퓨터에 제15항 내지 제17항 중 어느 한 항의 방법을 실행시키기 위하여 컴퓨터로 판독 가능한 기록매체에 저장된 컴퓨터 프로그램.</div>
+
+  <!-- ============================ 요약서 ============================ -->
+  <div class="field">【요약서】<span class="en">Abstract</span></div>
+  <div class="abs">
+    <p class="para"><b>【요약】</b> 본 발명은 커뮤니티형 게시글마다 1:1로 자동 생성되는 격리 샌드박스(130)에서 단일 공유 코드 에이전트 세션·단일 공유 컨텍스트(134)를 유지하면서, 복수의 상호 독립적 사용자의 각 입력을 독립된 턴(153)으로 <b>동시 병렬 추론(parallel inference)</b>하여 여러 AGENT_REPLY를 동시에 스트리밍해 전원에게 fan-out하는 협업 코딩 플랫폼을 제공한다. 이로써 내 답이 남의 긴 작업 뒤로 밀리는 머리-막힘(head-of-line blocking)을 제거하여 동시에 각자의 답이 흐르게 한다. 반면 파일 쓰기·도구 실행·컨텍스트 커밋 등 <b>부수효과는 샌드박스 단위 단일 직렬 실행기(133)</b>를 통과시켜 같은 작업 디렉토리에 대한 무잠금 동시 쓰기를 0으로 만들어 <b>파일 write 충돌</b>과 부분 쓰기를 차단한다(쓰기 직렬화, 머지 불요, 논리 결과 last-wins). 턴 멀티플렉서(132)는 turnId로 각 턴을 다중화하여 내 턴만 지정 인터럽트하고, 세션 상태는 활성 턴 수에 기반하며, 동시 inflight 턴이 상한(MAX_CONCURRENT_TURNS)을 넘으면 초과분만 라운드로빈 공정 큐(135)로 대기시킨다. LLM 키는 서버 비밀(160)에만 두어 응답·로그·중계에 비노출하고(서버 키 모델, 비용 서버 부담), 병렬 협업 경로는 글 생성 시 1회 확정되는 opt-in 게이트(기본 OFF)일 때에만 활성화된다. 그 구별적 신규성은 단일 공유 세션을 유지한 채 <b>추론은 병렬·부수효과는 직렬</b>로 분리하여 동시성·공유 협업·파일 안전·1:1 귀속을 동시에 만족시키는 동시성 계약에 있다.</p>
+    <p class="para"><b>【대표도】</b> 도 1</p>
+  </div>
+
+  <hr class="thin">
+  <p class="note">본 명세서의 도면 부호 및 식별자(API 경로·열거형·이벤트명)는 PoC 구현을 예시한 것으로 청구범위를 한정하지 않는다. 정량 진술은 별도 도출을 명시하지 않는 한 예시적·기대값이며, 동시성 관련 동작 특성은 본 명세서가 기술한 동작 모델의 범위에서 이해되어야 한다.</p>
+
+</main>
+</body>
+</html>
