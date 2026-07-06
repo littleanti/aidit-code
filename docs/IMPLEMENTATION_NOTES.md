@@ -11,6 +11,13 @@
 
 ## Changelog
 
+### 2026-07-06 · [docs] · 완료 · 루트 README.md 신규 — 프로젝트 소개·아키텍처·동작 흐름도·설치·사용법
+- **요청(사용자)**: 프로젝트를 잘 설명하는 README.md 작성(목적·구성(아키텍처)·동작 흐름도·설치·사용법 상세 포함), workflow로 진행.
+- **진행 방식**: 워크플로우 4단계 — ① 병렬 분석 5에이전트(제품 문서 PRD/TRD/PLAN · 백엔드 · 프론트엔드 · 런타임 흐름 · 설치 절차, 실제 코드/문서 실측만) → ② 종합 초안 작성 → ③ 검증 2에이전트(사실 대조 + 완성도/Mermaid 문법) → ④ 지적 반영.
+- **구성(8절)**: 1 프로젝트 소개(게시글=살아있는 코드 에이전트 세션, v2 병렬 추론+직렬 부수효과 핵심 가치) / 2 주요 기능 / 3 아키텍처(기술 스택 표·디렉터리 트리·데이터 모델 사슬) / 4 동작 흐름도(Mermaid sequenceDiagram — v2 병렬/레거시 분기·XC-SERIAL 직렬 부수효과·SSE fan-out) / 5 설치(환경변수 표 placeholder만, `API_KEY` 미설정 시 에코 스텁 명시) / 6 사용법(개발 서버 3001/5173·사용 흐름 5단계·테스트/keygate) / 7 프로젝트 문서(docs/ 링크·Ground Rules·PoC 비범위) / 8 라이선스(MIT).
+- **검증(③) — 리뷰 지적 3건 재확인 후 전부 반영**: ① HOST 기본값 — `backend/src/config.ts`의 폴백 `0.0.0.0`과 `.env.example` 권장값 `::` 구분 표기. ② Mermaid 라벨 `seq<0`의 미이스케이프 `<` → `&lt;` 수정(렌더 안전). ③ 라이선스 — 루트 LICENSE(MIT) 실존 확인 후 유보 문구 삭제, MIT 명시. 코드·스키마·런타임 무변경(문서만).
+- 변경 파일: `README.md`(신규), `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-07-01 · [docs] · 완료 · ACM `acmart`(sigconf) LaTeX 변환 — `docs/paper-acm/.../paper.tex`+`paper.bib` 신규
 - **요청(사용자)**: `docs/acmart-primary.zip`(ACM 공식 acmart 배포본)의 LaTeX 템플릿에 맞춰 `docs/PAPER.html`(IEEE 2단 HTML 논문)을 변환.
 - **결정/근거**: zip 해제 결과 = acmart 풀 배포본(`acmart.cls` v2.18·`ACM-Reference-Format.bst`·`samples.dtx`). "primary" 템플릿 = `\documentclass[sigconf]{acmart}`(README·samples.ins·samples.dtx 실측 확인). 본문 언어·내용·수치·저자(Wondeuk Yoon·Dujeong Lee@samsung)는 PAPER.html과 동일 유지, **표현만** acmart 관용구로 이식.
