@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Parallel Inference, Serial Side Effects — Aidit-Code (IEEE paper)</title>
+<style>
+  :root{
+    --ink:#0c0c0c; --muted:#444; --rule:#000; --accent:#0b3d91;
+    --body:9.8pt; --lead:1.46; --col-gap:26px;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; background:#e9e7e2; color:var(--ink); }
+  body{
+    font-family:"Times New Roman", Times, "Nimbus Roman", Georgia, serif;
+    line-height:var(--lead);
+    -webkit-text-size-adjust:100%;
+  }
+  .page{
+    width:100%; max-width:960px; margin:22px auto; background:#fff;
+    padding:50px 54px 60px; box-shadow:0 1px 10px rgba(0,0,0,.18);
+  }
+
+  /* ---- full-width masthead ---- */
+  .masthead{ column-span:all; text-align:center; margin:0 0 14px; }
+  .masthead h1{
+    font-size:21pt; font-weight:700; line-height:1.22; margin:0 auto 14px;
+    max-width:30em; letter-spacing:.1px;
+  }
+  .authors{ font-size:11pt; margin:8px 0 2px; }
+  .authors .nm{ font-variant:small-caps; letter-spacing:.3px; }
+  .affil{ font-size:8.8pt; color:var(--muted); font-style:italic; margin:2px 0 0; line-height:1.4; }
+  .affil .mono{ font-family:"Courier New",monospace; font-style:normal; }
+  .corr{ font-size:8.4pt; color:var(--muted); margin-top:5px; }
+
+  hr.band{ border:none; border-top:2px solid var(--rule); margin:14px 0 0; column-span:all; }
+
+  /* ---- two-column body ---- */
+  .body{
+    column-count:2; column-gap:var(--col-gap); column-fill:balance;
+    margin-top:16px; text-align:justify; hyphens:auto;
+    font-size:var(--body);
+  }
+  .body p{ margin:0 0 7px; }
+  .lead-in{ font-weight:700; }
+  .abstract, .idxterms{ font-size:9.2pt; }
+  .abstract b.kw, .idxterms b.kw{ font-weight:700; }
+  .abstract{ break-after:avoid; }
+
+  h2.sec{
+    font-size:10pt; font-weight:700; text-transform:uppercase; letter-spacing:.6px;
+    text-align:center; margin:14px 0 6px; break-after:avoid;
+  }
+  h3.sub{
+    font-size:9.6pt; font-weight:700; font-style:italic; margin:10px 0 4px;
+    break-after:avoid;
+  }
+  h4.subsub{ font-size:9.4pt; font-weight:700; margin:8px 0 3px; break-after:avoid; }
+
+  code,.mono{ font-family:"Courier New",monospace; font-size:8.5pt; }
+  .body code{ background:#f3f3f0; padding:0 2px; border-radius:2px; }
+  pre.code{
+    font-family:"Courier New",monospace; font-size:8pt; line-height:1.4;
+    background:#f6f6f3; border:1px solid #d8d8d2; border-left:3px solid var(--accent);
+    padding:7px 9px; margin:6px 0 9px; overflow-x:auto; white-space:pre;
+    border-radius:2px;
+  }
+
+  ul.bul,ol.num{ margin:4px 0 9px 16px; padding:0; }
+  ul.bul li,ol.num li{ margin:0 0 4px; }
+
+  figure{ margin:10px 0 10px; break-inside:avoid; }
+  figure.span{ column-span:all; margin:14px 0 16px; }
+  figure svg{ display:block; width:100%; height:auto; border:1px solid #deddd6; background:#fff; }
+  figcaption{ font-size:8.4pt; margin-top:6px; color:#1c1c1c; text-align:justify; }
+  figcaption b{ font-weight:700; }
+
+  table.tbl{ border-collapse:collapse; width:100%; font-size:8.2pt; margin:6px 0 10px; }
+  table.tbl.span{ column-span:all; }
+  table.tbl caption{ caption-side:top; text-align:left; font-size:8.4pt; font-weight:700; margin-bottom:5px; }
+  table.tbl th,table.tbl td{ border:1px solid #555; padding:4px 6px; vertical-align:top; text-align:left; }
+  table.tbl thead th{ background:#ececec; text-align:center; font-weight:700; }
+  table.tbl td.c{ text-align:center; }
+  .tbl-wrap{ overflow-x:auto; }
+  .tbl-wrap.span{ column-span:all; margin:6px 0 12px; }
+
+  .refs{ font-size:8.1pt; }
+  .refs ol{ margin:0 0 0 0; padding:0 0 0 20px; }
+  .refs li{ margin:0 0 3px; line-height:1.34; }
+
+  .note{ font-size:8.2pt; color:var(--muted); font-style:italic; }
+  sup.fn{ font-size:7pt; }
+
+  @media print{
+    html,body{ background:#fff; }
+    .page{ box-shadow:none; margin:0; max-width:none; width:auto; padding:14mm 13mm; }
+    figure.span,table.tbl.span{ break-inside:avoid; }
+  }
+  @media (max-width:720px){
+    .page{ padding:22px 16px; }
+    .body{ column-count:1; }
+    .masthead h1{ font-size:18pt; }
+  }
+</style>
+</head>
+<body>
+<main class="page">
+
+  <!-- ============================= MASTHEAD ============================= -->
+  <header class="masthead">
+    <h1>Parallel Inference, Serial Side Effects: Eliminating Information Inconsistency in Multi-User Collaborative Coding on a Single Shared LLM Agent Session</h1>
+    <div class="authors">
+      <span class="nm">Wondeuk Yoon</span><sup class="fn">†</sup>&nbsp;&nbsp;and&nbsp;&nbsp;<span class="nm">Dujeong Lee</span><sup class="fn">†</sup>
+    </div>
+    <div class="affil"><sup class="fn">†</sup>Samsung Electronics, Suwon, Republic of Korea</div>
+    <div class="corr"><span class="affil mono">{wondeuk.yoon, dujeong.lee}@samsung.com</span></div>
+  </header>
+  <hr class="band">
+
+  <!-- ============================= BODY ============================= -->
+  <div class="body">
+
+    <!-- Abstract -->
+    <p class="abstract"><b>Abstract—</b><i>When several knowledge workers each drive their own AI coding-agent session, their contexts silo and diverge, reproducing — now at the agent layer — the classic organizational pathology of <b>information inconsistency</b>: a collaborator instructs the agent to do <i>B</i> when the team needed <i>A</i>, because no participant sees the whole. Persistent personal and company-wide memory stores only partially help: propagation is eventually-consistent and human-curated, so it fails precisely when people work the same problem at the same time. We argue the structural fix is to collapse the N siloed sessions into <b>one</b> shared agent session — a single live process, a single shared conversation context, and a single workspace — that every collaborator attaches to. Inconsistency then becomes impossible by construction. The obstacle is that a naïve single shared session serializes concurrent input behind one active turn and a FIFO queue, producing <b>head-of-line (HOL) blocking</b>: one user's long build freezes the whole room. We present a concurrency contract — <b>parallel inference, serial side effects</b> — that decouples the two halves of an agent turn: LLM reasoning for each user's message runs as an independent, immediately-streamed turn (eliminating HOL), while every file write, tool execution, and context commit passes through a single per-sandbox serial executor (eliminating lockless concurrent writes to the shared workspace). Because each user's message is an independent turn rather than one batched with others, faults are isolated: a malformed or adversarial input fails within its own turn instead of poisoning a shared inference. We detail the supporting mechanisms (per-turn multiplexing with turn-scoped interrupts, snapshot-read + completion-order serial context commit, strict 1:1 question-answer attribution, active-turn-count session state, a concurrency cap with a fair round-robin overflow queue, and an opt-in gate fixed at post creation), and report end-to-end measurements from a working proof of concept (Aidit-Code). With the contract enabled, two users' answers begin streaming near-simultaneously and finish 92&nbsp;ms apart; with it disabled, the second answer starts only after the first completes, 3.3&nbsp;s later.</i></p>
+
+    <p class="idxterms"><b>Index Terms—</b><b class="kw">Collaborative software engineering, large-language-model agents, multi-user concurrency, head-of-line blocking, shared execution context, sandbox isolation, real-time fan-out, serialized side effects, pessimistic concurrency control.</b></p>
+
+    <!-- ============ I. INTRODUCTION ============ -->
+    <h2 class="sec">I.&nbsp;&nbsp;Introduction</h2>
+
+    <p>Coordinated knowledge work has long been organized as a tree: a manager fans tasks out to several practitioners who each execute a slice in relative isolation. The structure scales headcount but it pays a recurring tax. Practitioners need to be hired and managed; more corrosively, the lateral channels are thin — managers talk to managers, while the practitioners who actually do the work rarely see how the whole is moving. The result is <i>information inconsistency</i>: a practitioner, working from a partial and stale picture, confidently produces <i>B</i> when the team had already converged on <i>A</i>. The error is not incompetence; it is a structural consequence of siloed context.</p>
+
+    <p>The arrival of capable code agents — large language models (LLMs) that call shell, file, and package tools to write and run software [3], [4] — changed the unit of labor but not this pathology. Today a practitioner is amplified by an agent rather than replaced by one, and the natural usage pattern is that <i>each person opens their own agent session</i>. Two collaborators working the same repository now hold two independent agent conversations, with two divergent contexts. When one steers their agent down a path the other cannot see, the team again ends up with <i>B</i> instead of <i>A</i> — the old inconsistency, relocated to the agent layer and, if anything, accelerated by the agent's productivity.</p>
+
+    <p>The industry's current answer is persistent memory: per-user "personal memory" and shared "company-wide memory" stores (e.g., <code>memory.store</code>-style mechanisms) that an agent can read and write. These help across <i>time</i> — what one session learns, a later session can recall. But they do not solve concurrency. Two problems persist. First, memory is <b>not shared in real time</b>: while two people work the same task <i>simultaneously</i>, neither session's in-flight reasoning is visible to the other, so they still diverge during the very window that matters most. Second, promoting a useful fact from personal to company-wide memory is <b>human-mediated</b>: a person must notice it, curate it, and publish it. The human becomes the propagation bottleneck, and the system is only as consistent as that person is timely.</p>
+
+    <p><b>Thesis.</b> If the disease is divergent context across many sessions, the cure is to stop having many sessions. We collapse the per-user silos into <b>a single shared code-agent session</b> — one live agent process, one shared conversation context, one workspace directory — that all collaborators attach to. Every command, every answer, and every file change flows into and is absorbed by the same authoritative context that everyone observes in real time. Under this construction, two collaborators cannot hold inconsistent pictures of the work, because there is exactly one picture. Information inconsistency is eliminated not by better synchronization but by removing the thing being synchronized.</p>
+
+    <p><b>The obstacle.</b> A single shared session is easy to describe and hard to make usable. The straightforward implementation accepts one input at a time: it keeps a single active turn and serializes the rest behind a FIFO queue (or, worse, a "busy" gate that rejects or preempts in-flight work). With one active turn, output is effectively one stream. This serialization collides head-on with collaboration. If user&nbsp;A starts a multi-minute build, user&nbsp;B's one-line question cannot even <i>begin</i> until A finishes: it is stuck behind the queue head. The essence of collaboration — each participant getting their own answer concurrently — is exactly what the serial model forbids. We call this <b>head-of-line (HOL) blocking</b>, and it is the reason naïve shared sessions are abandoned in favor of per-user isolation in the first place.</p>
+
+    <p><b>Contribution.</b> We resolve the tension with an asymmetric concurrency contract we call <b>parallel inference, serial side effects</b>. The two halves of an agent turn have opposite safety requirements, so we treat them oppositely. <i>Inference</i> — the LLM completion stream — is embarrassingly parallel and has no shared mutable state, so each user's message becomes an independent turn that begins and streams immediately, regardless of anyone else's work; N answers stream at once and are fanned out to everyone. <i>Side effects</i> — file writes, tool/shell execution, and commits to the shared context — do touch shared mutable state, so every one of them is funneled through a <b>single per-sandbox serial executor</b> and applied one at a time. Reasoning never blocks; mutation never races. Concretely, this paper contributes:</p>
+
+    <ul class="bul">
+      <li>A framing of multi-user agent collaboration as an <b>information-consistency</b> problem, and the argument that a single shared session is the structural (not merely convenient) solution (§II).</li>
+      <li>The <b>parallel-inference / serial-side-effects</b> concurrency contract that makes a single shared session usable under real concurrency by eliminating HOL blocking while preventing concurrent-write corruption (§IV).</li>
+      <li>The supporting mechanisms required to make the contract correct: per-turn <code>turnId</code> multiplexing with turn-scoped interrupts; shared-context <b>snapshot read + completion-order serial commit</b> that preserves tool-call/tool-result pairing; strict 1:1 question–answer attribution with no input batching; active-turn-<i>count</i> session state; a concurrency cap with a <b>fair round-robin overflow queue</b>; one-active-turn-per-user; and an <b>opt-in gate</b> fixed once at post creation (§IV).</li>
+      <li>A working proof-of-concept implementation (Aidit-Code) and an end-to-end evaluation on a live LLM backend showing HOL elimination, enforced concurrency caps, preserved per-user serialization, correct real-time attribution, and per-turn fault isolation under adversarial input (§VI).</li>
+    </ul>
+
+    <p>The remainder of the paper motivates the consistency problem (§II), gives a system overview (§III), specifies the concurrency contract and its mechanisms (§IV), describes the implementation (§V), evaluates it (§VI), surveys related work and the two axes on which we differ — sharing instead of isolation, and conflict <i>prevention</i> instead of conflict <i>detection</i> (§VII) — and discusses honest limitations (§VIII).</p>
+
+    <!-- ============ II. MOTIVATION ============ -->
+    <h2 class="sec">II.&nbsp;&nbsp;The Information-Inconsistency Problem</h2>
+
+    <h3 class="sub">A. Three regimes of the same disease</h3>
+    <p>We distinguish three regimes (Table&nbsp;I). In the <b>pre-agent</b> regime, a manager coordinates several human practitioners; communication is hierarchical and lossy, and practitioners act on partial pictures. In the <b>per-session-agent</b> regime — today's default — each practitioner pairs with a private code-agent session. Throughput rises, but each session is a fresh silo of context; the lateral channel between practitioners is now <i>also</i> a lateral channel between divergent agent contexts, and nothing reconciles them while work is in flight. In the <b>shared-session</b> regime we propose, all practitioners drive one agent over one context; the lateral channel is the context itself.</p>
+
+    <div class="tbl-wrap">
+    <table class="tbl">
+      <caption>Table I.&nbsp;Regimes of collaboration and where context lives.</caption>
+      <thead><tr><th>Regime</th><th>Context locus</th><th>Consistency failure mode</th></tr></thead>
+      <tbody>
+        <tr><td>Pre-agent (manager + workers)</td><td>Per-person, hierarchical relay</td><td>Workers act on stale/partial picture → do <i>B</i> not <i>A</i></td></tr>
+        <tr><td>Per-session agent (today)</td><td>Per-user agent session (N silos)</td><td>Divergent agent contexts; memory stores propagate late &amp; human-curated</td></tr>
+        <tr><td><b>Shared session (ours)</b></td><td><b>One shared session / one context</b></td><td><b>None by construction — single authoritative context</b></td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3 class="sub">B. Why persistent memory is insufficient</h3>
+    <p>Personal and company-wide memory stores are valuable, but they are a <i>temporal</i> mechanism: they carry knowledge from a past session to a future one. Two limitations make them unable to prevent same-time inconsistency. (i) <b>No in-flight sharing.</b> A memory store records <i>completed</i> facts; it does not stream one session's partial, in-progress reasoning into another. While Alice and Bob both work the build at 10:03, neither store reflects what the other is doing at 10:03. (ii) <b>Human propagation bottleneck.</b> A fact discovered in personal memory only becomes team-wide after a human curates and promotes it. The system's consistency is gated on a person's attention and timeliness; under load that person is exactly who is too busy to curate. A single shared session sidesteps both: there is no propagation step because there is nothing to propagate <i>between</i> — all work already lives in one context, visible to all, as it happens.</p>
+
+    <h3 class="sub">C. The cost of the obvious shared-session implementation</h3>
+    <p>Given the case for one shared session, why is it rare? Because the obvious implementation is unusable. To keep a single agent's mutable workspace coherent, implementations admit one input at a time: a single active turn, with concurrent inputs serialized behind a FIFO queue, or a "busy" gate that rejects new input or preempts the running turn. Either way the room has one active turn and one output stream. The consequence is HOL blocking: response latency for <i>every</i> user is coupled to the <i>longest</i> in-flight task, not their own. A one-line question waits behind a package install. Preemption is worse — it truncates a collaborator's in-progress answer or file edit, and makes the session-status indicator flicker between busy and idle as the queue drains. The serial contract is therefore not a minor inefficiency; it is fundamentally at odds with multi-user parallelism, which is the whole point of collaboration. §IV reverses it.</p>
+
+    <!-- ============ III. SYSTEM OVERVIEW ============ -->
+    <h2 class="sec">III.&nbsp;&nbsp;System Overview</h2>
+
+    <p>Aidit-Code is a mobile-first web platform in which every <i>post</i> (a community thread) is bound 1:1 to an isolated execution <i>sandbox</i>, and the thread <i>is</i> a live code-agent session running inside that sandbox. Participants attach to the same session and observe its output in real time. Fig.&nbsp;1 shows the architecture.</p>
+
+    <figure class="span">
+      <svg viewBox="0 0 920 318" role="img" aria-label="System architecture: client, server, and per-post sandbox">
+        <defs>
+          <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#111"/></marker>
+        </defs>
+        <!-- Client -->
+        <rect x="10" y="30" width="208" height="262" fill="none" stroke="#111" stroke-width="1.3"/>
+        <text x="114" y="50" text-anchor="middle" font-size="12" font-weight="bold">Client (browser, PWA)</text>
+        <rect x="26" y="64" width="176" height="26" fill="#f2f2f2" stroke="#111"/><text x="114" y="81" text-anchor="middle" font-size="9.5">UI · React</text>
+        <rect x="26" y="96" width="176" height="34" fill="#f2f2f2" stroke="#111"/><text x="114" y="111" text-anchor="middle" font-size="9.2">Auth store</text><text x="114" y="123" text-anchor="middle" font-size="7.8">token only — no LLM key</text>
+        <rect x="26" y="136" width="176" height="26" fill="#f2f2f2" stroke="#111"/><text x="114" y="153" text-anchor="middle" font-size="9.2">REST client</text>
+        <rect x="26" y="168" width="176" height="36" fill="#f2f2f2" stroke="#111"/><text x="114" y="184" text-anchor="middle" font-size="9.2">ThreadStream / SSE</text><text x="114" y="196" text-anchor="middle" font-size="7.8">per-turnId concurrent streams</text>
+        <rect x="26" y="210" width="176" height="26" fill="#f2f2f2" stroke="#111"/><text x="114" y="227" text-anchor="middle" font-size="9.2">Workspace panel</text>
+        <!-- Server -->
+        <rect x="262" y="30" width="330" height="262" fill="none" stroke="#111" stroke-width="1.3"/>
+        <text x="427" y="50" text-anchor="middle" font-size="12" font-weight="bold">Server (Node · Fastify · Prisma)</text>
+        <rect x="278" y="64" width="148" height="38" fill="#fff" stroke="#111"/><text x="352" y="81" text-anchor="middle" font-size="9.2">REST API</text><text x="352" y="94" text-anchor="middle" font-size="7.6">messages·turn·interrupt·files</text>
+        <rect x="430" y="64" width="146" height="38" fill="#fff" stroke="#111"/><text x="503" y="81" text-anchor="middle" font-size="9.2">SSE hub</text><text x="503" y="94" text-anchor="middle" font-size="7.6">generate once · fan-out to all</text>
+        <rect x="278" y="108" width="148" height="40" fill="#fff" stroke="#111"/><text x="352" y="125" text-anchor="middle" font-size="9.2">Domain (seq SoT)</text><text x="352" y="138" text-anchor="middle" font-size="7.6">ordering · 1:1 attribution</text>
+        <rect x="430" y="108" width="146" height="40" fill="#fff" stroke="#111"/><text x="503" y="125" text-anchor="middle" font-size="9.2">AgentRuntime adapter</text><text x="503" y="138" text-anchor="middle" font-size="7.6">per-turnId sink dispatch</text>
+        <rect x="278" y="156" width="298" height="32" fill="#fff" stroke="#111" stroke-dasharray="4 3"/><text x="427" y="172" text-anchor="middle" font-size="8.6">Server secret .env: API_KEY · BASE_URL · MODEL</text><text x="427" y="183" text-anchor="middle" font-size="7.4" font-style="italic">never in responses / logs / SSE</text>
+        <rect x="278" y="196" width="298" height="34" fill="#f7f7f7" stroke="#111"/><text x="427" y="213" text-anchor="middle" font-size="9">DB — Message(seq), Sandbox, AgentSession,</text><text x="427" y="224" text-anchor="middle" font-size="9">ToolCall, Vote, Bookmark</text>
+        <!-- Sandbox -->
+        <rect x="636" y="30" width="274" height="262" fill="none" stroke="#111" stroke-width="1.3"/>
+        <text x="773" y="50" text-anchor="middle" font-size="12" font-weight="bold">Per-post sandbox (1:1)</text>
+        <rect x="652" y="62" width="242" height="34" fill="#eef3ee" stroke="#111"/><text x="773" y="78" text-anchor="middle" font-size="9.2">Code agent — single session, single cwd</text><text x="773" y="90" text-anchor="middle" font-size="7.6">pi agent process</text>
+        <rect x="652" y="102" width="242" height="40" fill="#e6efe6" stroke="#111"/><text x="773" y="118" text-anchor="middle" font-size="9.2">Turn multiplexer</text><text x="773" y="131" text-anchor="middle" font-size="7.6">turns: Map&lt;turnId,Turn&gt; — parallel inference</text>
+        <rect x="652" y="148" width="242" height="40" fill="#fbf6e6" stroke="#111" stroke-width="1.3"/><text x="773" y="164" text-anchor="middle" font-size="9.2" font-weight="bold">Serial side-effect executor</text><text x="773" y="177" text-anchor="middle" font-size="7.6">per-sandbox single lock / queue</text>
+        <rect x="652" y="194" width="242" height="36" fill="#fff" stroke="#111"/><text x="773" y="210" text-anchor="middle" font-size="9.2">Shared context (convo)</text><text x="773" y="222" text-anchor="middle" font-size="7.6">snapshot read + completion-order commit</text>
+        <rect x="652" y="236" width="242" height="26" fill="#fff" stroke="#111"/><text x="773" y="253" text-anchor="middle" font-size="8.8">Fair overflow queue (MAX_CONCURRENT_TURNS)</text>
+        <rect x="652" y="268" width="242" height="20" fill="#ececec" stroke="#111"/><text x="773" y="282" text-anchor="middle" font-size="8.4">sandboxRoot (isolation root)</text>
+        <!-- arrows -->
+        <line x1="218" y1="150" x2="262" y2="150" stroke="#111" marker-end="url(#ar)"/><text x="240" y="144" text-anchor="middle" font-size="7" font-style="italic">REST</text>
+        <line x1="262" y1="178" x2="218" y2="178" stroke="#111" marker-end="url(#ar)"/><text x="240" y="190" text-anchor="middle" font-size="7" font-style="italic">SSE</text>
+        <line x1="592" y1="128" x2="636" y2="120" stroke="#111" marker-end="url(#ar)"/>
+        <line x1="636" y1="175" x2="592" y2="175" stroke="#111" marker-end="url(#ar)"/><text x="614" y="170" text-anchor="middle" font-size="7" font-style="italic">events</text>
+        <line x1="773" y1="288" x2="773" y2="300" stroke="#111"/><text x="773" y="312" text-anchor="middle" font-size="8">→ OpenAI-compatible LLM (key injected by server)</text>
+      </svg>
+      <figcaption><b>Fig. 1.</b> Architecture. The client holds only a session token (no LLM key). The server is the source of truth for message ordering (a monotone per-post sequence number, <code>seq</code>) and relays each agent's output to every subscriber over Server-Sent Events. Each post owns one isolated sandbox running a single shared code-agent session whose internals — the <b>turn multiplexer</b> (parallel inference) and the <b>serial side-effect executor</b> (serial mutation) — realize the concurrency contract of §IV. LLM credentials live only in the server secret and are injected into the agent process as environment, never appearing in any response, log, or event.</figcaption>
+    </figure>
+
+    <h3 class="sub">A. Server-key model and single-generation fan-out</h3>
+    <p>Unlike a bring-your-own-key design in which each client calls the model provider directly, Aidit-Code hosts the agent server-side. The LLM is reached over an OpenAI-compatible interface whose <code>API_KEY</code>, <code>BASE_URL</code>, and <code>MODEL</code> reside solely in the server's <code>.env</code> and are injected into the agent process as environment; they never appear in any HTTP response, log line, or SSE event. A read-only <code>GET&nbsp;/runtime</code> exposes the model name and the base-URL host only. Cost is borne by the operator; abuse is bounded by rate limits and concurrency caps. Because the agent runs once on the server, its output is <b>generated a single time and fanned out</b> identically to every subscriber — the precondition for everyone seeing the <i>same</i> work, which per-client inference cannot guarantee.</p>
+
+    <h3 class="sub">B. Data model and a single source of truth</h3>
+    <p>All chat bubbles — human messages, agent replies, tool calls, tool results, and system notices — are rows of one <code>Message</code> table (the transcript). Each row carries a server-assigned monotone integer <code>seq</code> that is unique within a post (<code>@@unique([postId, seq])</code>). This single ordering axis is the source of truth (SoT) for sorting, replay, and idempotency. Crucially, even though §IV lets many turns run at once, every bubble they emit still lands at a unique point on the one <code>seq</code> axis, so a client reconstructs the entire thread deterministically by sorting on <code>seq</code> — "result merging" is not a separate algorithm but an emergent property of a monotone log. Agent replies link to the human message that caused them via <code>replyToId</code> (1:1 attribution); tool bubbles link to a <code>ToolCall</code> record via <code>toolCallId</code>; human sends carry a <code>clientId</code> idempotency key. A per-post <code>Sandbox</code> (<code>postId @unique</code>) holds the isolation root <code>path</code>, a status, and a <code>meta</code> blob whose <code>concurrentTurns</code> flag gates the parallel path (§IV-G).</p>
+
+    <!-- ============ IV. CONCURRENCY CONTRACT ============ -->
+    <h2 class="sec">IV.&nbsp;&nbsp;Parallel Inference, Serial Side Effects</h2>
+
+    <p>The core of the system is a single contract applied to every post that opts in: <i>reasoning is parallel; mutation is serial.</i> We keep one shared session, one shared context, and one workspace, and we make exactly one thing concurrent — the per-user inference stream — while routing exactly one class of operation — externally-visible side effects — through a single serial gate. Fig.&nbsp;2 is the canonical sequence.</p>
+
+    <figure class="span">
+      <svg viewBox="0 0 920 300" role="img" aria-label="Parallel inference with serial side effects, two users">
+        <defs>
+          <marker id="ar2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#111"/></marker>
+        </defs>
+        <!-- lanes -->
+        <text x="70" y="26" text-anchor="middle" font-size="10" font-weight="bold">User A turn</text>
+        <text x="70" y="150" text-anchor="middle" font-size="10" font-weight="bold">User B turn</text>
+        <line x1="20" y1="120" x2="560" y2="120" stroke="#bbb"/>
+        <!-- A tokens -->
+        <rect x="20" y="36" width="540" height="40" fill="#eef3ee" stroke="#111"/>
+        <text x="290" y="52" text-anchor="middle" font-size="8.6">parallel inference — A tokens stream:  A A A · · · A A</text>
+        <text x="290" y="68" text-anchor="middle" font-size="7.8" font-style="italic">begins immediately, independent of B</text>
+        <!-- B tokens -->
+        <rect x="20" y="160" width="540" height="40" fill="#eef3ee" stroke="#111"/>
+        <text x="290" y="176" text-anchor="middle" font-size="8.6">parallel inference — B tokens stream:  B B · · · B B B</text>
+        <text x="290" y="192" text-anchor="middle" font-size="7.8" font-style="italic">begins immediately, independent of A</text>
+        <!-- interleave note -->
+        <text x="290" y="232" text-anchor="middle" font-size="8" font-style="italic">tokens interleave on the wire (e.g., B×12 A×18 B×13 A×7) and fan out to all subscribers</text>
+        <!-- serial executor -->
+        <rect x="600" y="60" width="150" height="116" fill="#fbf6e6" stroke="#111" stroke-width="1.4"/>
+        <text x="675" y="100" text-anchor="middle" font-size="9.4" font-weight="bold">Serial side-effect</text>
+        <text x="675" y="114" text-anchor="middle" font-size="9.4" font-weight="bold">executor</text>
+        <text x="675" y="132" text-anchor="middle" font-size="7.8">single lock / queue</text>
+        <text x="675" y="146" text-anchor="middle" font-size="7.8">per sandbox</text>
+        <!-- side effect requests -->
+        <line x1="560" y1="56" x2="600" y2="96" stroke="#111" marker-end="url(#ar2)"/><text x="556" y="48" text-anchor="end" font-size="7.4">A: write x</text>
+        <line x1="560" y1="180" x2="600" y2="140" stroke="#111" marker-end="url(#ar2)"/><text x="556" y="196" text-anchor="end" font-size="7.4">B: write x</text>
+        <!-- filesystem -->
+        <rect x="790" y="84" width="116" height="68" fill="#ececec" stroke="#111"/>
+        <text x="848" y="112" text-anchor="middle" font-size="9">filesystem /</text>
+        <text x="848" y="126" text-anchor="middle" font-size="9">context</text>
+        <text x="848" y="142" text-anchor="middle" font-size="7.6">sequential apply</text>
+        <line x1="750" y1="118" x2="790" y2="118" stroke="#111" stroke-width="1.5" marker-end="url(#ar2)"/><text x="770" y="112" text-anchor="middle" font-size="7.4">1 at a time</text>
+        <!-- interrupt + queue -->
+        <rect x="20" y="252" width="360" height="38" fill="#fff" stroke="#111"/>
+        <text x="200" y="268" text-anchor="middle" font-size="8">interrupt(turnId) cancels only that turn — the other keeps running</text>
+        <text x="200" y="281" text-anchor="middle" font-size="7.6">inflight ≤ MAX_CONCURRENT_TURNS; overflow → fair RR queue; per-user inflight = 1</text>
+        <rect x="600" y="220" width="306" height="64" fill="#fff" stroke="#111"/>
+        <text x="753" y="240" text-anchor="middle" font-size="8">shared context: each turn reads a snapshot at start,</text>
+        <text x="753" y="254" text-anchor="middle" font-size="8">commits in completion order → preserves</text>
+        <text x="753" y="268" text-anchor="middle" font-size="8"><tspan font-family="Courier New, monospace" font-size="7.6">assistant.tool_calls ↔ role:tool</tspan> pairing</text>
+      </svg>
+      <figcaption><b>Fig. 2.</b> The contract. Turns <i>t<sub>A</sub></i> and <i>t<sub>B</sub></i> infer in parallel: their tokens interleave on the wire and stream to all subscribers, so neither answer waits for the other (HOL eliminated). But every side effect — including two writes to the same file <i>x</i> — passes through the sandbox's single serial executor and is applied one at a time, so there is no lockless concurrent write (logical result: last-wins). Interrupts are turn-scoped; the shared context is read as a snapshot and committed in completion order to preserve message-pairing.</figcaption>
+    </figure>
+
+    <h3 class="sub">A. Independent turns and parallel inference</h3>
+    <p>Each human message is treated as one independent <b>turn</b>. When a message arrives with AI mode on, the server first persists it as a <code>HUMAN</code> bubble with its own <code>seq</code> and fans it out immediately (no human message is ever lost behind agent work), then injects it into the shared session as a turn that <i>starts inferring at once</i>, regardless of any other in-flight turn. Multiple <code>AGENT_REPLY</code> bubbles therefore enter the <code>STREAMING</code> state concurrently and stream to all subscribers. The former single-output-stream assumption is gone; N answers flow at once and HOL blocking disappears because a turn's latency is decoupled from every other turn's length.</p>
+
+    <h3 class="sub">B. The serial side-effect executor</h3>
+    <p>Inference is parallel precisely because it is side-effect-free: a completion stream reads no shared mutable state. The opposite is true of file writes, shell/tool execution, and context commits, which all mutate state shared by every turn. The contract routes <i>all</i> of them through a single per-sandbox serial executor (a lock/queue keyed by the sandbox root). Two turns may both decide to write the same file; the executor applies their writes sequentially. We do not merge file contents — we <b>serialize the writes themselves</b>. The logical outcome is last-wins, but the <i>physical</i> outcome is always a well-formed file: there is no partial write, no torn file, no directory race, because the count of lockless concurrent writers to the shared workspace is held at zero. This is the system's <b>file-safety boundary</b>, and it is what lets inference be reckless about concurrency while the workspace stays coherent.</p>
+
+    <h3 class="sub">C. Shared context: snapshot read, completion-order commit</h3>
+    <p>One post keeps one conversation context (<code>convo</code>). A subtlety of parallel inference over a shared context is that the OpenAI-compatible message protocol requires each <code>assistant</code> message bearing <code>tool_calls</code> to be immediately followed by the matching <code>role:tool</code> results; if two turns interleaved their writes into <code>convo</code>, this pairing would shatter. We avoid the hazard with two rules: each turn <b>reads a snapshot</b> of <code>convo</code> at its start and infers against that snapshot, and each turn's completion and tool results are <b>committed in completion order</b> through the same serial executor, as an atomic group. Pairing is preserved without locking inference. The accepted cost is <i>staleness</i>: turns launched at the same instant may not see each other's just-arrived input. We treat this as a deliberate trade — immediacy and file-safety in exchange for bounded snapshot staleness — and state it openly rather than hide it.</p>
+
+    <h3 class="sub">D. turnId multiplexing and turn-scoped interrupts</h3>
+    <p>Inside the agent worker, in-flight turns are held in <code>turns: Map&lt;turnId, Turn&gt;</code>; each <code>Turn</code> owns its own interrupt flag and <code>AbortController</code>. The parent runtime adapter dispatches the agent process's interleaved stdout lines to the correct per-turn sink via <code>Map&lt;turnId, TurnSink&gt;</code>, and tool-call acknowledgements are routed by the pair <code>{callId, turnId}</code> so a result is matched to the right tool call of the right turn. Because turns are individuated, an interrupt names a <code>turnId</code> and cancels <i>only</i> that turn; another user's parallel turn is untouched. An accompanying steer string, if present, is delivered as new input to that turn alone.</p>
+
+    <h3 class="sub">E. Count-based session state</h3>
+    <p>With one active turn, "is the session busy?" is a boolean. With many, it is a count. We define session state by the number of active turns: <code>RUNNING</code> iff active turns ≥ 1, <code>IDLE</code> iff 0. The same <code>session.status</code> event carries an <code>activeTurns</code> integer (a count, not a secret), surfaced to the UI as an "<i>N tasks in progress</i>" badge. A turn finishing while others remain in flight correctly keeps the session <code>RUNNING</code>, eliminating the busy/idle flicker of the serial model.</p>
+
+    <h3 class="sub">F. Concurrency cap, fair queue, and one-turn-per-user</h3>
+    <p>Unbounded parallel inference would multiply token cost and server load, so each sandbox caps simultaneous in-flight turns at <code>MAX_CONCURRENT_TURNS</code>. Overflow is <b>not rejected</b>; it waits in a fair round-robin queue that, when a slot frees, admits the longest-waiting turn whose user has no active turn — preventing any single user from monopolizing the queue. Independently, a user may have at most <b>one active turn</b> (per-user inflight = 1): a user's second message waits for their own first to finish. Parallelism therefore arises only <i>between distinct users</i>, and the number of concurrent turns is naturally bounded by the number of concurrently active users. Notably, this reframes the FIFO queue: it is no longer "the serializer of all input" (the v0.1 role that caused HOL) but merely the holding area for cap overflow.</p>
+
+    <h3 class="sub">G. Opt-in gate and a single topology per post</h3>
+    <p>The parallel path is <b>off by default</b>. It is enabled only when <code>Sandbox.meta.concurrentTurns === true</code>, a flag set once from the <code>concurrent</code> parameter of <code>POST /posts</code> at creation and never changed thereafter. A post is therefore either fully serial (the legacy single-active-turn / FIFO path, byte-for-byte preserved) or fully parallel for its entire life; the two topologies never mix within one sandbox. This makes adoption incremental and safe and keeps the legacy behavior available as a control group — which §VI exploits.</p>
+
+    <h3 class="sub">H. Why not the alternatives</h3>
+    <p>Two tempting designs are rejected. <b>Per-user process isolation</b> (a separate agent/VM per user or per turn) destroys the shared context that motivates the whole system, and lets N processes write the same working directory without a lock — the worst case for file safety — while multiplying processes without reclamation. <b>Input batching</b> (coalescing N concurrent messages into one turn) collapses 1:1 attribution and causes <i>query pollution</i>: a single shared inference conflates distinct requests into <b>cross-addressed</b> responses and tool calls — one user's answer or shell command attributed to another — and it loses inter-user <b>fault isolation</b>, so a single malformed or adversarial message can derail or poison the entire turn for everyone (analyzed in §VII). It further loses per-message reasoning-effort and races the interrupt window. Only parallel-inference-plus-serial-side-effects satisfies concurrency, shared collaboration, file safety, 1:1 attribution, and per-turn fault isolation simultaneously.</p>
+
+    <!-- ============ V. IMPLEMENTATION ============ -->
+    <h2 class="sec">V.&nbsp;&nbsp;Implementation</h2>
+
+    <p>The server is Node&nbsp;20 + Fastify + Prisma (SQLite for the PoC, Postgres for scale); the client is React&nbsp;18 + TypeScript + Vite. The agent runtime is a <i>pi agent</i> bound through an adapter so the runtime is replaceable. Two files carry the concurrency contract.</p>
+
+    <h4 class="subsub">A. Worker multiplexing (<code>piWorker.mjs</code>)</h4>
+    <p>The worker previously held global single state — one <code>currentTurn</code>, one tool-ack resolver, one mutable <code>convo</code>. We replaced the first two with per-turn state (a <code>turns</code> map keyed by <code>turnId</code> or a <code>SINGLE</code> sentinel for legacy), gave each turn its own <code>AbortController</code>, and routed tool acknowledgements by <code>callId/turnId</code>. The shared <code>convo</code> stays single but is committed through a promise chain (<code>commitToConvo</code>) that pushes each <code>assistant.tool_calls</code> and its <code>role:tool</code> results as one synchronous group, so no interleaving can break pairing. The legacy preemption rule ("new input aborts the previous turn") was removed for multiplexed turns but preserved for the <code>SINGLE</code> path, so non-concurrent posts are byte-for-byte unchanged.</p>
+
+    <h4 class="subsub">B. Parent runtime routing (<code>pi.ts</code>) and the turn driver (<code>turn.ts</code>)</h4>
+    <p>The parent adapter turned its single active-turn sink into <code>Map&lt;turnId, TurnSink&gt;</code>, assigns a <code>turnId</code> on <code>send</code>, multiplexes the stdin protocol as <code>{type:'input', turnId, …}</code>, and dispatches stdout by <code>turnId</code>; <code>ackTool</code> and <code>interrupt</code> are likewise <code>turnId</code>-routed. The cap, fair queue, and one-turn-per-user gates live here, keyed by sandbox and user. The turn driver reads the post's <code>concurrent</code> flag and, on the count-based status events, applies a small but important correction: at the moment a turn is published <code>RUNNING</code> it is not yet registered in the runtime's count, so the driver reports <code>activeTurnCount()&nbsp;+&nbsp;1</code>; at <code>IDLE</code> it reports the raw count (the line pump has already de-counted). The per-sandbox serial executor is the existing <code>withSandboxLock</code> around tool execution, raised from per-turn to per-sandbox scope; tool/file events therefore arrive in order while tokens interleave freely.</p>
+
+    <h4 class="subsub">C. Real-time surface and client</h4>
+    <p>The SSE schema is unchanged except for the additive <code>activeTurns</code> field: <code>agent.token{messageId, seq, delta}</code> was already turn-scoped, so concurrent turns simply produce interleaved tokens for distinct <code>messageId</code>s, which the client accumulates per bubble. The frontend surfaces concurrency additively — an "<i>N tasks in progress</i>" badge, a "<i>concurrent streaming (N turns)</i>" divider, a <code>↳&nbsp;@asker</code> attribution micro-label per reply (the user's own question's reply is anchored and highlighted), and composer gating switched from "session is streaming" to "<i>my</i> turn is in flight," so a user's composer locks only while their own turn runs and never while someone else's does. Single-turn (legacy) rendering is pixel-equivalent to the pre-existing UI.</p>
+
+    <!-- ============ VI. EVALUATION ============ -->
+    <h2 class="sec">VI.&nbsp;&nbsp;Evaluation</h2>
+
+    <p>We evaluate on the running PoC against a live OpenAI-compatible backend (GitHub Models, <code>gpt-4o-mini</code>). Measurements are single-run, proof-of-concept observations intended to demonstrate the <i>qualitative</i> behavior of the contract — HOL elimination, cap enforcement, per-user serialization, and correct attribution — not to characterize production latency. The opt-in gate gives us a clean A/B: the same code path with <code>concurrent</code> off is the serial control.</p>
+
+    <h3 class="sub">A. HOL elimination (the central claim)</h3>
+    <p>Two users on one post fire simultaneously — user&nbsp;A a long turn (enumerate 1..40), user&nbsp;B a short one — and we capture the <code>agent.token</code> stream. With the contract <b>on</b>, tokens interleave (observed run-length <code>B×12 A×18 B×13 A×7</code>, three switches), both turns' first tokens arrive nearly together (A&nbsp;at&nbsp;+4631&nbsp;ms, B&nbsp;at&nbsp;+4572&nbsp;ms), and the two complete within <b>92&nbsp;ms</b> of each other. With the contract <b>off</b> (control), output is strictly serial (<code>A×24 B×15</code>, one switch): B's first token arrives at +8312&nbsp;ms, <i>after</i> A has already finished at +5068&nbsp;ms — a completion gap of <b>3.3&nbsp;s</b>. The short question is freed from the long task's tail exactly when the contract is enabled (Table&nbsp;II, S0).</p>
+
+    <h3 class="sub">B. Cap, per-user serialization, inter-user parallelism</h3>
+    <p>Using the interval between each reply's first token and its completion as a turn's "in-flight" window, we measure peak overlap (<code>maxInflight</code>). Two requests from the <i>same</i> user yield <code>maxInflight = 1</code> (the second's first token at +5609&nbsp;ms follows the first's completion at +4567&nbsp;ms) — per-user inflight = 1. Two requests from <i>different</i> users yield <code>maxInflight = 2</code> (first tokens at +1813/+2683&nbsp;ms). Five different users against a cap of four yield <code>maxInflight = 4</code> (four first tokens within +1662..+2581&nbsp;ms; the fifth at +5452&nbsp;ms, admitted only after a prior turn completes near +3699&nbsp;ms) — the cap is enforced and overflow is queued, not rejected (Table&nbsp;II).</p>
+
+    <div class="tbl-wrap span">
+    <table class="tbl">
+      <caption>Table II.&nbsp;End-to-end concurrency and isolation results (PoC; GitHub Models gpt-4o-mini; S0&ndash;S3 are single-run live observations, S4 is from the runtime multiplexing test harness).</caption>
+      <thead><tr><th>#</th><th>Scenario</th><th>Config</th><th>Observed</th><th>Confirms</th></tr></thead>
+      <tbody>
+        <tr><td class="c">S0</td><td>2 users, long&nbsp;+&nbsp;short turn</td><td class="c">concurrent ON</td><td>interleaved <code>B12 A18 B13 A7</code>; first tokens A&nbsp;+4631&nbsp;ms / B&nbsp;+4572&nbsp;ms; complete within 92&nbsp;ms</td><td><b>HOL eliminated</b></td></tr>
+        <tr><td class="c">S0′</td><td>same (control)</td><td class="c">concurrent OFF</td><td>strict serial <code>A24 B15</code>; B first token +8312&nbsp;ms &gt; A done +5068&nbsp;ms; 3.3&nbsp;s gap</td><td>legacy FIFO preserved</td></tr>
+        <tr><td class="c">S1</td><td>2 requests, same user</td><td class="c">ON</td><td><code>maxInflight=1</code>; 2nd first token +5609&nbsp;ms after 1st done +4567&nbsp;ms</td><td>per-user inflight = 1</td></tr>
+        <tr><td class="c">S2</td><td>2 requests, distinct users</td><td class="c">ON</td><td><code>maxInflight=2</code>; first tokens +1813 / +2683&nbsp;ms</td><td>inter-user parallelism</td></tr>
+        <tr><td class="c">S3</td><td>5 distinct users, cap=4</td><td class="c">ON</td><td><code>maxInflight=4</code>; 4 first tokens +1662..+2581&nbsp;ms; 5th +5452&nbsp;ms after a prior completes</td><td><code>MAX_CONCURRENT_TURNS</code> enforced, queued not rejected</td></tr>
+        <tr><td class="c">S4</td><td>failing/adversarial turn + normal turn</td><td class="c">ON</td><td>one turn's stream never carries another's tokens; a turn-scoped interrupt fails only its own reply while the peer streams to <code>COMPLETE</code>; cross-routed tool-acks raise no error (<code>arMux.test.ts</code>)</td><td><b>per-turn fault isolation</b></td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p><b>A note that itself confirms the design.</b> Prompts that trigger <i>tools</i> serialize at the executor (by construction), so token-level parallelism is observable only on pure-text prompts; tool-bearing turns appear serialized even with the contract on. This is not a defect — it is exactly parallel-inference + serial-side-effects in action, and we use pure-text prompts to isolate the inference-parallelism measurement.</p>
+
+    <h3 class="sub">C. Real-time multi-stream UI (browser E2E)</h3>
+    <p>Driving two browser users (Alice, Bob) on a <code>concurrent=true</code> post against the real LLM, we verified the live surface from the DOM: during concurrent streaming (<code>activeTurns = 2</code>) the header showed "<i>◉ 2 tasks in progress</i>," a "<i>concurrent streaming (2 turns)</i>" divider appeared, both <code>AGENT_REPLY</code> bubbles carried attribution labels (own question vs. peer), and the user's own composer was locked while a peer's turn did <i>not</i> block it. After completion the badge and divider disappeared, only the own-question attribution remained (single-turn rule), and the composer was released — the full lifecycle matched the specification.</p>
+
+    <h3 class="sub">D. Correctness and regression</h3>
+    <p>The contract is covered by an automated suite: 117 backend tests across 30 files and 19 frontend unit tests for the pure attribution/active-turn selectors. Concurrency-sensitive suites (worker multiplexing, parent routing, cap/fair-queue, count-based status) were rerun five times in isolation with no flakes. Backend and frontend type-checks are clean, no user-facing string is hard-coded (all pass through i18n), and a redaction regression test asserts that no key material appears in responses, logs, or events — the server-key invariant holds on every parallel path.</p>
+
+    <h3 class="sub">E. Fault isolation under adversarial or failing input</h3>
+    <p>Because the system <i>never batches</i>, a malformed or adversarial message is confined to its own turn (S4). Three runtime properties establish this, all exercised by the multiplexing test suite (<code>arMux.test.ts</code>): per-turn routing is <b>non-crossing</b> — with two concurrent turns, one turn's token stream never carries the other's content; a <b>turn-scoped interrupt</b> cancels only the named turn while its neighbor streams to <code>COMPLETE</code>; and cross-routed tool acknowledgements, keyed by <code>{callId, turnId}</code>, raise no error. It follows by construction that a turn whose input is hostile, or whose inference errors, marks only its <i>own</i> <code>AGENT_REPLY</code> as <code>FAILED</code> and can neither inject content into, mis-attribute to, nor abort a concurrent user's turn; its file writes, like any other, are serialized rather than interleaved (§IV-B). This is precisely the property a batched turn forfeits — there, a single poisoned input shares one inference with everyone (§VII) — and it is why we report fault isolation as a first-class result rather than a side effect.</p>
+
+    <!-- ============ VII. RELATED WORK ============ -->
+    <h2 class="sec">VII.&nbsp;&nbsp;Related Work</h2>
+
+    <p>Code-interpreter LLM agents that call shell and file tools [3], [4], [5] and server-side execution sandboxes are well established, but they assume a single user and a single active task; they do not address one execution session shared and steered by many independent users, nor the concurrent-write hazard that creates. Collaborative cloud IDEs and real-time co-editing via operational transformation [6], [7] or CRDTs [8] share a <i>document</i>, not a live agent session, and reconcile concurrent edits by transformation or merge rather than by serializing an agent's side effects. The open-source pattern of many viewers sharing and steering one live AI session inspired both this work and its predecessor, but it presumes a single active turn and serial processing — the very source of the HOL blocking we remove.</p>
+
+    <p>Recent agent systems obtain concurrency through <b>isolation</b>: autonomous coding agents that run each task in its own cloud VM [12], multi-tenant platforms that partition by user/session, and personal agents that parallelize by delegating to sub-agents. All abandon a shared context to gain parallelism, which is the opposite of our goal.</p>
+
+    <p>A distinct prior approach keeps a single session but <b>batches</b> several users' queries — and the resulting tool calls — into one coalesced turn, as proposed for multi-user chat agents that merge rapid inputs. Batching is simple but induces <i>query pollution</i> in two ways. First, <b>cross-request contamination</b>: a single inference over several users' distinct requests conflates them, so the model returns a reply, or issues a tool call, that belongs to a different user than the one it is attributed to — silently breaking the 1:1 mapping and producing actions no one asked for. Second, <b>loss of fault isolation</b>: because all users share one inference, a single malformed or adversarial message — for instance a prompt-injection attempt — can derail, corrupt, or fail the entire batched turn, poisoning the output even for users who submitted nothing wrong. Our design batches nothing (cf. §IV-A, §IV-H): each user message is an independent turn, so distinct requests cannot cross-contaminate and a faulty or hostile turn fails in isolation without affecting its neighbors. Experiment-tracking systems such as MLflow log many parallel runs but provide no shared conversational context, no side-effect serialization, and no real-time multi-user fan-out. Two cited patents — concurrent screen sharing [13] and multi-version malware-analysis sandboxes [14] — concern, respectively, displaying existing video and single-analyst threat detection, neither a collaborative shared workspace.</p>
+
+    <p>The closest design point is multi-principal agent coordination [11], where agents acting for <i>different</i> principals reconcile shared state with explicit intents, first-class conflict objects, Lamport clocks [10], and <b>optimistic concurrency control</b> — detecting stale state and resolving by rebase/retry [9]. We differ on two axes. <b>(1) Sharing, not isolation:</b> we keep a single shared agent, a single shared context, and a single sandbox, and multiplex only the <i>users' inputs</i> as parallel turns. <b>(2) Prevention, not detection:</b> rather than detect conflicts after the fact and rebase, we pass every side effect through one serial executor so concurrent-write conflicts never <i>enter</i> — pessimistic serialization in place of optimistic reconciliation. The distinguishing essence is the asymmetry itself: permit parallelism in reasoning, reduce all mutation to a single serial gate.</p>
+
+    <!-- ============ VIII. LIMITATIONS ============ -->
+    <h2 class="sec">VIII.&nbsp;&nbsp;Limitations and Discussion</h2>
+    <p>We state limitations plainly. <b>(i) Token cost.</b> N concurrent turns consume roughly N× the tokens — the intrinsic price of concurrency, bounded by the cap. <b>(ii) Shared-context capacity.</b> A single shared <code>convo</code> fills faster under many users and will need raising or summarization. <b>(iii) Same-file logical race.</b> The serial executor guarantees <i>physical</i> file safety, but two turns writing the same file still resolve last-wins logically; a same-file-only serialization fallback could narrow this. <b>(iv) Detached writers.</b> A tool that spawns a detached/background process writes outside the lock; process-group teardown is needed to close this gap. <b>(v) Snapshot staleness.</b> Simultaneously-launched turns may not see each other's just-arrived input. These are the accepted costs of trading global serialization for immediacy and shared collaboration; none is hidden, and each suggests concrete future hardening. More broadly, the PoC's sandbox isolation is host-directory + path-escape + resource/network policy; container-grade isolation (Firecracker/gVisor) is future work, as is summarization policy for the shared context and threshold tuning for the cap.</p>
+
+    <!-- ============ IX. CONCLUSION ============ -->
+    <h2 class="sec">IX.&nbsp;&nbsp;Conclusion</h2>
+    <p>Information inconsistency in collaborative work is, at root, a problem of divergent context across many silos — and capable code agents reproduce it whenever each collaborator runs a private session. We argued that the structural remedy is a single shared agent session that all collaborators attach to, making inconsistency impossible by construction, and we showed how to make that shared session usable under real concurrency with a single asymmetric contract: <b>parallel inference, serial side effects</b>. Reasoning runs per-user in parallel so no one's answer waits behind another's long task; side effects pass through one per-sandbox serial executor so the shared workspace never suffers a lockless concurrent write. A working proof of concept demonstrates the behavior end-to-end: with the contract enabled, two users' answers stream together and finish 92&nbsp;ms apart, where the serial baseline forces a 3.3&nbsp;s wait. We believe "share the session, parallelize the reasoning, serialize the mutation" is a general recipe for multi-user agent collaboration beyond coding.</p>
+
+    <!-- ============ REFERENCES ============ -->
+    <h2 class="sec">References</h2>
+    <div class="refs">
+      <ol>
+        <li>W. Yoon and D. Lee, "Aidit: A provider-side zero-inference-cost architecture for multi-user shared-context AI workspaces," tech. rep. (parent project), 2026.</li>
+        <li>WHATWG, "Server-sent events," <i>HTML Living Standard</i>, §9.2. [Online]. Available: https://html.spec.whatwg.org/</li>
+        <li>S. Yao, J. Zhao, D. Yu, N. Du, I. Shafran, K. Narasimhan, and Y. Cao, "ReAct: Synergizing reasoning and acting in language models," in <i>Proc. ICLR</i>, 2023.</li>
+        <li>T. Schick <i>et al.</i>, "Toolformer: Language models can teach themselves to use tools," in <i>Proc. NeurIPS</i>, 2023.</li>
+        <li>OpenAI, "Function calling and the Chat Completions API," API documentation, 2023–2024.</li>
+        <li>C. A. Ellis and S. J. Gibbs, "Concurrency control in groupware systems," in <i>Proc. ACM SIGMOD</i>, 1989, pp. 399–407.</li>
+        <li>D. A. Nichols, P. Curtis, M. Dixon, and J. Lamping, "High-latency, low-bandwidth windowing in the Jupiter collaboration system," in <i>Proc. ACM UIST</i>, 1995, pp. 111–120.</li>
+        <li>M. Shapiro, N. Preguiça, C. Baquero, and M. Zawirski, "Conflict-free replicated data types," in <i>Proc. SSS</i>, 2011, pp. 386–400.</li>
+        <li>H. T. Kung and J. T. Robinson, "On optimistic methods for concurrency control," <i>ACM Trans. Database Syst.</i>, vol. 6, no. 2, pp. 213–226, 1981.</li>
+        <li>L. Lamport, "Time, clocks, and the ordering of events in a distributed system," <i>Commun. ACM</i>, vol. 21, no. 7, pp. 558–565, 1978.</li>
+        <li>"Multi-principal agent coordination protocol (MPAC): Session/intent/operation/conflict/governance layering with optimistic concurrency control," arXiv:2604.09744, 2026.</li>
+        <li>Google, "Jules: An asynchronous coding agent running tasks in isolated cloud VMs," Google Labs, 2025.</li>
+        <li>U.S. Patent 11,330,026 B1, "Concurrent screen sharing among multiple users in a communication session."</li>
+        <li>U.S. Patent 9,626,509 B1, "Malicious content analysis via concurrent multi-version application execution in a sandbox."</li>
+        <li>R. T. Fielding, "Architectural styles and the design of network-based software architectures," Ph.D. dissertation, Univ. California, Irvine, 2000.</li>
+        <li>M. Zaharia <i>et al.</i>, "Accelerating the machine learning lifecycle with MLflow," <i>IEEE Data Eng. Bull.</i>, vol. 41, no. 4, pp. 39–45, 2018.</li>
+      </ol>
+    </div>
+
+    <p class="note" style="margin-top:10px">Manuscript prepared from the Aidit-Code project documents (PRD, TRD, PLAN, IMPLEMENTATION&nbsp;NOTES) and proof-of-concept measurements. Quantitative values are single-run PoC observations and are illustrative.</p>
+
+  </div>
+</main>
+</body>
+</html>
