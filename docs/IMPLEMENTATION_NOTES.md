@@ -11,6 +11,13 @@
 
 ## Changelog
 
+### 2026-07-06 · [fix] · 완료 · README Mermaid GitHub 렌더 깨짐 수정 — `&lt;` 엔티티의 `;`가 문장 구분자로 파싱
+- **증상(사용자 보고)**: README.md의 동작 흐름도 Mermaid가 GitHub에서 "Unable to render rich display / Parse error on line 13" 로 깨짐(브라우저 실측으로 에러 메시지 확인).
+- **원인**: 직전 README 작성 시 리뷰 반영으로 넣은 `seq&lt;0`의 HTML 엔티티 — Mermaid는 `&lt;`의 **`;`를 문장 구분자로 해석**해 뒤 텍스트 `0)`가 별도 문장이 되며 파스 에러. (`&`-엔티티는 Mermaid 이스케이프가 아님.)
+- **수정**: Mermaid 공식 이스케이프 문법 `#lt;`로 교체 — `seq#lt;0` (렌더 결과 `seq<0`). README 전체 grep으로 Mermaid 블록 내 다른 `&...;`/`;` 없음 확인.
+- **검증(③) — 실측**: Mermaid v11(esm, jsdelivr) 실파서로 `mermaid.parse()` 통과(diagramType: sequence) + `mermaid.render()` SVG 생성 성공·라벨 `seq<0` 렌더 확인. 푸시 후 GitHub README 페이지 재로드로 다이어그램 정상 렌더 재확인.
+- 변경 파일: `README.md`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-07-06 · [docs] · 완료 · 루트 README.md 신규 — 프로젝트 소개·아키텍처·동작 흐름도·설치·사용법
 - **요청(사용자)**: 프로젝트를 잘 설명하는 README.md 작성(목적·구성(아키텍처)·동작 흐름도·설치·사용법 상세 포함), workflow로 진행.
 - **진행 방식**: 워크플로우 4단계 — ① 병렬 분석 5에이전트(제품 문서 PRD/TRD/PLAN · 백엔드 · 프론트엔드 · 런타임 흐름 · 설치 절차, 실제 코드/문서 실측만) → ② 종합 초안 작성 → ③ 검증 2에이전트(사실 대조 + 완성도/Mermaid 문법) → ④ 지적 반영.

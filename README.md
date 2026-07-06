@@ -132,7 +132,7 @@ sequenceDiagram
     participant TB as withSandboxLock →<br/>runToolIntent
     participant BUS as pub/sub → SSE<br/>(publish / stream)
 
-    U->>FE: 낙관적 HUMAN 버블 (clientId, seq&lt;0)
+    U->>FE: 낙관적 HUMAN 버블 (clientId, seq#lt;0)
     U->>API: {body, aiMode, clientId, lang}
     API->>API: tx: nextSeq 채번 + HUMAN 영속화
     API->>BUS: message.created (HUMAN)
