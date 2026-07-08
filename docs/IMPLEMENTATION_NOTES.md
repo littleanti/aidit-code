@@ -11,6 +11,12 @@
 
 ## Changelog
 
+### 2026-07-08 · [docs] · 완료 · PAPER.html 관련연구(§VII)에 CopilotKit/OpenTag 반영
+- **요청(사용자)**: PATENT.html에 반영한 OpenTag 차별성 검토 결과를 논문 `docs/PAPER.html` Related Work에도 반영.
+- **구현**: §VII 첫 문단(단일 활성 턴·직렬 처리 계열) 말미에 OpenTag 사례 추가 — 공유 Slack 스레드의 단일 활성 run을 분산 락(TTL+하트비트)으로 강제하고 동시 run을 409 Conflict로 거부하는 busy-gate 직렬화의 상용 실시례로 대비(OpenTag의 락 = 병렬 실행 금지 목적 vs 본 설계의 락 = 병렬 추론 유지·부수효과만 직렬화; 실행 워크스페이스 부재로 동시 쓰기 문제 자체가 없음). References [17] 신규(CopilotKit OpenTag GitHub + "Threads & persistence architecture" 문서, 2026). 본문 영문·IEEE 형식 유지, 코드 무변경.
+- **검증(③) — 실측**: HTML 파서 태그 밸런스 **미닫힘 0·mismatch 0**, 본문 [17] 인용 ↔ References 17번째 항목 정합, OpenTag 언급 5회 확인. (기존 참고문헌 [1][2][15][16]이 본문 브라켓 인용 없이 목록에만 있는 것은 종전부터의 상태로 이번 범위 밖.)
+- 변경 파일: `docs/PAPER.html`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-07-08 · [docs] · 완료 · PATENT.html 종래기술(특허·논문·서비스) 재조사 및 본문·청구항 개정
 - **요청(사용자)**: `docs/PATENT.html` 특허 발명서의 종래기술 조사를 다시 수행(논문·특허·서비스)하고, 조사 결과에 따라 본문(배경기술·선행기술문헌·근접 선행기술 구별)과 청구항을 재작성. workflow 사용.
 - **진행 방식**: 워크플로 3단계 — ① 6축 병렬 조사(국제특허 / 한국특허 / 학술논문 / 상용 서비스·OSS / 일반 동시성 제어 / 기존 인용문헌 실존 재검증, 6 finders) → ② 발견 문헌 중복 제거 후 high/medium 24건을 각각 실존·인용정보·4축 근접도(단일 공유 세션 / 병렬 턴 / 부수효과 직렬화 / 1:1 귀속) 검증 → ③ 청구항별 위험 분석 포함 종합 보고서(변리사 관점) → 보고서 권고를 본문·청구항에 반영.
