@@ -11,6 +11,12 @@
 
 ## Changelog
 
+### 2026-07-08 · [docs] · 완료 · PAPER.html 참고문헌 IEEE 등장 순서 재번호
+- **요청(사용자)**: 본문 첫 등장 순서와 참고문헌 번호가 어긋난 상태(예: 구 [15]가 Fig. 1 캡션에서 구 [3]보다 먼저 등장)를 IEEE 관례대로 재정렬.
+- **구현**: 파이썬 스크립트로 본문·캡션의 첫 등장 위치 순 old→new 매핑 산출(구→신: 3→1 ReAct, 4→2 Toolformer, 2→3 SSE, 15→4 Fielding, 1→5 Aidit, 5→6 OpenAI FC, 6→7 Ellis OT, 7→8 Jupiter, 8→9 CRDT, 17→10 OpenTag, 12→11 Jules, 16→12 MLflow, 13→13, 14→14, 11→15 MPAC, 10→16 Lamport, 9→17 Kung OCC) → 본문 브라켓 인용 전면 치환 + References `<li>` 동일 순서 재배열(항목 내용 무변경).
+- **검증(③) — 실측**: 본문 첫 등장 순서 = **[1]~[17] 정확히 순차**, References 17건 재배열 순서 매핑과 일치, HTML 파서 태그 밸런스 **미닫힘 0·mismatch 0**, UTF-8 특수문자(§·ç) 보존.
+- 변경 파일: `docs/PAPER.html`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-07-08 · [docs] · 완료 · PAPER.html 미인용 참고문헌 [1][2][15][16] 본문 인용 정리
 - **요청(사용자)**: References 목록에만 있고 본문 브라켓 인용이 없던 [1](Aidit 모출원), [2](SSE), [15](Fielding REST), [16](MLflow)을 정리(IEEE 투고 대비).
 - **구현**: 삭제가 아니라 자연스러운 언급 지점에 인용 추가 — [1] §III-A BYOK 문장("bring-your-own-key design ... directly [1]") + §VII "its predecessor [1]", [2]·[15] Fig. 1 캡션(SSE fan-out [2] + REST 쓰기 경로 [15] 문장 보강; 본문 REST 언급은 도식뿐이라 캡션이 유일한 산문 지점), [16] §VII "MLflow [16]".
