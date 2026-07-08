@@ -11,6 +11,12 @@
 
 ## Changelog
 
+### 2026-07-08 · [docs] · 완료 · PAPER.html 미인용 참고문헌 [1][2][15][16] 본문 인용 정리
+- **요청(사용자)**: References 목록에만 있고 본문 브라켓 인용이 없던 [1](Aidit 모출원), [2](SSE), [15](Fielding REST), [16](MLflow)을 정리(IEEE 투고 대비).
+- **구현**: 삭제가 아니라 자연스러운 언급 지점에 인용 추가 — [1] §III-A BYOK 문장("bring-your-own-key design ... directly [1]") + §VII "its predecessor [1]", [2]·[15] Fig. 1 캡션(SSE fan-out [2] + REST 쓰기 경로 [15] 문장 보강; 본문 REST 언급은 도식뿐이라 캡션이 유일한 산문 지점), [16] §VII "MLflow [16]".
+- **검증(③) — 실측**: HTML 파서 태그 밸런스 **미닫힘 0·mismatch 0**, 본문/캡션 인용 = [1]~[17] **전부 등장(미인용 0)** ↔ References 17건 완전 정합.
+- 변경 파일: `docs/PAPER.html`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-07-08 · [docs] · 완료 · PAPER.html 관련연구(§VII)에 CopilotKit/OpenTag 반영
 - **요청(사용자)**: PATENT.html에 반영한 OpenTag 차별성 검토 결과를 논문 `docs/PAPER.html` Related Work에도 반영.
 - **구현**: §VII 첫 문단(단일 활성 턴·직렬 처리 계열) 말미에 OpenTag 사례 추가 — 공유 Slack 스레드의 단일 활성 run을 분산 락(TTL+하트비트)으로 강제하고 동시 run을 409 Conflict로 거부하는 busy-gate 직렬화의 상용 실시례로 대비(OpenTag의 락 = 병렬 실행 금지 목적 vs 본 설계의 락 = 병렬 추론 유지·부수효과만 직렬화; 실행 워크스페이스 부재로 동시 쓰기 문제 자체가 없음). References [17] 신규(CopilotKit OpenTag GitHub + "Threads & persistence architecture" 문서, 2026). 본문 영문·IEEE 형식 유지, 코드 무변경.
