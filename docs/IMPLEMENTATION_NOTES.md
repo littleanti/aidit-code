@@ -11,6 +11,12 @@
 
 ## Changelog
 
+### 2026-07-08 · [docs] · 완료 · 논문 보강 실험 측정 하네스 설계 문서(docs/EXPERIMENTS.md) 신규
+- **요청(사용자)**: 논문 품질 보강 논의에서 선정한 실험 E1(직렬 실행기 ablation)·E2(HOL 지연 분포)·E3(스케일 스윕)·E4(적대적 격리)·E6(사용자 연구)의 측정 하네스 설계를 수행하고 docs/에 추가.
+- **구성**: H0 공통 인프라(부하 발생기 `backend/bench/`(안)·LLM 3모드(에코 스텁/모의 LLM 서버/실 LLM)·계측 포인트(`withSandboxLock` 대기/보유 계측, `BENCH_TRACE`)·JSONL→CSV→그래프 파이프라인·통계 규약(중앙값·p95·부트스트랩 CI, 워밍업 폐기, 조건 교차)·`BENCH_*` 플래그 원칙) + 실험별 가설/조작 변인/워크로드/반복 수/판정 기준/논문 §VI 매핑: E1(락 우회·naive 커밋 ablation — torn write 검증기·짝 정합 전수 검사, 500/300런), E2(FIFO/409 거부/병렬 3계약 × 선행 길이 3 — B TTFT CDF, 셀당 50런 + 실 LLM 스팟), E3(N 2~16·cap 1~8·도구 밀도 스윕 — 공정성 지수·락 병목 프로파일), E4(카나리 마커 공격 코퍼스 50건 × 비배칭 vs 드라이버 레벨 배칭 프록시 — P1~P5 오염 판정, 실 LLM 500×2), E6(within-subject 8~10명 라틴 스퀘어, 페어 디버깅·미니 구현 과제, SUS·귀속 혼동 코딩·서버 로그 HOL 자동 산출, Wilcoxon+효과크기).
+- **검증(③) — 실측**: 마크다운 표 파이프 균형 이상 0, 문서가 참조하는 코드 실체 전수 확인(`sandboxLock.ts`의 `withSandboxLock`·`config.ts`의 `maxConcurrentTurns`·`arMux/xcCap/stream.test.ts` 존재 OK), 계획 신규물(`bench/mockLlm.mjs` 등)은 미존재 확인(설계 문서 상태와 일치). 코드 무변경.
+- 변경 파일: `docs/EXPERIMENTS.md`(신규), `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-07-08 · [docs] · 완료 · PAPER.html 참고문헌 IEEE 등장 순서 재번호
 - **요청(사용자)**: 본문 첫 등장 순서와 참고문헌 번호가 어긋난 상태(예: 구 [15]가 Fig. 1 캡션에서 구 [3]보다 먼저 등장)를 IEEE 관례대로 재정렬.
 - **구현**: 파이썬 스크립트로 본문·캡션의 첫 등장 위치 순 old→new 매핑 산출(구→신: 3→1 ReAct, 4→2 Toolformer, 2→3 SSE, 15→4 Fielding, 1→5 Aidit, 5→6 OpenAI FC, 6→7 Ellis OT, 7→8 Jupiter, 8→9 CRDT, 17→10 OpenTag, 12→11 Jules, 16→12 MLflow, 13→13, 14→14, 11→15 MPAC, 10→16 Lamport, 9→17 Kung OCC) → 본문 브라켓 인용 전면 치환 + References `<li>` 동일 순서 재배열(항목 내용 무변경).
