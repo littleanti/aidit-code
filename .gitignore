@@ -47,3 +47,6 @@ Thumbs.db
 
 # ACM acmart LaTeX 템플릿 배포본 + 변환 산출물·빌드 아티팩트 (로컬 전용, 용량 큼)
 docs/paper-acm/
+
+# --- Demo recording (large, not committed) ---
+/demo-aidit-code.mp4
