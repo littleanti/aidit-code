@@ -11,6 +11,15 @@
 
 ## Changelog
 
+### 2026-07-25 · [chore]·[docs] · 완료 · v2 병렬 협업 실증 벤치 + E2 파일럿 실측 + 데모 문서 페이오프
+- **요청(사용자)**: v2 "병렬 추론+직렬 부수효과"가 실제 병렬 스트리밍인지 확정하고 증명.
+- **조사**: 코드 트레이싱으로 병렬 경로 확인 — worker의 fire-and-forget `runTurn`(piWorker.mjs:629) + 동시 `fetch` 스트림. 게이트: 게시글 `meta.concurrentTurns=true` 옵트인(기본 직렬) + 사용자별 활성 턴 1개 → **서로 다른 2명** 필요. 부수효과는 `withSandboxLock`으로 샌드박스 단위 직렬.
+- **벤치(신규)**: `backend/scripts/bench-concurrency.mjs` — 게스트 2명 동시 전송, SSE `agent.token` 도착 시각으로 스트림 겹침·벽시계 측정. 실측(medium, 실 LLM): **병렬=94% 겹침·11.5s vs 직렬=0% 겹침·19.8s(1.72× 단축)**. `docs/EXPERIMENTS.md` 부록 A에 기록, `docs/BUSINESS_VALUE.md` §7에 연결.
+- **데모 페이오프**: `frontend/e2e/demo-scenario.mjs`·`docs/DEMO_SCENARIO.md`에 turn 11 추가 — 에이전트가 `README.md`를 실제로 써서 파일 트리에 남기는 산출물 엔딩. (현재 녹화본은 turn 11 이전 버전 — 필요 시 재촬영.)
+
+### 2026-07-25 · [docs] · 완료 · 비즈니스 가치 근거 문서(docs/BUSINESS_VALUE.md) 신규
+- **요청(사용자)**: 심사 기준 "비즈니스 가치" 보강. 한 줄 가치제안, 문제·시장, ICP·쐐기 유스케이스(몹 프로그래밍/라이브 리뷰), 차별화 해자(병렬 추론+직렬 부수효과·공유 단일 컨텍스트 멀티유저 세션·실제 실행+fan-out), Unit Economics(서버 부담 N×토큰 → 관리형 유료 티어·원가 방어 레버), 경쟁 2×2, GTM, KPI(병렬성 증명), 자매 제품(Aidit) 포트폴리오 논리, 리스크. (`docs/BUSINESS_VALUE.md`)
+
 ### 2026-07-24 · [chore] · 완료 · 데모 오케스트레이션 스크립트 추가
 - **요청(사용자)**: `docs/DEMO_SCENARIO.md` 시나리오(3440×1440 3분할 창 A/B/C, 게스트 로그인, 게시글=샌드박스 세션 생성 → B·C 참여 → 협업 코딩/리뷰 10턴 → v2 동시 협업 → 중단/방향조정)를 Playwright로 자동 실행.
 - **구현**: `frontend/e2e/demo-scenario.mjs` — 작업영역(실측 3374×1440@66,0) 3분할 타일링(이웃 창 8px 겹침으로 테두리 틈 제거, 높이 전체 1440), 게스트 모달 로그인, 게시글 생성(동시 협업 ON), 타임라인 1~10 구동. ffmpeg(ddagrab+NVENC, `draw_mouse=0`) 전체 화면 녹화 시작/종료, 산출물 `demo-aidit-code.mp4`(리포 루트, 미추적). 앱 코드 무변경 — 데모 전용 도구.

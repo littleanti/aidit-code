@@ -52,6 +52,8 @@ const TURNS = [
   { n: 8, who: 'C', ai: true, effort: '중간', noWait: true, text: '리뷰에서 지적한 것 중 "없는 id에 404 반환" 먼저 고쳐줘.' },
   { n: 9, who: 'A', action: 'steer', steer: '테스트도 같이 업데이트해줘' },
   { n: 10, who: 'C', ai: true, effort: '높음', text: '마지막으로 전체 테스트 다 돌려서 결과 보여주고, 최종 코드 구조를 한 번 정리해줘.' },
+  // 문서 페이오프: 논의·코드를 산출물(README.md 파일)로 응결 — 엔딩 파일탭에서 노출.
+  { n: 11, who: 'A', ai: true, effort: '중간', text: '좋아요. 지금까지 만든 코드를 정리해서 README.md 파일로 작성해줘 — 프로젝트 개요, 실행 방법, API 엔드포인트 목록을 포함해서.' },
 ];
 
 const ts = () => new Date().toISOString().slice(11, 19);
