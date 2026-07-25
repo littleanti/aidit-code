@@ -34,26 +34,27 @@ const USERS = {
 };
 
 const POST = {
-  title: 'FastAPI로 TODO API 같이 만들어요',
-  body: 'FastAPI로 TODO CRUD API를 만들어줘. 우선 GET /health 헬스체크 라우트와 pytest 테스트부터 시작하자.',
+  title: '파이썬 유틸 라이브러리 pytest로 같이 만들어요',
+  body: '순수 파이썬 유틸 라이브러리를 pytest로 TDD하며 같이 만들자. 우선 프로젝트 뼈대(utils.py, test_utils.py)와 pytest 설치·최초 통과 테스트부터. 웹 서버 말고 로컬에서 바로 돌려볼 수 있는 순수 함수로.',
 };
 
-// 시나리오 타임라인 1~10 (docs/DEMO_SCENARIO.md §3 Phase 3)
+// 시나리오 타임라인 1~11 (docs/DEMO_SCENARIO.md §3 Phase 3)
+// 순수 파이썬+pytest 워크로드 — 매 AI 턴이 pytest 실행으로 끝나 터미널 버블에 'N passed'가 보인다.
 // concurrent: 6·7은 B·C가 거의 동시 전송(병렬 협업).
 const TURNS = [
-  { n: 1, who: 'B', ai: true, effort: '중간', text: '좋네요! POST /todos 생성 API도 추가해줘. 제목(title)만 받으면 되고, in-memory 리스트로 저장해줘.' },
-  { n: 2, who: 'C', ai: false, text: '잠깐, 스키마부터 정하고 가죠. id는 정수 자동증가, title 필수, done 기본값 false 어때요?' },
-  { n: 3, who: 'B', ai: false, text: '동의! done 필드까지 포함해서 가요.' },
-  { n: 4, who: 'B', ai: true, effort: '중간', text: '위 논의대로 Todo 모델에 id(자동증가)·title(필수)·done(기본 false)을 반영하고, GET /todos 목록 조회도 추가해줘.' },
+  { n: 1, who: 'B', ai: true, effort: '중간', text: '회문(palindrome) 판별 함수 is_palindrome(s)를 utils.py에 추가하고, test_utils.py에 pytest 테스트도 써줘. pytest 돌려서 통과 확인해줘.' },
+  { n: 2, who: 'C', ai: false, text: '잠깐, 회문 판정에 대소문자랑 공백은 무시해야죠? "A man a plan a canal Panama" 같은 것도 회문으로.' },
+  { n: 3, who: 'B', ai: false, text: '맞아요, 영숫자만 남기고 소문자로 정규화해서 비교하는 걸로.' },
+  { n: 4, who: 'B', ai: true, effort: '중간', text: '위 논의대로 is_palindrome를 대소문자·공백·문장부호 무시하도록 고치고, 그 케이스 테스트도 보강해줘. pytest 다시 돌려줘.' },
   { n: 5, who: 'A', action: 'filesTab' },
-  { n: 6, who: 'B', ai: true, effort: '중간', concurrentWith: 7, text: 'PATCH /todos/{id}로 done 토글하는 API 추가해줘.' },
-  { n: 7, who: 'C', ai: true, effort: '중간', concurrentWith: 6, text: '지금까지 작성된 코드 리뷰해줘. 에러 처리 빠진 곳이나 상태코드 잘못 쓴 곳 있는지 지적해줘.' },
+  { n: 6, who: 'B', ai: true, effort: '중간', concurrentWith: 7, text: '정수 리스트에서 두 수의 합이 target인 인덱스 쌍을 찾는 two_sum(nums, target) 함수랑 테스트도 추가해줘.' },
+  { n: 7, who: 'C', ai: true, effort: '중간', concurrentWith: 6, text: '지금까지 작성된 코드 리뷰해줘 — 놓친 엣지케이스나 빠진 테스트(빈 입력·중복·해 없음 등) 있는지 지적해줘.' },
   // noWait: 완료를 기다리지 않고 다음(turn 9 steer)이 이 턴 스트리밍 중에 개입하도록 둔다.
-  { n: 8, who: 'C', ai: true, effort: '중간', noWait: true, text: '리뷰에서 지적한 것 중 "없는 id에 404 반환" 먼저 고쳐줘.' },
-  { n: 9, who: 'A', action: 'steer', steer: '테스트도 같이 업데이트해줘' },
-  { n: 10, who: 'C', ai: true, effort: '높음', text: '마지막으로 전체 테스트 다 돌려서 결과 보여주고, 최종 코드 구조를 한 번 정리해줘.' },
+  { n: 8, who: 'C', ai: true, effort: '중간', noWait: true, text: '리뷰에서 지적한 것 중 "해가 없을 때"랑 "빈 리스트" 엣지케이스부터 테스트 추가하고 고쳐줘.' },
+  { n: 9, who: 'A', action: 'steer', steer: '음수랑 중복 값 케이스도 테스트에 넣어줘' },
+  { n: 10, who: 'C', ai: true, effort: '높음', text: '마지막으로 pytest 전체 다 돌려서 결과 보여주고, 최종 함수 목록·테스트 구조를 한 번 정리해줘.' },
   // 문서 페이오프: 논의·코드를 산출물(README.md 파일)로 응결 — 엔딩 파일탭에서 노출.
-  { n: 11, who: 'A', ai: true, effort: '중간', text: '좋아요. 지금까지 만든 코드를 정리해서 README.md 파일로 작성해줘 — 프로젝트 개요, 실행 방법, API 엔드포인트 목록을 포함해서.' },
+  { n: 11, who: 'A', ai: true, effort: '중간', text: '좋아요. 지금까지 만든 코드를 정리해서 README.md 파일로 작성해줘 — 함수 목록·사용 예시·pytest 실행법 포함.' },
 ];
 
 const ts = () => new Date().toISOString().slice(11, 19);
@@ -120,28 +121,40 @@ async function waitForText(page, text, timeoutMs = 90000) {
 
 const agentBubbleCount = (page) => page.getByText('Aidit Agent').count();
 
+// 창을 문서 맨 아래로 스크롤 — 앱은 "하단 근처(pinned)일 때만" 새 답을 따라가므로,
+// 데모에선 세 창 모두 능동적으로 하단을 따라가게 해 스트리밍 답이 화면에 보이게 한다.
+const followBottom = (page) =>
+  page.evaluate(() =>
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })
+  ).catch(() => {});
+// 세 창 전부 하단 따라가기 — 메인에서 P가 준비된 뒤 주입.
+let followAll = async () => {};
+
 // main 텍스트 안정화 대기 (스트리밍/툴콜 종료). 툴콜 사이 공백을 견디도록 4회(≈10s) 연속 안정 요구.
-async function waitForStable(page, timeoutMs = 300000) {
+// onPoll: 매 폴링마다 실행(스트리밍 따라 하단 스크롤 등).
+async function waitForStable(page, timeoutMs = 300000, onPoll = null) {
   const deadline = Date.now() + timeoutMs;
   let last = '';
   let stable = 0;
   while (stable < 4) {
     if (Date.now() > deadline) { log('  (stabilize timeout — proceeding)'); return; }
     await sleep(2500);
+    if (onPoll) await onPoll();
     const txt = await page.locator('main').innerText().catch(() => '');
     if (txt && txt === last) stable += 1;
     else { stable = 0; last = txt; }
   }
 }
 
-// 에이전트 턴 완료 대기: 새 AGENT_REPLY 버블 출현 → main 안정화
-async function waitForAgentReply(page, prevCount, timeoutMs = 300000) {
+// 에이전트 턴 완료 대기: 새 AGENT_REPLY 버블 출현 → main 안정화. onPoll 로 하단 스크롤을 따라간다.
+async function waitForAgentReply(page, prevCount, timeoutMs = 300000, onPoll = null) {
   const deadline = Date.now() + timeoutMs;
   while ((await agentBubbleCount(page)) <= prevCount) {
     if (Date.now() > deadline) throw new Error('agent bubble did not appear');
+    if (onPoll) await onPoll();
     await sleep(1500);
   }
-  await waitForStable(page, deadline - Date.now());
+  await waitForStable(page, deadline - Date.now(), onPoll);
 }
 
 // Composer AI 팝오버 상태 세팅 (스위치/추론강도). 팝오버는 선택 직후 닫힐 수 있어 매번 재오픈.
@@ -194,6 +207,8 @@ try {
   ]);
   browsers = [wA.browser, wB.browser, wC.browser];
   const P = { A: wA.page, B: wB.page, C: wC.page };
+  // 세 창 모두 하단 따라가기 (스트리밍 답이 모든 창에서 보이도록).
+  followAll = async () => { await Promise.all([followBottom(P.A), followBottom(P.B), followBottom(P.C)]); };
 
   log('Phase 0: guest logins');
   await Promise.all([
@@ -221,8 +236,8 @@ try {
   const postUrl = P.A.url();
   log(`post created: ${postUrl}`);
 
-  // 1차 AI 답변 스트리밍을 A 창에서 잠깐 감상
-  await waitForAgentReply(P.A, 0, 300000).catch((e) => log(`  first-reply wait: ${e.message}`));
+  // 1차 AI 답변 스트리밍을 A 창에서 잠깐 감상 (하단 따라가기)
+  await waitForAgentReply(P.A, 0, 300000, () => followBottom(P.A)).catch((e) => log(`  first-reply wait: ${e.message}`));
 
   // Phase 2 — B·C 세션 참여
   log('Phase 2: B, C join session');
@@ -258,8 +273,8 @@ try {
       } catch (e) {
         log(`  steer skipped (no running turn visible): ${e.message}`);
       }
-      // 개입된 턴이 마무리될 때까지 대기 후 다음으로.
-      await waitForStable(P.A, 180000);
+      // 개입된 턴이 마무리될 때까지 대기 후 다음으로 (하단 따라가기).
+      await waitForStable(P.A, 180000, followAll);
       // 다음 turn의 waitForText 기준은 확실히 보이는 turn 8 사람 메시지로 둔다(steer는 버블로 안 보일 수 있음).
       const t8 = TURNS.find((x) => x.n === 8);
       if (t8) prevProbe = t8.text.slice(0, 12);
@@ -290,9 +305,10 @@ try {
         pageB.getByRole('button', { name: '보내기' }).click(),
       ]);
       log(`  concurrent turns sent — waiting both replies`);
+      await followAll();
       await Promise.all([
-        waitForAgentReply(page, beforeA).catch((e) => log(`  ${turn.who}: ${e.message}`)),
-        waitForAgentReply(pageB, beforeB).catch((e) => log(`  ${partner.who}: ${e.message}`)),
+        waitForAgentReply(page, beforeA, 300000, followAll).catch((e) => log(`  ${turn.who}: ${e.message}`)),
+        waitForAgentReply(pageB, beforeB, 300000, followAll).catch((e) => log(`  ${partner.who}: ${e.message}`)),
       ]);
       prevProbe = turn.text.slice(0, 12);
       await sleep(1500);
@@ -306,12 +322,13 @@ try {
     await setAiState(page, { ai: turn.ai, effort: turn.effort });
     await sendMessage(page, turn.text);
     await waitForText(page, turn.text.slice(0, 12), 30000);
+    await followAll();
     if (turn.ai && turn.noWait) {
       // 완료를 기다리지 않는다 — 다음 turn(steer)이 이 스트리밍 중 개입한다.
       log(`turn ${turn.n}: sent (noWait — leaving turn streaming for steer)`);
     } else if (turn.ai) {
       log(`turn ${turn.n}: waiting for agent reply...`);
-      await waitForAgentReply(page, before, turn.n === 10 ? 360000 : 300000)
+      await waitForAgentReply(page, before, turn.n === 10 ? 360000 : 300000, followAll)
         .catch((e) => log(`  agent wait: ${e.message}`));
       log(`turn ${turn.n}: agent reply done`);
     }

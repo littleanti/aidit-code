@@ -11,6 +11,12 @@
 
 ## Changelog
 
+### 2026-07-25 · [chore] · 완료 · 데모 워크로드를 순수 파이썬+pytest로 교체 + 세 창 스크롤 따라가기
+- **요청(사용자)**: 데모 영상에서 (1) 웹 앱은 실행 결과가 화면에 안 보여 약하고, (2) 채팅 답변이 올 때 스레드가 안 내려가 데모가 도는지 알 수 없음.
+- **(1) 워크로드 교체**: FastAPI TODO API → **순수 파이썬 유틸 라이브러리(is_palindrome·two_sum) + pytest TDD**. 매 AI 턴이 `pytest` 실행으로 끝나 터미널 버블에 `N passed`/실패가 그대로 보인다(눈에 보이는 실행 증거). 협업→리뷰→동시협업→steer→README 페이오프 아크 유지. (`docs/DEMO_SCENARIO.md` Phase 1·타임라인, `frontend/e2e/demo-scenario.mjs`)
+- **(2) 스크롤 진단**: 앱 버그 아님 — `Thread.tsx`는 의도적으로 "진입 시 맨 위 착지, 하단 120px 이내(pinned)일 때만 새 내용 따라감"이고 글 보낸 창만 pinned가 된다. 3분할 데모에선 보고만 있는 두 창이 위에 멈춘다. **앱 동작은 보존**하고, 데모 스크립트가 매 발화·스트리밍마다 **세 창 모두 하단으로 스크롤**(`followAll`/`followBottom`, 대기 루프 `onPoll` 연결)하도록 수정. (`frontend/e2e/demo-scenario.mjs`)
+- **재촬영**: 11턴 전부 성공(pytest 통과·steer·README 산출), 세 창이 라이브 답변을 따라감 확인. 산출물 `demo-aidit-code.mp4`(미추적).
+
 ### 2026-07-25 · [chore]·[docs] · 완료 · v2 병렬 협업 실증 벤치 + E2 파일럿 실측 + 데모 문서 페이오프
 - **요청(사용자)**: v2 "병렬 추론+직렬 부수효과"가 실제 병렬 스트리밍인지 확정하고 증명.
 - **조사**: 코드 트레이싱으로 병렬 경로 확인 — worker의 fire-and-forget `runTurn`(piWorker.mjs:629) + 동시 `fetch` 스트림. 게이트: 게시글 `meta.concurrentTurns=true` 옵트인(기본 직렬) + 사용자별 활성 턴 1개 → **서로 다른 2명** 필요. 부수효과는 `withSandboxLock`으로 샌드박스 단위 직렬.
