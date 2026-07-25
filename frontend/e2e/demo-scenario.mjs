@@ -35,24 +35,26 @@ const USERS = {
 
 const POST = {
   title: '파이썬 유틸 라이브러리 pytest로 같이 만들어요',
-  body: '순수 파이썬 유틸 라이브러리를 pytest로 TDD하며 같이 만들자. 우선 프로젝트 뼈대(utils.py, test_utils.py)와 pytest 설치·최초 통과 테스트부터. 웹 서버 말고 로컬에서 바로 돌려볼 수 있는 순수 함수로.',
+  body: '순수 파이썬 유틸을 pytest로 TDD하며 같이 만들자. 함수마다 파일을 나눠서(예: palindrome.py + test_palindrome.py) 만들고, 각 단계마다 pytest로 전부 통과하는지 확인하며 진행하자. 웹 서버 말고 로컬에서 바로 돌려볼 수 있는 순수 함수로.',
 };
 
 // 시나리오 타임라인 1~11 (docs/DEMO_SCENARIO.md §3 Phase 3)
 // 순수 파이썬+pytest 워크로드 — 매 AI 턴이 pytest 실행으로 끝나 터미널 버블에 'N passed'가 보인다.
-// concurrent: 6·7은 B·C가 거의 동시 전송(병렬 협업).
+// 결정적(deterministic) 함수(is_palindrome:bool, count_vowels:int)만 사용하고 함수별로 파일을 분리해,
+// AI가 기대값을 틀리거나 파일을 덮어써 함수가 사라지는 일을 없앤다(→ 안정적으로 green).
+// concurrent: 6·7은 B·C가 거의 동시 전송(병렬 협업). 7은 리뷰(파일 안 건드림)라 6과 부수효과 충돌 없음.
 const TURNS = [
-  { n: 1, who: 'B', ai: true, effort: '중간', text: '회문(palindrome) 판별 함수 is_palindrome(s)를 utils.py에 추가하고, test_utils.py에 pytest 테스트도 써줘. pytest 돌려서 통과 확인해줘.' },
+  { n: 1, who: 'B', ai: true, effort: '중간', text: '회문(palindrome) 판별 함수 is_palindrome(s)를 palindrome.py에 만들고, test_palindrome.py에 pytest 테스트도 써줘. pytest 돌려서 전부 통과하는지 확인해줘.' },
   { n: 2, who: 'C', ai: false, text: '잠깐, 회문 판정에 대소문자랑 공백은 무시해야죠? "A man a plan a canal Panama" 같은 것도 회문으로.' },
   { n: 3, who: 'B', ai: false, text: '맞아요, 영숫자만 남기고 소문자로 정규화해서 비교하는 걸로.' },
-  { n: 4, who: 'B', ai: true, effort: '중간', text: '위 논의대로 is_palindrome를 대소문자·공백·문장부호 무시하도록 고치고, 그 케이스 테스트도 보강해줘. pytest 다시 돌려줘.' },
+  { n: 4, who: 'B', ai: true, effort: '중간', text: '위 논의대로 palindrome.py의 is_palindrome를 대소문자·공백·문장부호 무시하도록 고치고, test_palindrome.py 테스트도 보강해줘. pytest 다시 돌려서 전부 통과 확인.' },
   { n: 5, who: 'A', action: 'filesTab' },
-  { n: 6, who: 'B', ai: true, effort: '중간', concurrentWith: 7, text: '정수 리스트에서 두 수의 합이 target인 인덱스 쌍을 찾는 two_sum(nums, target) 함수랑 테스트도 추가해줘.' },
-  { n: 7, who: 'C', ai: true, effort: '중간', concurrentWith: 6, text: '지금까지 작성된 코드 리뷰해줘 — 놓친 엣지케이스나 빠진 테스트(빈 입력·중복·해 없음 등) 있는지 지적해줘.' },
+  { n: 6, who: 'B', ai: true, effort: '중간', concurrentWith: 7, text: '문자열의 모음(a,e,i,o,u) 개수를 세는 count_vowels(s) 함수를 vowels.py에 새로 만들고, test_vowels.py 테스트도 추가해줘. 기존 palindrome 파일은 그대로 두고. pytest 돌려서 통과 확인.' },
+  { n: 7, who: 'C', ai: true, effort: '중간', concurrentWith: 6, text: '지금까지 작성된 코드 전체를 리뷰만 해줘(파일 수정 말고) — 놓친 엣지케이스나 빠진 테스트(빈 문자열·대문자·비영문 등) 있는지 지적해줘.' },
   // noWait: 완료를 기다리지 않고 다음(turn 9 steer)이 이 턴 스트리밍 중에 개입하도록 둔다.
-  { n: 8, who: 'C', ai: true, effort: '중간', noWait: true, text: '리뷰에서 지적한 것 중 "해가 없을 때"랑 "빈 리스트" 엣지케이스부터 테스트 추가하고 고쳐줘.' },
-  { n: 9, who: 'A', action: 'steer', steer: '음수랑 중복 값 케이스도 테스트에 넣어줘' },
-  { n: 10, who: 'C', ai: true, effort: '높음', text: '마지막으로 pytest 전체 다 돌려서 결과 보여주고, 최종 함수 목록·테스트 구조를 한 번 정리해줘.' },
+  { n: 8, who: 'C', ai: true, effort: '중간', noWait: true, text: '리뷰에서 지적한 빈 문자열·대소문자 엣지케이스부터 test에 추가하고, 통과하도록 고쳐줘. pytest 전부 통과 확인.' },
+  { n: 9, who: 'A', action: 'steer', steer: '숫자나 특수문자 섞인 경우 케이스도 넣어줘' },
+  { n: 10, who: 'C', ai: true, effort: '높음', text: '마지막으로 pytest 전체 다 돌려서 결과 보여줘. 혹시 실패하는 테스트가 있으면 전부 통과하도록 고쳐줘. 그리고 최종 함수 목록·테스트 구조를 한 번 정리해줘.' },
   // 문서 페이오프: 논의·코드를 산출물(README.md 파일)로 응결 — 엔딩 파일탭에서 노출.
   { n: 11, who: 'A', ai: true, effort: '중간', text: '좋아요. 지금까지 만든 코드를 정리해서 README.md 파일로 작성해줘 — 함수 목록·사용 예시·pytest 실행법 포함.' },
 ];
@@ -62,11 +64,18 @@ const log = (m) => console.log(`[demo ${ts()}] ${m}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- 녹화 ----------
+// gdigrab(GDI 캡처) + libx264 를 기본으로 쓴다. GPU 캡처(ddagrab/DXGI)·NVENC 는 캡처를
+// 반복 시작/강제종료하면 세션이 꼬여 인코더 열기 실패/행이 생기므로, 캡처 세션 상태에
+//의존하지 않는 CPU 경로가 재현성이 높다. `-draw_mouse 0` 로 커서 숨김. framerate 는
+// 3440×1440 실시간 인코딩 여유를 위해 20fps(느린 페이스 데모엔 충분). NVENC 를 쓰려면
+// 아래 인자를 ddagrab+h264_nvenc 로 교체(단, 클린한 GPU 캡처 상태 필요).
 function startRecording() {
   const rec = spawn('ffmpeg', [
-    '-y', '-init_hw_device', 'd3d11va',
-    '-filter_complex', 'ddagrab=framerate=30:draw_mouse=0',
-    '-c:v', 'h264_nvenc', '-preset', 'p4', '-cq', '19',
+    '-y',
+    '-f', 'gdigrab', '-framerate', '20',
+    '-video_size', '3440x1440', '-offset_x', '0', '-offset_y', '0',
+    '-draw_mouse', '0', '-i', 'desktop',
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p',
     OUT_MP4,
   ], { stdio: ['pipe', 'ignore', 'pipe'] });
   let err = '';

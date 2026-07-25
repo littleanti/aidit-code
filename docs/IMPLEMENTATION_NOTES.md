@@ -11,6 +11,12 @@
 
 ## Changelog
 
+### 2026-07-25 · [fix] · 완료 · 데모 pytest 항상 실패 원인 수정(결정적 함수+파일 분리) + 녹화 인코더 gdigrab 전환
+- **요청(사용자)**: 데모 영상에서 pytest가 항상 실패로 뜬다.
+- **원인 규명(앱 버그 아님)**: 실제 샌드박스·DB TOOL_RESULT 확인 결과 — ① `two_sum`은 유효한 쌍이 여러 개일 때 반환 인덱스가 **모호**(해시맵 구현은 먼저 완성되는 쌍 반환)해서 AI가 자기 구현과 안 맞는 기대값을 적어 첫 assert부터 실패. ② 에이전트가 파일 전체를 재작성해 초기 `is_palindrome`가 유실(utils.py에 two_sum만 남음).
+- **수정**: 워크로드를 **결정적 함수(is_palindrome:bool, count_vowels:int) + 함수별 파일 분리**(palindrome.py/vowels.py/각 test)로 변경. turn 10에 "실패 시 전부 통과하도록 고쳐줘" 자가 수정 지시 추가. 프리플라이트로 **`2 passed` green 검증** 후 재촬영 — 최종 샌드박스 `2 passed in 0.01s`. (`frontend/e2e/demo-scenario.mjs`, `docs/DEMO_SCENARIO.md`)
+- **녹화 인코더**: 반복 시작/강제종료로 DXGI(ddagrab)·NVENC 세션이 꼬여 "인코더 열기 실패"·행 발생 → **gdigrab(GDI)+libx264**로 전환(세션 상태 비의존, 재현성↑, ~20fps). (`frontend/e2e/demo-scenario.mjs` startRecording, `docs/DEMO_SCENARIO.md` 녹화 섹션)
+
 ### 2026-07-25 · [chore] · 완료 · 데모 워크로드를 순수 파이썬+pytest로 교체 + 세 창 스크롤 따라가기
 - **요청(사용자)**: 데모 영상에서 (1) 웹 앱은 실행 결과가 화면에 안 보여 약하고, (2) 채팅 답변이 올 때 스레드가 안 내려가 데모가 도는지 알 수 없음.
 - **(1) 워크로드 교체**: FastAPI TODO API → **순수 파이썬 유틸 라이브러리(is_palindrome·two_sum) + pytest TDD**. 매 AI 턴이 `pytest` 실행으로 끝나 터미널 버블에 `N passed`/실패가 그대로 보인다(눈에 보이는 실행 증거). 협업→리뷰→동시협업→steer→README 페이오프 아크 유지. (`docs/DEMO_SCENARIO.md` Phase 1·타임라인, `frontend/e2e/demo-scenario.mjs`)
