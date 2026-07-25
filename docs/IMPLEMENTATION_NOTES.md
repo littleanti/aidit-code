@@ -11,7 +11,7 @@
 
 ## Changelog
 
-### 2026-07-25 · [fix] · 완료(코드) · 빈 인자 tool_call 실행 차단(EISDIR write failed 제거) + 데모 로그인 장면 연장
+### 2026-07-25 · [fix] · 완료 · 빈 인자 tool_call 실행 차단(EISDIR write failed 제거) + 데모 로그인 장면 연장
 - **요청(사용자)**: 데모 영상에서 `write_file {"relPath":"","content":""}` → `write failed: EISDIR: illegal operation on a directory` 실패 버블이 노출. 원인 수정 + 재촬영. 로그인 장면이 너무 빨리 지나가므로 길게.
 - **원인**: LLM이 tool_call 인자를 빈/불량 JSON으로 방출하는 경우(스트리밍 인자 누락 또는 `JSON.parse` 실패 → `argsObj={}` 폴백), worker가 검증 없이 `relPath:''`로 FILE_WRITE 인텐트를 방출 → `resolveInsideRoot(root,'')`가 샌드박스 루트(디렉토리) 자체를 반환 → `writeFile(디렉토리)` = EISDIR. 실패가 툴콜 버블로 사용자에게 노출됨.
 - **수정(2중 방어)**:
@@ -20,7 +20,9 @@
 - **데모 스크립트**(`frontend/e2e/demo-scenario.mjs`): 로그인 장면 연장 — 타이핑 딜레이 증가 + 모달 오픈/로그인 완료 전후 대기 추가.
 - **재촬영 중 발견·추가 수정**:
   - DB 리셋 오류: `DATABASE_URL="file:./prisma/dev.db"`는 schema.prisma 위치 기준이라 실제 DB는 `backend/prisma/prisma/dev.db` — 잘못된 파일을 지워 옛 게시글이 홈 피드에 남은 채 1차 재촬영됨 → 중단, 올바른 경로 리셋 후 재촬영.
-  - LLM 쿼터: 반복 촬영으로 GitHub Models(`models.github.ai`, gpt-4o-mini) **일일 쿼터 소진** — 429 응답의 `retry-after=26705`(≈7.4시간)로 확인. B·C 턴이 `agent turn failed`로 비는 테이크만 나와 최종본 미확보. **코드 수정(EISDIR 가드·로그인 연장·시나리오 결정성)은 완료·커밋(7ee9ad2)**, 최종 재촬영은 쿼터 리셋(익일) 또는 `.env`의 `API_KEY`/`BASE_URL`/`MODEL`을 다른 OpenAI-호환 엔드포인트로 교체 후 `cd frontend && node e2e/demo-scenario.mjs` 재실행으로 마감. (앱 코드 문제 아님)
+  - LLM 쿼터: 반복 촬영으로 GitHub Models(`models.github.ai`, gpt-4o-mini) **일일 쿼터 소진** — 429 응답의 `retry-after=26705`(≈7.4시간)로 확인. 사용자가 `.env`의 `API_KEY`를 다른 GitHub 계정 PAT로 교체 → 버스트 프로브 4/4 통과 후 재촬영.
+  - 데모 스크립트 보강(`frontend/e2e/demo-scenario.mjs`): 재촬영 중 turn 4(B, AI ON)에서 `보내기` 버튼이 30s disabled로 클릭 타임아웃 → 직전 turn 3(B, AI OFF)의 AI 스위치가 실제로 꺼지지 않아 B가 에이전트 턴에 잠긴 것이 원인. **① `setAiState` 토글 후 aria-checked 재확인·재시도(3회), ② `sendMessage`가 `보내기` 활성화까지 대기(waitSendEnabled)** 추가.
+  - **최종 검증(실측)**: 클린 DB·새 키로 11턴 전부 성공 — 툴콜 19건 중 **EISDIR/빈경로 0건·invalid-path 0건**, AGENT_REPLY 8건 **FAILED 0·빈본문 0**, 최종 pytest **`2 passed` green**, README.md 산출, steer 개입 성공. 산출물 `demo-aidit-code.mp4`(4:12, 미추적).
   - red 엔딩 재발: 시나리오 turn 7의 `비영문` 언급이 에이전트가 한글 회문 테스트(`is_palindrome("카약")`)를 추가하게 유발 → ASCII 기준 구현과 충돌해 스텝 상한(8)까지 red 루프. 시나리오 문구를 결정적으로 수정(7: `비영문`→`문장부호`, 8: `테스트 문자열은 영문 기준으로만`, 10: `구현과 테스트를 일관되게 고쳐서(기대값만 바꾸지 말고)`) + 데모 구동 시 `AGENT_MAX_STEPS=14`로 자가수정 여유 확보. (`docs/DEMO_SCENARIO.md`, `frontend/e2e/demo-scenario.mjs`)
 - 변경 파일: `backend/src/agent/piWorker.mjs`, `backend/src/agent/piWorkerBody.mjs`, `backend/src/agent/toolExec.ts`, `backend/test/*(검증 테스트)`, `frontend/e2e/demo-scenario.mjs`, `docs/IMPLEMENTATION_NOTES.md`.
 

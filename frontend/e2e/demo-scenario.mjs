@@ -184,12 +184,21 @@ async function ensureMenuOpen(page) {
   return dialog;
 }
 async function setAiState(page, { ai, effort }) {
-  let dialog = await ensureMenuOpen(page);
-  const sw = dialog.getByRole('switch');
-  const isOn = (await sw.getAttribute('aria-checked')) === 'true';
-  if (isOn !== ai) { await sw.click(); await sleep(500); }
+  // 스위치를 목표 상태로 맞추되, 토글 후 실제 aria-checked 를 재확인해 어긋나면 재시도한다.
+  //   (AI-OFF 발화가 실수로 ON 으로 남으면 그 사용자의 다음 발화 전송이 잠겨 데모가 멈춘다 —
+  //    turn 3(B,OFF)→turn 4(B) 전송 disabled 타임아웃의 근본 원인.)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const dialog = await ensureMenuOpen(page);
+    const sw = dialog.getByRole('switch');
+    const isOn = (await sw.getAttribute('aria-checked').catch(() => null)) === 'true';
+    if (isOn === ai) break;
+    await sw.click();
+    await sleep(500);
+    const nowOn = (await sw.getAttribute('aria-checked').catch(() => null)) === 'true';
+    if (nowOn === ai) break;
+  }
   if (ai && effort) {
-    dialog = await ensureMenuOpen(page);
+    const dialog = await ensureMenuOpen(page);
     await dialog.getByRole('radio', { name: effort }).click();
     await sleep(500);
   }
@@ -205,8 +214,20 @@ async function typeMessage(page, text) {
   await box.pressSequentially(text, { delay: 16 });
   await sleep(300);
 }
+// 보내기 버튼이 활성화될 때까지 대기 — 직전(같은 사용자) 턴 스트리밍이 마무리돼 전송 잠금이
+// 풀리기를 기다린다. disabled 상태 클릭 재시도 타임아웃(30s)으로 실패하는 대신 명시적으로 대기.
+async function waitSendEnabled(page, timeoutMs = 120000) {
+  const btn = page.getByRole('button', { name: '보내기' });
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await btn.isEnabled().catch(() => false)) return true;
+    await sleep(500);
+  }
+  return false;
+}
 async function sendMessage(page, text) {
   await typeMessage(page, text);
+  await waitSendEnabled(page);
   await page.getByRole('button', { name: '보내기' }).click();
 }
 
