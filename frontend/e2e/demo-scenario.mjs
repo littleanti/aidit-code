@@ -50,11 +50,12 @@ const TURNS = [
   { n: 4, who: 'B', ai: true, effort: '중간', text: '위 논의대로 palindrome.py의 is_palindrome를 대소문자·공백·문장부호 무시하도록 고치고, test_palindrome.py 테스트도 보강해줘. pytest 다시 돌려서 전부 통과 확인.' },
   { n: 5, who: 'A', action: 'filesTab' },
   { n: 6, who: 'B', ai: true, effort: '중간', concurrentWith: 7, text: '문자열의 모음(a,e,i,o,u) 개수를 세는 count_vowels(s) 함수를 vowels.py에 새로 만들고, test_vowels.py 테스트도 추가해줘. 기존 palindrome 파일은 그대로 두고. pytest 돌려서 통과 확인.' },
-  { n: 7, who: 'C', ai: true, effort: '중간', concurrentWith: 6, text: '지금까지 작성된 코드 전체를 리뷰만 해줘(파일 수정 말고) — 놓친 엣지케이스나 빠진 테스트(빈 문자열·대문자·비영문 등) 있는지 지적해줘.' },
+  // 비영문(한글) 회문 테스트는 ASCII 기준 구현과 충돌해 red 루프를 유발하므로 문구에서 배제(결정성).
+  { n: 7, who: 'C', ai: true, effort: '중간', concurrentWith: 6, text: '지금까지 작성된 코드 전체를 리뷰만 해줘(파일 수정 말고) — 놓친 엣지케이스나 빠진 테스트(빈 문자열·대문자·문장부호 등) 있는지 지적해줘.' },
   // noWait: 완료를 기다리지 않고 다음(turn 9 steer)이 이 턴 스트리밍 중에 개입하도록 둔다.
-  { n: 8, who: 'C', ai: true, effort: '중간', noWait: true, text: '리뷰에서 지적한 빈 문자열·대소문자 엣지케이스부터 test에 추가하고, 통과하도록 고쳐줘. pytest 전부 통과 확인.' },
+  { n: 8, who: 'C', ai: true, effort: '중간', noWait: true, text: '리뷰에서 지적한 빈 문자열·대소문자 엣지케이스부터 test에 추가하고, 통과하도록 고쳐줘. 테스트 문자열은 영문 기준으로만. pytest 전부 통과 확인.' },
   { n: 9, who: 'A', action: 'steer', steer: '숫자나 특수문자 섞인 경우 케이스도 넣어줘' },
-  { n: 10, who: 'C', ai: true, effort: '높음', text: '마지막으로 pytest 전체 다 돌려서 결과 보여줘. 혹시 실패하는 테스트가 있으면 전부 통과하도록 고쳐줘. 그리고 최종 함수 목록·테스트 구조를 한 번 정리해줘.' },
+  { n: 10, who: 'C', ai: true, effort: '높음', text: '마지막으로 pytest 전체 다 돌려서 결과 보여줘. 실패하는 테스트가 있으면 구현과 테스트를 일관되게 고쳐서 전부 통과시켜줘(기대값만 바꾸지 말고). 그리고 최종 함수 목록·테스트 구조를 한 번 정리해줘.' },
   // 문서 페이오프: 논의·코드를 산출물(README.md 파일)로 응결 — 엔딩 파일탭에서 노출.
   { n: 11, who: 'A', ai: true, effort: '중간', text: '좋아요. 지금까지 만든 코드를 정리해서 README.md 파일로 작성해줘 — 함수 목록·사용 예시·pytest 실행법 포함.' },
 ];
@@ -102,16 +103,22 @@ async function launchWindow(tile) {
   return { browser, page };
 }
 
+// 로그인 장면은 데모 도입부라 시청자가 따라올 수 있게 일부러 느리게 간다:
+// 홈 첫 화면 → 모달 오픈 → 닉네임 타이핑 → 시작, 단계마다 카메라용 대기를 넣는다.
 async function guestLogin(page, nick) {
   await page.goto(BASE);
+  await sleep(2000); // 홈 첫 화면을 잠깐 보여준다
   await page.getByRole('button', { name: '로그인' }).first().click();
   const dialog = page.getByRole('dialog', { name: '로그인' });
   await dialog.waitFor({ state: 'visible', timeout: 15000 });
+  await sleep(2000); // 로그인 모달을 카메라에 보여준다
   const nickInput = dialog.getByPlaceholder('닉네임');
   await nickInput.click();
-  await nickInput.pressSequentially(nick, { delay: 60 });
+  await nickInput.pressSequentially(nick, { delay: 250 });
+  await sleep(1500); // 입력된 닉네임 확인 컷
   await dialog.getByRole('button', { name: '게스트로 시작' }).click();
   await dialog.waitFor({ state: 'hidden', timeout: 15000 });
+  await sleep(1500); // 로그인 완료 상태(헤더 닉네임)를 보여준다
 }
 
 // 텍스트가 이 창에 보일 때까지 대기 (실시간 SSE 미반영 시 reload 폴백)

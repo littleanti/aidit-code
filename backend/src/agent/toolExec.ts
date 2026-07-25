@@ -28,6 +28,11 @@ import {
 /** path violation 시 사용하는 결과 문구(이벤트/행에 남는 일반 문구 — 민감정보 아님). */
 export const PATH_VIOLATION_RESULT = 'path violation';
 
+/** 빈 relPath 시 사용하는 결과 문구. 빈 경로는 resolveInsideRoot 가 루트(디렉토리) 자체를
+ *  반환해 writeFile 이 EISDIR 로 터지므로, 실행 전에 명시적으로 거른다(2중 방어 — worker 의
+ *  parseToolArgs 게이트가 1차, 수동 '!write' 컨벤션 경로까지 이 가드가 커버). */
+export const INVALID_PATH_RESULT = 'invalid path: empty relPath';
+
 /**
  * 파일 변경 알림 콜백(M6 RT-FILEEV).
  *   - FILE_WRITE 성공: change='CREATED'(이전에 없던 경우)|'MODIFIED'(있던 경우), size=기록 바이트.
@@ -126,6 +131,10 @@ async function runFileWrite(
   onFileChange?: FileChangeSink,
 ): Promise<ToolExecResult> {
   const relPath = req.relPath ?? '';
+  if (!relPath.trim()) {
+    onChunk(INVALID_PATH_RESULT + '\n');
+    return { status: 'FAILED', exitCode: 1, result: INVALID_PATH_RESULT };
+  }
   let abs: string;
   try {
     abs = resolveInsideRoot(root, relPath);
@@ -164,6 +173,10 @@ async function runFileRead(
   onChunk: ToolChunkSink,
 ): Promise<ToolExecResult> {
   const relPath = req.relPath ?? '';
+  if (!relPath.trim()) {
+    onChunk(INVALID_PATH_RESULT + '\n');
+    return { status: 'FAILED', exitCode: 1, result: INVALID_PATH_RESULT };
+  }
   let abs: string;
   try {
     abs = resolveInsideRoot(root, relPath);
@@ -189,6 +202,10 @@ async function runFileDelete(
   onFileChange?: FileChangeSink,
 ): Promise<ToolExecResult> {
   const relPath = req.relPath ?? '';
+  if (!relPath.trim()) {
+    onChunk(INVALID_PATH_RESULT + '\n');
+    return { status: 'FAILED', exitCode: 1, result: INVALID_PATH_RESULT };
+  }
   let abs: string;
   try {
     abs = resolveInsideRoot(root, relPath);

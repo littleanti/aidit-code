@@ -31,6 +31,45 @@ export function reasoningEffortApplies(model, effort, envOverride) {
   return REASONING_MODEL_RE.test(typeof model === 'string' ? model : '');
 }
 
+/**
+ * LLM tool_call 인자(JSON 문자열)를 파싱·검증한다(순수 함수 — 단위 테스트 대상).
+ * 스트리밍 인자가 누락/불량이면(빈 path·빈 command·JSON 아님) 인텐트를 실행하면 안 된다 —
+ * 예: relPath '' 는 경로 가드를 통과해 샌드박스 루트(디렉토리)에 writeFile → EISDIR 로 사용자에게
+ * 실패 버블이 노출된다. 실패 시 {ok:false, reason} 을 돌려주고, 호출부(runLlmAgent)는 인텐트를
+ * 방출하지 않고 reason 을 tool 메시지로 되먹여 LLM 이 올바른 인자로 재시도하게 한다.
+ */
+export function parseToolArgs(name, argsText) {
+  let args;
+  try {
+    args = JSON.parse(argsText || '{}');
+  } catch {
+    return { ok: false, reason: 'arguments are not valid JSON' };
+  }
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    return { ok: false, reason: 'arguments must be a JSON object' };
+  }
+  switch (name) {
+    case 'write_file':
+      if (typeof args.path !== 'string' || !args.path.trim())
+        return { ok: false, reason: 'non-empty "path" is required' };
+      if (typeof args.content !== 'string')
+        return { ok: false, reason: '"content" (string) is required' };
+      break;
+    case 'read_file':
+    case 'delete_file':
+      if (typeof args.path !== 'string' || !args.path.trim())
+        return { ok: false, reason: 'non-empty "path" is required' };
+      break;
+    case 'bash':
+      if (typeof args.command !== 'string' || !args.command.trim())
+        return { ok: false, reason: 'non-empty "command" is required' };
+      break;
+    default:
+      break; // unknown tool 은 호출부(toolCallToIntent → null)에서 처리한다.
+  }
+  return { ok: true, args };
+}
+
 /** 허용 이미지 MIME(부모가 화이트리스트 통과한 값만 보내지만 워커도 방어적으로 검사). */
 export const ALLOWED_IMAGE_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 

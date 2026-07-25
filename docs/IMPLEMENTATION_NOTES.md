@@ -11,6 +11,19 @@
 
 ## Changelog
 
+### 2026-07-25 · [fix] · 완료(코드) · 빈 인자 tool_call 실행 차단(EISDIR write failed 제거) + 데모 로그인 장면 연장
+- **요청(사용자)**: 데모 영상에서 `write_file {"relPath":"","content":""}` → `write failed: EISDIR: illegal operation on a directory` 실패 버블이 노출. 원인 수정 + 재촬영. 로그인 장면이 너무 빨리 지나가므로 길게.
+- **원인**: LLM이 tool_call 인자를 빈/불량 JSON으로 방출하는 경우(스트리밍 인자 누락 또는 `JSON.parse` 실패 → `argsObj={}` 폴백), worker가 검증 없이 `relPath:''`로 FILE_WRITE 인텐트를 방출 → `resolveInsideRoot(root,'')`가 샌드박스 루트(디렉토리) 자체를 반환 → `writeFile(디렉토리)` = EISDIR. 실패가 툴콜 버블로 사용자에게 노출됨.
+- **수정(2중 방어)**:
+  - worker(`backend/src/agent/piWorker.mjs`): 도구 인자 검증 가드 — FILE_* 계열 `path` 빈 값, SHELL `command` 빈 값, 인자 JSON 파싱 실패 시 **인텐트를 방출하지 않고**(툴콜 버블 미생성) tool 메시지로 `error: invalid arguments …` 를 되먹여 LLM이 올바른 인자로 재시도하게 한다. 검증 함수는 `piWorkerBody.mjs`에 순수 함수로 분리(단위 테스트).
+  - 서버(`backend/src/agent/toolExec.ts`): FILE_WRITE/READ/DELETE에서 relPath가 빈 문자열이면 실행 전 `invalid path` FAILED로 마감(EISDIR 도달 불가 — 수동 `!write` 경로 포함 방어).
+- **데모 스크립트**(`frontend/e2e/demo-scenario.mjs`): 로그인 장면 연장 — 타이핑 딜레이 증가 + 모달 오픈/로그인 완료 전후 대기 추가.
+- **재촬영 중 발견·추가 수정**:
+  - DB 리셋 오류: `DATABASE_URL="file:./prisma/dev.db"`는 schema.prisma 위치 기준이라 실제 DB는 `backend/prisma/prisma/dev.db` — 잘못된 파일을 지워 옛 게시글이 홈 피드에 남은 채 1차 재촬영됨 → 중단, 올바른 경로 리셋 후 재촬영.
+  - LLM 쿼터: 반복 촬영으로 GitHub Models(`models.github.ai`, gpt-4o-mini) 레이트리밋 429 도달 — B·C 턴이 `agent turn failed`로 비는 테이크 발생. 쿼터 회복 후 최종 재촬영 필요. (코드 문제 아님 — 프로브로 429 확인)
+  - red 엔딩 재발: 시나리오 turn 7의 `비영문` 언급이 에이전트가 한글 회문 테스트(`is_palindrome("카약")`)를 추가하게 유발 → ASCII 기준 구현과 충돌해 스텝 상한(8)까지 red 루프. 시나리오 문구를 결정적으로 수정(7: `비영문`→`문장부호`, 8: `테스트 문자열은 영문 기준으로만`, 10: `구현과 테스트를 일관되게 고쳐서(기대값만 바꾸지 말고)`) + 데모 구동 시 `AGENT_MAX_STEPS=14`로 자가수정 여유 확보. (`docs/DEMO_SCENARIO.md`, `frontend/e2e/demo-scenario.mjs`)
+- 변경 파일: `backend/src/agent/piWorker.mjs`, `backend/src/agent/piWorkerBody.mjs`, `backend/src/agent/toolExec.ts`, `backend/test/*(검증 테스트)`, `frontend/e2e/demo-scenario.mjs`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-07-25 · [fix] · 완료 · 데모 pytest 항상 실패 원인 수정(결정적 함수+파일 분리) + 녹화 인코더 gdigrab 전환
 - **요청(사용자)**: 데모 영상에서 pytest가 항상 실패로 뜬다.
 - **원인 규명(앱 버그 아님)**: 실제 샌드박스·DB TOOL_RESULT 확인 결과 — ① `two_sum`은 유효한 쌍이 여러 개일 때 반환 인덱스가 **모호**(해시맵 구현은 먼저 완성되는 쌍 반환)해서 AI가 자기 구현과 안 맞는 기대값을 적어 첫 assert부터 실패. ② 에이전트가 파일 전체를 재작성해 초기 `is_palindrome`가 유실(utils.py에 two_sum만 남음).

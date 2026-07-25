@@ -36,7 +36,7 @@
 //   '!'-접두사 도구 컨벤션 라인은 두 모드 공통으로 도구 의도를 방출한다(부모 toolBridge 가 실행).
 
 import { createInterface } from 'node:readline';
-import { buildCompletionBody, buildUserContent, reasoningEffortApplies } from './piWorkerBody.mjs';
+import { buildCompletionBody, buildUserContent, reasoningEffortApplies, parseToolArgs } from './piWorkerBody.mjs';
 
 // ── LLM 런타임 설정(부모 pi.ts 가 주입한 env). 키는 절대 stdout/이벤트로 흘리지 않는다. ──
 const LLM_API_KEY = process.env.OPENAI_API_KEY || process.env.PI_API_KEY || '';
@@ -382,19 +382,24 @@ async function runLlmAgent(prompt, lang, turn, opts = {}) {
     const toolMsgs = [];
     for (const tc of toolCalls) {
       if (turn.interrupted) return;
-      let argsObj = {};
-      try { argsObj = JSON.parse(tc.arguments || '{}'); } catch { argsObj = {}; }
-      const intent = toolCallToIntent(tc.name, argsObj, tc.id);
+      // 인자 검증 게이트: 빈/불량 인자(스트리밍 누락·JSON 파싱 실패)는 실행하지 않는다.
+      //   인텐트를 방출하지 않으므로 실패 툴콜 버블이 생기지 않고, 에러를 되먹여 재시도를 유도한다.
+      const parsed = parseToolArgs(tc.name, tc.arguments);
       let toolContent;
-      if (!intent) {
-        toolContent = `error: unknown tool ${tc.name}`;
+      if (!parsed.ok) {
+        toolContent = `error: invalid arguments for ${tc.name} — ${parsed.reason}. Retry with complete JSON arguments.`;
       } else {
-        const ack = await emitToolAndWait(intent, turn);
-        if (turn.interrupted) return;
-        toolContent =
-          ack && typeof ack.output === 'string' && ack.output.length
-            ? ack.output
-            : ack && ack.ok ? 'ok' : 'failed';
+        const intent = toolCallToIntent(tc.name, parsed.args, tc.id);
+        if (!intent) {
+          toolContent = `error: unknown tool ${tc.name}`;
+        } else {
+          const ack = await emitToolAndWait(intent, turn);
+          if (turn.interrupted) return;
+          toolContent =
+            ack && typeof ack.output === 'string' && ack.output.length
+              ? ack.output
+              : ack && ack.ok ? 'ok' : 'failed';
+        }
       }
       toolMsgs.push({ role: 'tool', tool_call_id: tc.id, content: String(toolContent) });
     }
