@@ -20,7 +20,7 @@
 - **데모 스크립트**(`frontend/e2e/demo-scenario.mjs`): 로그인 장면 연장 — 타이핑 딜레이 증가 + 모달 오픈/로그인 완료 전후 대기 추가.
 - **재촬영 중 발견·추가 수정**:
   - DB 리셋 오류: `DATABASE_URL="file:./prisma/dev.db"`는 schema.prisma 위치 기준이라 실제 DB는 `backend/prisma/prisma/dev.db` — 잘못된 파일을 지워 옛 게시글이 홈 피드에 남은 채 1차 재촬영됨 → 중단, 올바른 경로 리셋 후 재촬영.
-  - LLM 쿼터: 반복 촬영으로 GitHub Models(`models.github.ai`, gpt-4o-mini) 레이트리밋 429 도달 — B·C 턴이 `agent turn failed`로 비는 테이크 발생. 쿼터 회복 후 최종 재촬영 필요. (코드 문제 아님 — 프로브로 429 확인)
+  - LLM 쿼터: 반복 촬영으로 GitHub Models(`models.github.ai`, gpt-4o-mini) **일일 쿼터 소진** — 429 응답의 `retry-after=26705`(≈7.4시간)로 확인. B·C 턴이 `agent turn failed`로 비는 테이크만 나와 최종본 미확보. **코드 수정(EISDIR 가드·로그인 연장·시나리오 결정성)은 완료·커밋(7ee9ad2)**, 최종 재촬영은 쿼터 리셋(익일) 또는 `.env`의 `API_KEY`/`BASE_URL`/`MODEL`을 다른 OpenAI-호환 엔드포인트로 교체 후 `cd frontend && node e2e/demo-scenario.mjs` 재실행으로 마감. (앱 코드 문제 아님)
   - red 엔딩 재발: 시나리오 turn 7의 `비영문` 언급이 에이전트가 한글 회문 테스트(`is_palindrome("카약")`)를 추가하게 유발 → ASCII 기준 구현과 충돌해 스텝 상한(8)까지 red 루프. 시나리오 문구를 결정적으로 수정(7: `비영문`→`문장부호`, 8: `테스트 문자열은 영문 기준으로만`, 10: `구현과 테스트를 일관되게 고쳐서(기대값만 바꾸지 말고)`) + 데모 구동 시 `AGENT_MAX_STEPS=14`로 자가수정 여유 확보. (`docs/DEMO_SCENARIO.md`, `frontend/e2e/demo-scenario.mjs`)
 - 변경 파일: `backend/src/agent/piWorker.mjs`, `backend/src/agent/piWorkerBody.mjs`, `backend/src/agent/toolExec.ts`, `backend/test/*(검증 테스트)`, `frontend/e2e/demo-scenario.mjs`, `docs/IMPLEMENTATION_NOTES.md`.
 
