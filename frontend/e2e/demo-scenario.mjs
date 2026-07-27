@@ -1,7 +1,7 @@
 // docs/DEMO_SCENARIO.md 오케스트레이션 스크립트 (Aidit-Code).
 // 실행: cd frontend && node e2e/demo-scenario.mjs
 // 3440×1440 모니터에 A/B/C 창 3분할 → 게스트 로그인(모달) → 게시글=샌드박스 세션 생성(동시 협업 ON)
-// → B·C 참여 → 협업 코딩/리뷰 10턴 → v2 동시 협업 → 중단/방향조정.
+// → B·C 참여 → 협업 코딩/리뷰 14턴 → v2 동시 협업(6·7 무충돌, 8·9 같은 파일 동시 수정) → 중단/방향조정.
 // ffmpeg(ddagrab+NVENC, draw_mouse=0)로 전체 화면 녹화. 종료는 stdin 'q'.
 import { spawn } from 'node:child_process';
 import { chromium } from '@playwright/test';
@@ -52,17 +52,42 @@ const TURNS = [
   { n: 6, who: 'B', ai: true, effort: '중간', concurrentWith: 7, text: '문자열의 모음(a,e,i,o,u) 개수를 세는 count_vowels(s) 함수를 vowels.py에 새로 만들고, test_vowels.py 테스트도 추가해줘. 기존 palindrome 파일은 그대로 두고. pytest 돌려서 통과 확인.' },
   // 비영문(한글) 회문 테스트는 ASCII 기준 구현과 충돌해 red 루프를 유발하므로 문구에서 배제(결정성).
   { n: 7, who: 'C', ai: true, effort: '중간', concurrentWith: 6, text: '지금까지 작성된 코드 전체를 리뷰만 해줘(파일 수정 말고) — 놓친 엣지케이스나 빠진 테스트(빈 문자열·대문자·문장부호 등) 있는지 지적해줘.' },
-  // noWait: 완료를 기다리지 않고 다음(turn 9 steer)이 이 턴 스트리밍 중에 개입하도록 둔다.
-  { n: 8, who: 'C', ai: true, effort: '중간', noWait: true, text: '리뷰에서 지적한 빈 문자열·대소문자 엣지케이스부터 test에 추가하고, 통과하도록 고쳐줘. 테스트 문자열은 영문 기준으로만. pytest 전부 통과 확인.' },
-  { n: 9, who: 'A', action: 'steer', steer: '숫자나 특수문자 섞인 경우 케이스도 넣어줘' },
-  { n: 10, who: 'C', ai: true, effort: '높음', text: '마지막으로 pytest 전체 다 돌려서 결과 보여줘. 실패하는 테스트가 있으면 구현과 테스트를 일관되게 고쳐서 전부 통과시켜줘(기대값만 바꾸지 말고). 그리고 최종 함수 목록·테스트 구조를 한 번 정리해줘.' },
+  // ── 8·9: 같은 파일(vowels.py) 동시 수정 — XC-SERIAL(직렬 부수효과) 시연 ──────────────
+  // 6·7이 '병렬 추론'만 보여줬다면(7은 리뷰라 파일 미수정), 8·9는 두 사용자가 같은 파일을 동시에
+  // 고친다. 서버는 도구 실행을 withSandboxLock(sandboxId)으로 감싸므로(backend/src/agent/turn.ts:190)
+  // 파일 쓰기는 한 번에 하나만 진입한다 — 툴콜 버블이 겹치지 않고 순차로 찍히는 것이 시각 증거.
+  // 한계: write_file 은 파일 전체 덮어쓰기라 read→write 사이 논리적 lost update 는 lock 이 막지 못한다.
+  //   그래서 두 발화 모두 'read_file 먼저 + 기존 함수 유지'를 명시하고, turn 10 정합성 턴을 안전망으로 둔다.
+  // 공유 파일은 vowels.py 하나로 한정(테스트는 test_vowels.py / test_consonants.py 로 분리).
+  { n: 8, who: 'B', ai: true, effort: '중간', concurrentWith: 9, sameFile: 'vowels.py', text: 'vowels.py의 count_vowels가 대문자 모음(A,E,I,O,U)도 세도록 고쳐줘. 먼저 read_file로 vowels.py 현재 내용을 읽고, 파일에 이미 있는 다른 함수는 절대 지우지 말고 그대로 유지한 채 고쳐줘. test_vowels.py에 대문자 케이스도 추가하고 pytest 돌려서 통과 확인.' },
+  { n: 9, who: 'C', ai: true, effort: '중간', concurrentWith: 8, sameFile: 'vowels.py', text: '같은 vowels.py 파일에 자음 개수를 세는 count_consonants(s) 함수를 추가해줘. 먼저 read_file로 현재 내용을 읽고, 기존 count_vowels 함수는 그대로 둔 채 아래에 추가만 해줘. 테스트는 test_consonants.py에 따로 만들고 pytest 돌려서 통과 확인.' },
+  // 정합성 안전망: 두 동시 수정이 한 파일에 온전히 남았는지 확인·복구(유실 시) — 데모의 수렴 장면.
+  { n: 10, who: 'A', ai: true, effort: '중간', text: 'vowels.py 열어서 count_vowels랑 count_consonants 두 함수가 모두 남아있는지 확인해줘. 하나라도 없어졌으면 복구하고, pytest 전체 돌려서 전부 통과시켜줘.' },
+  // noWait: 완료를 기다리지 않고 다음(turn 12 steer)이 이 턴 스트리밍 중에 개입하도록 둔다.
+  { n: 11, who: 'C', ai: true, effort: '중간', noWait: true, text: '리뷰에서 지적한 빈 문자열·대소문자 엣지케이스부터 test에 추가하고, 통과하도록 고쳐줘. 테스트 문자열은 영문 기준으로만. pytest 전부 통과 확인.' },
+  // steer 문구는 결정적으로: 문장부호 섞인 문장('A man, a plan…')은 자음 개수를 사람이 세기 애매해
+  //   AI가 틀린 기대값을 넣어 red 루프를 유발한다(take1 실측). 숫자/특수문자만 있는 문자열은 답이 0으로 자명.
+  { n: 12, who: 'A', action: 'steer', steerAfter: 11, steer: "'12345'나 '#$%'처럼 숫자·특수문자만 있는 문자열 케이스도 넣어줘" },
+  { n: 13, who: 'C', ai: true, effort: '높음', text: '마지막으로 pytest 전체 다 돌려서 결과 보여줘. 실패하는 테스트가 있으면 구현과 테스트를 일관되게 고쳐서 전부 통과시켜줘(기대값만 바꾸지 말고). 그리고 최종 함수 목록·테스트 구조를 한 번 정리해줘.' },
   // 문서 페이오프: 논의·코드를 산출물(README.md 파일)로 응결 — 엔딩 파일탭에서 노출.
-  { n: 11, who: 'A', ai: true, effort: '중간', text: '좋아요. 지금까지 만든 코드를 정리해서 README.md 파일로 작성해줘 — 함수 목록·사용 예시·pytest 실행법 포함.' },
+  { n: 14, who: 'A', ai: true, effort: '중간', text: '좋아요. 지금까지 만든 코드를 정리해서 README.md 파일로 작성해줘 — 함수 목록·사용 예시·pytest 실행법 포함.' },
 ];
+
+// 8·9(같은 파일 동시 수정)에서 뒤 발화를 이만큼 늦게 전송한다. 0 = 완전 동시(기본).
+// 리허설에서 lost update(한쪽 함수 유실)가 반복되면 1500~3000 정도로 올린다 — 화면상으론 여전히 동시로 보인다.
+const SAME_FILE_STAGGER_MS = Number(process.env.SAME_FILE_STAGGER_MS ?? 0);
 
 const ts = () => new Date().toISOString().slice(11, 19);
 const log = (m) => console.log(`[demo ${ts()}] ${m}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ---------- 페이스 ----------
+// 데모가 느려지는 원인은 두 가지였다: ① 턴 종료를 '텍스트가 오래 안 변함'으로 판정(꼬리 10초+),
+// ② 카메라용 고정 대기. ①은 아래 배지 신호로 대체하고, ②만 PACE 배율로 조절한다.
+const PACE = Number(process.env.DEMO_PACE ?? 0.7); // 카메라 정지 컷 배율(1=원래, 0.5=절반)
+const POLL_MS = 500;                                // 상태 폴링 간격
+const QUIET_MS = Number(process.env.DEMO_QUIET_MS ?? 1500); // 배지 소멸 후 요구하는 정적 시간
+const pause = (ms) => sleep(Math.max(0, Math.round(ms * PACE)));
 
 // ---------- 녹화 ----------
 // gdigrab(GDI 캡처) + libx264 를 기본으로 쓴다. GPU 캡처(ddagrab/DXGI)·NVENC 는 캡처를
@@ -125,17 +150,25 @@ async function guestLogin(page, nick) {
 async function waitForText(page, text, timeoutMs = 90000) {
   const deadline = Date.now() + timeoutMs;
   const loc = page.getByText(text).last();
+  let waited = 0;
   for (;;) {
     if (await loc.isVisible().catch(() => false)) return;
     if (Date.now() > deadline) throw new Error(`waitForText timeout: ${text}`);
-    await sleep(2500);
-    if (await loc.isVisible().catch(() => false)) return;
-    await page.reload().catch(() => {});
-    await sleep(1500);
+    await sleep(800);
+    waited += 800;
+    // SSE 로 곧 도착하는 게 보통이므로 성급히 reload 하지 않는다(8초 넘게 안 오면 폴백).
+    if (waited >= 8000) {
+      waited = 0;
+      await page.reload().catch(() => {});
+      await sleep(1200);
+    }
   }
 }
 
 const agentBubbleCount = (page) => page.getByText('Aidit Agent').count();
+// LLM 일시 오류로 턴이 실패하면 서버가 이 시스템 버블을 남긴다(빈 AGENT_REPLY + 안내).
+//   take1의 turn 1이 여기 걸렸다 — 발화 후 이 버블이 새로 늘었으면 같은 발화를 1회 재전송한다.
+const failBubbleCount = (page) => page.getByText('에이전트 응답 실패').count();
 
 // 창을 문서 맨 아래로 스크롤 — 앱은 "하단 근처(pinned)일 때만" 새 답을 따라가므로,
 // 데모에선 세 창 모두 능동적으로 하단을 따라가게 해 스트리밍 답이 화면에 보이게 한다.
@@ -146,19 +179,32 @@ const followBottom = (page) =>
 // 세 창 전부 하단 따라가기 — 메인에서 P가 준비된 뒤 주입.
 let followAll = async () => {};
 
-// main 텍스트 안정화 대기 (스트리밍/툴콜 종료). 툴콜 사이 공백을 견디도록 4회(≈10s) 연속 안정 요구.
+// 이 스레드에 도는 턴이 있는지 — Thread.tsx 의 `◉ N개 작업 진행 중` 배지(role=status, activeTurns≥1).
+//   SSE 로 모든 창에 실시간 반영되므로, 어느 창에서 봐도 '지금 에이전트가 일하는 중'을 정확히 알려준다.
+const anyTurnActive = (page) =>
+  page.getByText('작업 진행 중').first().isVisible().catch(() => false);
+
+// 턴 종료 대기. 예전에는 main 텍스트가 10초간 안 변하는 것으로 판정했는데(툴콜 사이 공백을 견디려는 값),
+//   그 탓에 매 턴 12초 넘는 죽은 꼬리가 붙었다. 이제는 배지가 사라진 뒤 짧은 정적(QUIET_MS)만 확인한다 —
+//   툴콜 중에는 배지가 켜져 있으므로 조기 종료 위험 없이 대기를 1/6 수준으로 줄일 수 있다.
 // onPoll: 매 폴링마다 실행(스트리밍 따라 하단 스크롤 등).
 async function waitForStable(page, timeoutMs = 300000, onPoll = null) {
   const deadline = Date.now() + timeoutMs;
   let last = '';
-  let stable = 0;
-  while (stable < 4) {
+  let quietSince = null;
+  for (;;) {
     if (Date.now() > deadline) { log('  (stabilize timeout — proceeding)'); return; }
-    await sleep(2500);
+    await sleep(POLL_MS);
     if (onPoll) await onPoll();
+    if (await anyTurnActive(page)) { quietSince = null; continue; } // 아직 도는 턴이 있다
     const txt = await page.locator('main').innerText().catch(() => '');
-    if (txt && txt === last) stable += 1;
-    else { stable = 0; last = txt; }
+    if (txt && txt === last) {
+      if (quietSince == null) quietSince = Date.now();
+      if (Date.now() - quietSince >= QUIET_MS) return;
+    } else {
+      last = txt;
+      quietSince = null;
+    }
   }
 }
 
@@ -168,7 +214,7 @@ async function waitForAgentReply(page, prevCount, timeoutMs = 300000, onPoll = n
   while ((await agentBubbleCount(page)) <= prevCount) {
     if (Date.now() > deadline) throw new Error('agent bubble did not appear');
     if (onPoll) await onPoll();
-    await sleep(1500);
+    await sleep(POLL_MS);
   }
   await waitForStable(page, deadline - Date.now(), onPoll);
 }
@@ -225,6 +271,19 @@ async function waitSendEnabled(page, timeoutMs = 120000) {
   }
   return false;
 }
+// 그 창 사용자의 활성 턴이 끝날 때까지 대기.
+//   Composer 는 '내 턴' 게이팅(self-concurrency=1) 동안 role=status 안내를 띄운다(thread.myTurnBusy).
+//   이 문구가 사라지면 그 사용자의 턴이 실제로 종료된 것 — 화면 텍스트 안정화보다 정확하고,
+//   빈 입력창에서는 항상 disabled 인 '보내기' 버튼 상태보다 신뢰할 수 있다(take2 4분 헛대기 원인).
+async function waitMyTurnIdle(page, timeoutMs = 240000) {
+  const busy = page.getByText('내 답변 진행 중');
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!(await busy.isVisible().catch(() => false))) return true;
+    await sleep(1000);
+  }
+  return false;
+}
 async function sendMessage(page, text) {
   await typeMessage(page, text);
   await waitSendEnabled(page);
@@ -253,7 +312,7 @@ try {
     guestLogin(P.B, USERS.B.nick),
     guestLogin(P.C, USERS.C.nick),
   ]);
-  await sleep(1500);
+  await pause(1500);
 
   // Phase 1 — A: 게시글(=샌드박스 세션) 생성, 동시 협업 ON
   log('Phase 1: A creates post (concurrent ON)');
@@ -279,7 +338,8 @@ try {
   // Phase 2 — B·C 세션 참여
   log('Phase 2: B, C join session');
   await Promise.all([P.B.goto(postUrl), P.C.goto(postUrl)]);
-  await sleep(2500);
+  // 1차 답변 직후 곧바로 다음 LLM 호출이 붙으면 일시 오류가 나기 쉽다(take1 turn 1 FAILED) — 여유를 둔다.
+  await pause(6000);
 
   // Phase 3 — 타임라인 1~10
   let prevProbe = POST.title.slice(0, 10);
@@ -290,15 +350,15 @@ try {
     if (turn.action === 'filesTab') {
       log(`turn ${turn.n} (A: files tab showcase)`);
       await P.A.getByRole('tab', { name: '파일' }).click();
-      await sleep(4000);
+      await pause(4000);
       await P.A.getByRole('tab', { name: '대화' }).click();
-      await sleep(1500);
+      await pause(1500);
       continue;
     }
 
     if (turn.action === 'steer') {
       log(`turn ${turn.n} (A: interrupt/steer)`);
-      // 직전(turn 8, noWait)의 에이전트 턴이 도는 동안 steer 입력란(agentStreaming)이 A에도 보인다.
+      // 직전(steerAfter, noWait)의 에이전트 턴이 도는 동안 steer 입력란(agentStreaming)이 A에도 보인다.
       const steerBox = P.A.getByPlaceholder('방향 조정 (선택)…');
       try {
         await steerBox.waitFor({ state: 'visible', timeout: 30000 });
@@ -312,10 +372,20 @@ try {
       }
       // 개입된 턴이 마무리될 때까지 대기 후 다음으로 (하단 따라가기).
       await waitForStable(P.A, 180000, followAll);
-      // 다음 turn의 waitForText 기준은 확실히 보이는 turn 8 사람 메시지로 둔다(steer는 버블로 안 보일 수 있음).
-      const t8 = TURNS.find((x) => x.n === 8);
-      if (t8) prevProbe = t8.text.slice(0, 12);
-      await sleep(1500);
+      // take1 결함: A 창 텍스트 안정화만 보고 통과해 버렸는데, steer 된 사용자의 턴은 그 뒤로도
+      //   툴콜을 계속 돌고 있었다(약 1분 더). 그 상태로 같은 사용자의 다음 발화를 보내면 턴이
+      //   붙지 않고(SYSTEM '세션을 시작하세요') 최종 green 정리 턴이 통째로 사라진다.
+      //   → steer 대상 사용자 창의 '보내기'가 다시 활성화될 때까지(=그 사용자의 활성 턴 종료) 기다린다.
+      const steered = TURNS.find((x) => x.n === turn.steerAfter);
+      if (steered) {
+        const ok = await waitMyTurnIdle(P[steered.who], 240000);
+        log(`  steered turn (${steered.who}) finished: idle=${ok}`);
+        await followAll();
+      }
+      // 다음 turn의 waitForText 기준은 확실히 보이는 직전(steerAfter) 사람 메시지로 둔다(steer는 버블로 안 보일 수 있음).
+      const prior = TURNS.find((x) => x.n === turn.steerAfter);
+      if (prior) prevProbe = prior.text.slice(0, 12);
+      await pause(1500);
       continue;
     }
 
@@ -328,34 +398,53 @@ try {
     if (turn.concurrentWith) {
       // v2 동시 협업: 짝을 이루는 두 발화를 거의 동시에 전송
       const partner = TURNS.find((x) => x.n === turn.concurrentWith);
-      log(`turns ${turn.n}+${partner.n} (${turn.who}+${partner.who}, concurrent AI)`);
+      log(`turns ${turn.n}+${partner.n} (${turn.who}+${partner.who}, concurrent AI${turn.sameFile ? ` — same file ${turn.sameFile}` : ''})`);
       await waitForText(page, prevProbe);
       const pageB = P[partner.who];
       await setAiState(page, { ai: turn.ai, effort: turn.effort });
       await setAiState(pageB, { ai: partner.ai, effort: partner.effort });
       await typeMessage(page, turn.text);
       await typeMessage(pageB, partner.text);
+      // 직전 턴의 툴콜이 아직 돌고 있으면 전송이 잠겨 있다 — 두 창 모두 활성화될 때까지 기다린다.
+      await Promise.all([waitSendEnabled(page, 180000), waitSendEnabled(pageB, 180000)]);
       const beforeA = await agentBubbleCount(page);
       const beforeB = await agentBubbleCount(pageB);
+      // 같은 파일을 건드리는 짝(sameFile)이면 뒤 발화를 조금 늦춰 lost update 확률을 낮춘다(기본 0 = 완전 동시).
+      const stagger = turn.sameFile ? SAME_FILE_STAGGER_MS : 0;
       await Promise.all([
         page.getByRole('button', { name: '보내기' }).click(),
-        pageB.getByRole('button', { name: '보내기' }).click(),
+        (async () => {
+          if (stagger > 0) await sleep(stagger);
+          await pageB.getByRole('button', { name: '보내기' }).click();
+        })(),
       ]);
       log(`  concurrent turns sent — waiting both replies`);
       await followAll();
+      // 같은 파일 동시 수정 구간에서는 A 창을 '파일' 탭으로 두어 vowels.py 변경 표시가
+      // 두 턴에 걸쳐 연달아 갱신되는 것을 카메라에 남긴다(직렬 부수효과의 시각 증거).
+      if (turn.sameFile) {
+        await P.A.getByRole('tab', { name: '파일' }).click().catch(() => {});
+        await pause(1200);
+      }
       await Promise.all([
         waitForAgentReply(page, beforeA, 300000, followAll).catch((e) => log(`  ${turn.who}: ${e.message}`)),
         waitForAgentReply(pageB, beforeB, 300000, followAll).catch((e) => log(`  ${partner.who}: ${e.message}`)),
       ]);
+      if (turn.sameFile) {
+        await pause(2000);
+        await P.A.getByRole('tab', { name: '대화' }).click().catch(() => {});
+        await pause(1500);
+      }
       prevProbe = turn.text.slice(0, 12);
-      await sleep(1500);
+      await pause(1500);
       continue;
     }
 
     log(`turn ${turn.n} (${turn.who}, AI ${turn.ai ? 'ON' : 'OFF'}${turn.effort ? `·${turn.effort}` : ''})`);
     await waitForText(page, prevProbe);
-    await sleep(1200);
+    await pause(1200);
     const before = turn.ai ? await agentBubbleCount(page) : 0;
+    const failBefore = turn.ai ? await failBubbleCount(page) : 0;
     await setAiState(page, { ai: turn.ai, effort: turn.effort });
     await sendMessage(page, turn.text);
     await waitForText(page, turn.text.slice(0, 12), 30000);
@@ -365,22 +454,32 @@ try {
       log(`turn ${turn.n}: sent (noWait — leaving turn streaming for steer)`);
     } else if (turn.ai) {
       log(`turn ${turn.n}: waiting for agent reply...`);
-      await waitForAgentReply(page, before, turn.n === 10 ? 360000 : 300000, followAll)
+      await waitForAgentReply(page, before, turn.n === 13 ? 360000 : 300000, followAll)
         .catch((e) => log(`  agent wait: ${e.message}`));
+      // LLM 일시 오류(FAILED·빈 답변)면 같은 발화를 1회만 재전송한다 — take1의 turn 1 결함 대응.
+      if ((await failBubbleCount(page)) > failBefore) {
+        log(`turn ${turn.n}: agent FAILED — retrying once`);
+        const retryBefore = await agentBubbleCount(page);
+        await setAiState(page, { ai: true, effort: turn.effort });
+        await sendMessage(page, turn.text);
+        await followAll();
+        await waitForAgentReply(page, retryBefore, 300000, followAll)
+          .catch((e) => log(`  retry wait: ${e.message}`));
+      }
       log(`turn ${turn.n}: agent reply done`);
     }
     prevProbe = turn.text.slice(0, 12);
-    await sleep(1000);
+    await pause(1000);
   }
 
   // 엔딩 — A 창에서 파일 탭으로 완성 트리 → 대화 스크롤
   log('ending: A files tree + scroll');
   await P.A.getByRole('tab', { name: '파일' }).click();
-  await sleep(4000);
+  await pause(4000);
   await P.A.getByRole('tab', { name: '대화' }).click();
-  await sleep(1500);
+  await pause(1500);
   for (let i = 0; i < 12; i++) { await P.A.mouse.wheel(0, -600); await sleep(500); }
-  await sleep(3000);
+  await pause(3000);
 
   log('demo complete');
 } catch (e) {

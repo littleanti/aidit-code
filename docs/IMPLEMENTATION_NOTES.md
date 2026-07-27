@@ -11,6 +11,78 @@
 
 ## Changelog
 
+### 2026-07-27 · [chore] · 완료 · 데모 시나리오에 "동시에 같은 파일 수정" 구간 추가(XC-SERIAL 실증)
+- **요청(사용자)**: 데모 시나리오에 **두 사용자가 동시에 하나의 파일을 수정하는** 시나리오를 추가.
+- **배경**: 기존 동시 협업 구간(turn 6·7)은 의도적으로 **부수효과 충돌이 없는** 조합(6=파일 생성, 7=리뷰만)이라
+  "병렬 추론"만 보여주고 v2의 나머지 절반인 **직렬 부수효과(XC-SERIAL)** 는 화면에 드러나지 않았다.
+  `backend/src/agent/turn.ts:190`이 모든 도구 실행을 `withSandboxLock(session.sandboxId, …)`로 감싸므로
+  같은 샌드박스의 두 턴이 동시에 돌아도 파일 쓰기는 한 번에 하나만 진입한다.
+- **추가 구간(신규 turn 8·9·10, 기존 8~11은 11~14로 재번호)**:
+  - 8(B, AI ON) + 9(C, AI ON) **동시 전송** — 둘 다 **같은 파일 `vowels.py`** 를 수정.
+    B는 `count_vowels`를 대문자 모음까지 세도록 수정, C는 같은 파일에 `count_consonants`를 추가.
+    (테스트 파일은 각각 `test_vowels.py`/`test_consonants.py`로 분리해 공유 파일을 `vowels.py` 하나로 한정.)
+  - 10(A, AI ON) **정합성 확인 턴** — `vowels.py`에 두 함수가 모두 남아있는지 확인하고 유실 시 복구 + `pytest` 전체 통과.
+- **정직한 한계 명시(문서에 기재)**: `write_file`은 **파일 전체 덮어쓰기**이므로 lock이 보장하는 것은
+  *동시 쓰기 진입 0(찢어진 파일·인터리브 없음)* 이지 read→write 사이의 **논리적 lost update 방지는 아니다**.
+  그래서 두 발화 모두 "먼저 `read_file`로 읽고 기존 함수는 지우지 말 것"을 명시하고, 10번 정합성 턴을
+  안전망으로 둔다. (이 수렴 자체가 데모의 일부.)
+- **스크립트 변경 상세**(`frontend/e2e/demo-scenario.mjs`): TURNS에 8·9(`concurrentWith` 짝 + `sameFile:'vowels.py'`)·10 삽입,
+  기존 8~11 → 11~14 재번호. steer 턴은 하드코딩된 `n===8` 참조 대신 `steerAfter: 11` 필드로 일반화,
+  마지막 pytest 턴 타임아웃 분기 `n===10` → `n===13`. 동시 전송 시 `sameFile` 짝이면
+  `SAME_FILE_STAGGER_MS`(env, 기본 0=완전 동시)만큼 뒤 발화를 늦출 수 있고, 두 턴이 도는 동안
+  A 창을 `파일` 탭으로 전환해 `vowels.py` 변경 표시가 연달아 갱신되는 것을 잡는다.
+- **검증(정적)**: `node --check e2e/demo-scenario.mjs` 통과. TURNS 파싱 후 루프 로직 드라이런 —
+  실행 순서 `1,2,3,4,5,(6+7),(8+9 SAMEFILE=vowels.py),10,11,steer12,13,14`, 번호 연속성,
+  동시 짝의 상호 참조·서로 다른 사용자·`sameFile` 플래그 일치, steer의 선행 턴(11, `noWait`) 존재 확인.
+- **실촬영 검증(3회 모두 동일 결론)**: 8·9 동시 수정 구간에서 **툴콜 시간 구간이 겹친 쌍 0건**
+  (take1 42건 중 0, take2 36건 중 0, take3 36건 중 0) — 파일 쓰기가 샌드박스 단위로 직렬화됨을 실증.
+  `vowels.py`에 `count_vowels`·`count_consonants`가 **3회 모두 온전히 병합**(lost update 미발생),
+  직후 정합성 턴에서 green. `SAME_FILE_STAGGER_MS`는 기본값 0(완전 동시)으로 충분했다.
+- **최종 산출물**: `demo-aidit-code.mp4`(take3, 5분 48초, 97MB, 미추적).
+  take1/take2는 `demo-aidit-code.take1.mp4`/`.take2.mp4`로 보관(결함 있음 — 위 항목 참조).
+- 변경 파일: `docs/DEMO_SCENARIO.md`, `frontend/e2e/demo-scenario.mjs`, `docs/IMPLEMENTATION_NOTES.md`.
+
+### 2026-07-27 · [fix] · 완료 · 재촬영 take1 결함 수정 — steer 후 실제 턴 종료 대기(엔딩 red 원인)
+- **take1 실측(2026-07-27 09:40~09:52, `demo-aidit-code.take1.mp4`)**:
+  - ✅ **신규 8·9 구간 성공** — 같은 `vowels.py`에 대한 read 3건·write 4건에서 **겹치는 툴콜 쌍 0건**
+    (XC-SERIAL 실증), `count_vowels`·`count_consonants` **둘 다 온전**(lost update 미발생),
+    직후 정합성 턴(10)에서 **`3 passed` green**.
+  - ❌ turn 1(B): AGENT_REPLY `FAILED`·빈 본문 + `에이전트 응답 실패` 시스템 버블 노출(LLM 일시 오류로 추정).
+  - ❌ turn 13(C): 에이전트 턴 미개시 — `세션을 시작하세요` 버블 후 **약 5분 무응답 정적**.
+  - ❌ 엔딩 red: 마지막 pytest `1 failed, 2 passed`
+    (에이전트가 `count_consonants('A man, a plan, a canal: Panama') == 7`이라는 틀린 기대값을 넣음, 실제 11).
+- **원인(스크립트)**: turn 12 steer 이후 `waitForStable(P.A, …)`가 **A 창 텍스트만** 보고 14초 만에 통과 —
+  실제로는 steer된 **C의 턴이 09:46:20까지 툴콜을 계속 실행 중**이었다. 그 상태에서 같은 사용자 C로
+  turn 13을 전송해 턴이 붙지 않았고, 최종 green 정리 턴이 사라져 엔딩이 red로 남았다.
+- **수정**:
+  - steer 이후 **steer 대상 사용자 창의 `보내기` 활성화**(=그 사용자의 활성 턴 종료)를 대기 조건으로 추가.
+    화면 텍스트 안정화만으로는 툴콜 진행 중인 턴을 놓친다.
+  - 일반 턴에서도 AI 턴 종료 판정 뒤 **툴콜 잔여 실행을 감안한 send-enabled 확인**을 거치도록 보강.
+  - steer 문구를 결정적으로 교체 — `숫자나 특수문자 섞인 경우` → **`'12345'나 '#$%' 처럼 숫자·특수문자만 있는 문자열 케이스`**
+    (문장부호 섞인 문장은 자음 개수를 사람이 세기 애매해 AI가 틀린 기대값을 넣는 red 유발원).
+  - Phase 1(1차 답변) 직후 turn 1 전송 전 여유 대기 추가(연속 LLM 호출 간격 확보).
+- **검증(take2 실측)**: AGENT_REPLY 11건 **FAILED 0·빈 본문 0**, SYSTEM 오류 버블 **0건**,
+  최종 pytest **`4 passed`(exit 0)**. take1의 세 결함이 모두 사라짐. (단 steer 대기 방식이 남긴
+  4분 16초 정적은 다음 항목에서 해결.)
+- 변경 파일: `frontend/e2e/demo-scenario.mjs`, `docs/DEMO_SCENARIO.md`, `docs/IMPLEMENTATION_NOTES.md`.
+
+### 2026-07-28 · [fix] · 완료 · 데모 페이스 개선 — 턴 종료를 배지로 판정(고정 대기 제거)
+- **요청(사용자)**: 쿼리 사이 딜레이가 너무 길다. 페이지 업데이트가 멈추면 바로 다음 작업으로 넘어가게.
+- **원인**: 턴 종료 판정이 `waitForStable` — `main` 텍스트를 2.5초 간격으로 폴링해 **4회 연속 무변화(≈10초)**
+  를 요구했다. 툴콜 사이 공백을 견디려고 넉넉히 잡은 값이라 매 턴 12초 이상의 꼬리가 붙었다.
+  take2에서는 steer 대기가 빈 입력창의 `보내기` 상태를 봐서 **4분 16초 정적**까지 생겼다.
+- **수정**: 앱이 이미 노출하는 정확한 신호를 쓴다.
+  - `◉ N개 작업 진행 중` 배지(`Thread.tsx` role=status, activeTurns≥1)가 **이 스레드에 도는 턴이 있는지**를
+    그대로 알려준다 → 배지가 보이면 무조건 대기, 사라진 뒤 짧은 정적(기본 1.5s)만 확인하고 진행.
+    툴콜 사이 공백을 텍스트 무변화로 오판할 위험이 없어져 **대기 창을 10초→1.5초로 줄여도 안전**하다.
+  - steer 종료 판정은 `내 답변 진행 중`(Composer role=status) 소멸로 교체(take2 결함 수정).
+  - 폴링 간격 2500ms→500ms, `waitForText` 폴링 2500ms→800ms(reload 폴백은 8초 후).
+  - 턴 사이 카메라용 정지 컷은 `DEMO_PACE`(기본 0.7) 배율로 축소 — 로그인 장면은 도입부라 원래 길이 유지.
+- **검증(take3 실측, 2026-07-28 15:17~15:22)**: 총 길이 **5분 48초**(take2 10분 52초 대비 **약 47% 단축**).
+  같은 지점(6·7 구간) 도달 2분 19초→**1분 42초**, turn 1 응답 대기 20초→**11초**,
+  steer 종료 대기 4분 16초→**30초**(`idle=true`). 조기 진행으로 인한 누락·실패는 0건.
+- 변경 파일: `frontend/e2e/demo-scenario.mjs`, `docs/DEMO_SCENARIO.md`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-07-25 · [fix] · 완료 · 빈 인자 tool_call 실행 차단(EISDIR write failed 제거) + 데모 로그인 장면 연장
 - **요청(사용자)**: 데모 영상에서 `write_file {"relPath":"","content":""}` → `write failed: EISDIR: illegal operation on a directory` 실패 버블이 노출. 원인 수정 + 재촬영. 로그인 장면이 너무 빨리 지나가므로 길게.
 - **원인**: LLM이 tool_call 인자를 빈/불량 JSON으로 방출하는 경우(스트리밍 인자 누락 또는 `JSON.parse` 실패 → `argsObj={}` 폴백), worker가 검증 없이 `relPath:''`로 FILE_WRITE 인텐트를 방출 → `resolveInsideRoot(root,'')`가 샌드박스 루트(디렉토리) 자체를 반환 → `writeFile(디렉토리)` = EISDIR. 실패가 툴콜 버블로 사용자에게 노출됨.
