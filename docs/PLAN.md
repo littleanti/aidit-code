@@ -459,5 +459,14 @@ PRD §M7 매핑. NFR + 지표 + i18n + 라이선스.
 - [x] **지표**: 글당 평균 에이전트 턴·고유 참여자·세션 성공률 — BE-METRICS.
 - [~] **배포**: 정적 프론트 + Node 서버 + 샌드박스 호스트 구조 확립(로컬 실행·검증). SQLite→Postgres는 추상화만(L10). (실 배포 파이프라인 미구성)
 - [~] **라이선스**: MIT LICENSE 존재 — XC-LICENSE. (per-file 소스 헤더는 동시 레인 충돌 회피로 연기)
-- [x] **테스트**: 통합 스위트 unit/contract/integration green(52 vitest); E2E(글→샌드박스→세션→AI 턴→도구→파일)는 pi 모킹 스캐폴드 레인(XC-T `test/e2e.test.ts`).
-- [ ] **(v2) 동시 병렬 협업(M8)**: 두 사용자의 동시 질문이 각자 독립 턴으로 동시 스트리밍(HOL blocking 0) — AR-PAR/AR-MUX; 각 AGENT_REPLY가 자기 HUMAN에 `replyToId` 1:1 귀속(배칭 0); 같은 샌드박스 동시 턴의 부수효과 직렬 적용(동시 파일 쓰기 진입 0) — XC-SERIAL; convo 단일 공유본 정합 보존(`tool_calls`↔`role:tool`, 완료 순 커밋); 동시 inflight 턴 cap + 공정 큐 — XC-CAP; `session.status` 활성 턴 수 표면화 — RT-MULTI; UI 다중 타이핑 인디케이터 공존 + 내 답글 하이라이트(term-* 새 색 0) — FE-MULTI. **한계 명시**: N× 토큰 / convo 캡 / 같은 파일 last-wins / detached 셸 직렬화 밖 / convo staleness.
+- [x] **테스트**: 통합 스위트 unit/contract/integration green — **백엔드 36파일/152건 + 프론트 9파일/127건**(2026-07-28 기준, 최초 기재값 52에서 확충); E2E(글→샌드박스→세션→AI 턴→도구→파일)는 pi 모킹 스캐폴드 레인(XC-T `test/e2e.test.ts`) + **단언형 브라우저 E2E**(`frontend/e2e/concurrent-turns.assert.mjs`).
+- [x] **(v2) 동시 병렬 협업(M8)**: 두 사용자의 동시 질문이 각자 독립 턴으로 동시 스트리밍(HOL blocking 0) — AR-PAR/AR-MUX; 각 AGENT_REPLY가 자기 HUMAN에 `replyToId` 1:1 귀속(배칭 0); 같은 샌드박스 동시 턴의 부수효과 직렬 적용(동시 파일 쓰기 진입 0) — XC-SERIAL; convo 단일 공유본 정합 보존(`tool_calls`↔`role:tool`, 완료 순 커밋); 동시 inflight 턴 cap + 공정 큐 — XC-CAP; `session.status` 활성 턴 수 표면화 — RT-MULTI; UI 다중 타이핑 인디케이터 공존 + 내 답글 하이라이트(term-* 새 색 0) — FE-MULTI. **한계 명시**: N× 토큰 / convo 캡 / 같은 파일 last-wins / detached 셸 직렬화 밖 / convo staleness.
+  - **완료 근거(2026-07-28 실측)**: ① HOL blocking 제거 — `B TTFT ~ L` 회귀 기울기 직렬 1.000 vs 병렬 **0.000**, L=15s에서 14930→235ms(n=20/셀, EXPERIMENTS §E2) ② 부수효과 직렬 — 락 우회 시 같은 파일 동시 쓰기 위반률 **74%**·최종 파일 오염, 락 적용 시 **0%**(§E1 W1) ③ 1:1 귀속·동시 스트리밍·활성 턴 표면화 — **실제 브라우저 2개**에서 단언 통과, 직렬 계약 음성 대조군은 겹침 −277ms로 실패(테스트가 실제로 분별함을 증명).
+  - **적용 범위(정직히)**: ①의 큰 이점은 동시 질문이 **추론 중심**일 때 성립한다. 두 턴이 모두 파일을 수정하면 직렬 실행기가 병목이 되어 **1.07×(결정적)~1.35×(실 LLM)** 로 줄어든다(§E2-B). 부수효과 직렬화를 택한 계약의 필연적 귀결이며, 대가로 파일 깨짐 0·머지 불필요·1:1 귀속을 얻는다.
+
+### 후속(범위 밖 — 별도 판단 필요)
+
+- **논문 실험 잔여**: E1 W1b(디렉토리 레이스)·W2(convo 짝 정합 — 워커에 `BENCH_COMMIT=naive` 게이트 신설 필요)·E3(스케일 스윕)·E4(적대적 격리)·E6(사용자 연구). **사용자 결정으로 후속 시행**.
+  - E3 는 로컬 단일 LLM 인스턴스로는 측정 불가(상류 큐가 교란변수 — 우리 cap 포화와 구분 불가). E4 는 모델 행동 자체가 측정 대상이라 로컬 무제한 모델(ollama 등)이 적합.
+- **운영 담당**: CI 파이프라인·컨테이너 격리는 **실 서버 배포 시 구축**(README §6, TRD §6.3). 적용할 컨테이너 플래그는 이미 실측 검증됨(PASS 7/FAIL 0, EXPERIMENTS 부록 B).
+- **문서 정합**: `PATENT.html`/`PAPER.html` 은 부수효과 직렬화를 "샌드박스 단위"로 서술한다. XC-SCOPE 는 이를 "충돌하는 부수효과를 직렬화"로 일반화한 것이다(보장 동일, 입도만 세분화). 청구항 문구 조정은 별도 판단 대상으로 **미처리**.

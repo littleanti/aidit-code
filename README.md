@@ -351,9 +351,15 @@ npm run bench:e2:render                # → docs/assets/e2-hol-cdf.svg
 |---|---|
 | [docs/PRD.md](./docs/PRD.md) | 제품 요구사항 — 목적·문제 정의·기능 범위 (v2 병렬 협업 포함) |
 | [docs/TRD.md](./docs/TRD.md) | 기술 요구사항 — 아키텍처·보안(키 관리 §2·§8)·계약 |
-| [docs/PLAN.md](./docs/PLAN.md) | 마일스톤 계획 M1~M7(v0.1) + M8(v2 동시 병렬 협업) — 전부 완료 |
+| [docs/PLAN.md](./docs/PLAN.md) | 마일스톤 계획 M1~M7(v0.1) + M8(v2 동시 병렬 협업) — 전부 완료(근거 실측 첨부) + 후속 과제 |
 | [docs/WIREFRAME.md](./docs/WIREFRAME.md) | 화면 설계 + CRT 레트로 터미널 디자인 시스템 SoT (`term-*` 토큰) |
 | [docs/IMPLEMENTATION_NOTES.md](./docs/IMPLEMENTATION_NOTES.md) | 변경 이력(Changelog) — 문서-우선(Docs-before-code) 규칙의 기본 문서 |
+| **[docs/EXPERIMENTS.md](./docs/EXPERIMENTS.md)** | **측정 실험 — E2(HOL 지연 분포, n=180)·E2-B(락 경합)·E1(직렬 실행기 ablation)·XC-SCOPE·부록 B(컨테이너 격리 PoC) 실측 결과와 한계** |
+| [docs/BUSINESS_VALUE.md](./docs/BUSINESS_VALUE.md) | 비즈니스 가치 — ICP·쐐기 유스케이스·원가/과금·해자(실측 근거 연결) |
+| [docs/PATENT.html](./docs/PATENT.html) · [docs/PAPER.html](./docs/PAPER.html) | 특허 명세서 · IEEE 형식 논문 (중심 주제: 병렬 추론 + 직렬 부수효과) |
+
+> **핵심 주장의 증거는 `docs/EXPERIMENTS.md`에 있습니다.** 모든 수치는
+> `backend/bench/out/*.jsonl`(원자료)에서 기계 생성되며 `npm run bench:e2` / `bench:e1` 로 재현됩니다.
 
 작업 규칙은 [CLAUDE.md](./CLAUDE.md) / `AGENTS.md`의 Ground Rules(문서 업데이트 → 구현 → 검증 → 완료 표시 → 커밋)를 따릅니다.
 
