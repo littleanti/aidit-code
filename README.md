@@ -313,7 +313,11 @@ npm run bench:e2:render                # → docs/assets/e2-hol-cdf.svg
 | 항목 | 이 리포의 상태 | 실 서버에서 할 일 |
 |---|---|---|
 | **CI 파이프라인** | 워크플로 파일 없음(GitHub 미사용) | 위 "테스트/검증" 명령을 그대로 호출하면 됨 — 게이트는 `npm test`·`npm run typecheck`·`npm run keygate` 3종 |
-| **컨테이너 격리** | 호스트 디렉토리 격리 + 경로 가드 + ENV 화이트리스트 + 프로세스/타임아웃 상한까지만 | `--network none`, read-only 마운트, 메모리/CPU 쿼터(cgroup v2). TRD §6.3 참조 |
+| **컨테이너 격리** | 호스트 디렉토리 격리 + 경로 가드 + ENV 화이트리스트 + 프로세스/타임아웃 상한까지만 | `--network none`, read-only 마운트, 메모리/CPU/PID 쿼터. **적용할 플래그는 이미 실측 검증됨** — `npm run bench:docker-poc`([결과](./docs/EXPERIMENTS.md) 부록 B, PASS 7/FAIL 0). TRD §6.3 참조 |
+
+> ⚠️ 현행 격리의 실측된 구멍 3개(부록 B): ① 아웃바운드 네트워크 무제한
+> ② `SHELL` 명령 문자열 안의 `../` 상대경로 탈출(경로 가드는 `FILE_*` 인자만 검사)
+> ③ 메모리 상한 없음. 셋 다 위 컨테이너 플래그로 닫히며, 실 서버 배포 시 적용 대상이다.
 
 > 참고: 샌드박스 셸은 **부모 `process.env`를 상속하지 않는다**(TRD §6.3-(d) XC-ENV).
 > 운영자 LLM 키는 화이트리스트에서 제외되며, `backend/test/security/sandboxEnv.test.ts`가 회귀를 감시한다.

@@ -11,6 +11,111 @@
 
 ## Changelog
 
+### 2026-07-28 · [test] · 완료 · 프론트엔드 테스트 확충 — 보안 초크포인트·스토어·REST 클라이언트
+- **요청(사용자)**: "프론트 테스트도 확충해줘".
+- **현황(착수 전)**: 프론트 테스트는 `src/lib/threadSelectors.test.ts` **1개 파일 / 19건**뿐.
+  백엔드가 33 파일 / 131건인 것과 대비되는 최대 공백이었다. 특히
+  `src/lib/sanitize.ts`(XSS 살균 초크포인트, `dangerouslySetInnerHTML` 직전 마지막 방어선)가
+  **테스트 0건**이라 회귀가 곧 저장형 XSS로 이어질 수 있는 상태였다.
+- **범위(순수 로직·스토어 우선, 컴포넌트 렌더는 비범위)**:
+  | 대상 | 왜 |
+  |---|---|
+  | `lib/sanitize.ts` | **보안 최우선** — script/이벤트핸들러/`javascript:`·`data:` URL/iframe 차단, allowlist 밖 태그 제거, 파서 throw 시 escape 폴백 |
+  | `stores/threadStore.ts` | 305줄, 스레드 UI의 심장 — seq 정렬·id/seq 이중 dedupe·낙관적 삽입 reconcile·토큰 누적·툴콜 패치 |
+  | `api/rest.ts` | Bearer 인터셉터·`ApiError` 상태 매핑(네트워크 0)·`assetUrl` |
+  | `i18n/resolve.ts`·`serverError.ts` | 키 해석 폴백 순서(lang→ko→raw), 서버 오류 → 큐레이트된 키 매핑(원문 누출 금지) |
+  | `stores/workspaceStore.ts` | `file.changed` 적용·rev 단조 증가 |
+  | `stores/authStore.ts` | **키 형태 필드 부재 단언**(HARD RULE 회귀 방어) |
+  | `lib/shellArg.ts`·`lib/time.ts` | 공백 collapse·트렁케이트·로케일 포맷 |
+- **환경 변경**: `jsdom` devDependency 추가 + `vitest.config.ts` 기본 환경을 `node` → `jsdom` 으로.
+  이유: DOMPurify 는 DOM 이 있어야 동작하고, `langStore`/`authStore` 는 `navigator`·`localStorage`·
+  `document` 에 접근한다(persist 미들웨어). 기존 `threadSelectors.test.ts` 는 jsdom 에서도 그대로 통과.
+- **비범위(정직히)**: 컴포넌트 렌더 테스트(`*.tsx`)는 이번에 넣지 않는다 —
+  `@testing-library/react` 도입은 별도 결정 사항. `useThreadStream`(SSE 훅)도 React 렌더러가 필요해 후속.
+- **결과: 1 파일 / 19건 → 9 파일 / 127건** (typecheck·프로덕션 빌드 통과):
+
+  | 파일 | 건수 | 비중 있는 단언 |
+  |---|---|---|
+  | `lib/sanitize.test.ts` | 17 | script/on\*/`javascript:`·`data:`/iframe·form·style·data-\* 차단, 난독화 벡터, allowlist 통과, 코드 마스킹, 폴백 |
+  | `stores/threadStore.test.ts` | 22 | seq 정렬 불변식, id vs seq 이중 dedupe, 낙관적 reconcile 멱등, **동시 2턴 토큰 비혼입**, 미도착 메시지 이벤트 무시 |
+  | `i18n/resolve.test.ts` | 16 | 폴백 순서, **ko/en 키 집합 일치(번역 누락 감시)**, 오류키가 사전에 실제 존재하는지 |
+  | `api/rest.test.ts` | 13 | Bearer 부착/미부착, `ApiError` 상태 매핑, 빈 본문 관용, **키 형태 필드 부재** |
+  | `lib/time.test.ts` | 12 | 단위 버킷 선택, 로케일 전환, `document.lang` 동기화 |
+  | `stores/workspaceStore.test.ts` | 10 | rev 단조 증가(재조회 트리거), clearChanged no-op 참조 동일성 |
+  | `lib/shellArg.test.ts` | 10 | 공백 collapse, 트렁케이트→이스케이프 **순서 계약** |
+  | `stores/authStore.test.ts` | 8 | persist 페이로드가 신원 3필드만, 키 형태 문자열 부재 |
+  | `lib/threadSelectors.test.ts` | 19 | (기존) |
+- **부수 발견**: `sanitize.test.ts` 가 `data:` URL 카브아웃을 잡아냈다(아래 별 항목).
+- **테스트 자체의 오류 2건을 수정**(코드가 아니라 단언이 틀렸던 경우 — 정직히 기록):
+  `relativeTime` 은 `style:'narrow'` 라 "5h ago" 를 내고 `numeric:'auto'` 라 -1일에 "yesterday" 를 낸다.
+  처음 쓴 정규식이 이를 반영하지 못했다 → 문구 매칭 대신 **단위 버킷 선택**을 숫자 크기로 검증하도록 교체.
+- 변경 파일: `frontend/src/lib/{sanitize,shellArg,time}.test.ts`,
+  `frontend/src/i18n/resolve.test.ts`,
+  `frontend/src/stores/{threadStore,workspaceStore,authStore}.test.ts`,
+  `frontend/src/api/rest.test.ts`, `frontend/vitest.config.ts`, `frontend/package.json`(jsdom).
+
+### 2026-07-28 · [fix] · 완료 · sanitize.ts — 선언된 URL allowlist 를 실제로 강제(data: 카브아웃 차단)
+- **발견 경위**: 위 프론트 테스트 확충 작업에서 신규 `sanitize.test.ts` 가 잡아냈다.
+- **불일치**: `sanitize.ts:25` 주석은 *"이미지/링크 URL 은 ALLOWED_URI_REGEXP 로 http(s)/mailto 만
+  통과(javascript:/data: 차단)"* 라고 선언하는데, 실제로는 **`<img src="data:...">` 가 통과**한다.
+  - 원인: DOMPurify 는 `ALLOWED_URI_REGEXP` 검사에 실패해도 별도 분기로
+    `(src|href|xlink:href) && tag !== 'script' && value.startsWith('data:') && DATA_URI_TAGS[tag]`
+    이면 허용한다(`purify.cjs.js:1646`). `DEFAULT_DATA_URI_TAGS` 에 **`img` 가 포함**돼 있다.
+  - 설정으로는 못 뺀다 — `ADD_DATA_URI_TAGS` 는 `_resolveSetOption(..., base: DEFAULT_DATA_URI_TAGS)`
+    라 기본 집합에 **더하기만** 가능하다.
+- **심각도: 낮음(과장 금지)**. `<img>` 는 HTML/스크립트를 실행하지 않으며, `data:image/svg+xml` 을
+  `<img src>` 로 넣어도 SVG 내부 스크립트는 명세상 실행되지 않는다. 즉 **직접적인 XSS 는 아니다.**
+  실제 영향은 ① 모듈이 스스로 선언한 보안 계약이 거짓이라는 점 ② CSP `img-src` 우회 및 임의 바이트
+  임베드(대용량 페이로드) 허용 ③ 향후 `object`/`iframe` 허용 시 실제 실행 벡터로 승격될 여지.
+- **수정 방침**: `afterSanitizeAttributes` 훅으로 `href`/`src`/`xlink:href` 에 URL allowlist
+  (`^(?:https?:|mailto:)`)를 **직접 재강제**하고 위반 속성을 제거한다. DOMPurify 의 data: 분기보다
+  훅이 나중에 돌므로 카브아웃을 확실히 덮는다. 훅은 모듈 로드 시 1회만 설치(멱등 가드).
+  - 상대경로 URL 동작은 **변하지 않는다** — 현재도 엄격 `ALLOWED_URI_REGEXP` 때문에 이미 제거된다
+    (첨부 이미지는 마크다운이 아니라 `imageUrl` 필드로 렌더되므로 영향 없음).
+- **검증(완료)**: `sanitize.test.ts` **17건 전부 통과** — data: 벡터가 차단되고, http/https/mailto
+  링크·이미지·코드펜스·표 등 allowlist 통과 케이스는 그대로 렌더된다. 프론트 typecheck·빌드 통과.
+  상대경로 URL 동작은 변화 없음(엄격 `ALLOWED_URI_REGEXP` 때문에 이전에도 제거됐다).
+- 변경 파일: `frontend/src/lib/sanitize.ts`, `frontend/src/lib/sanitize.test.ts`.
+
+### 2026-07-28 · [test] · 완료 · Docker 샌드박스 격리 PoC — 실코드 미반영, 검증 전용
+- **요청(사용자)**: "docker 그냥 다시 켰으니 docker로 샌드박스 격리하는 테스트(poc)도 해줘.
+  **실 코드는 반영하지 말고.**"
+- **성격**: `backend/src/**` 를 **일절 수정하지 않는다**. 제품 실행 경로는 지금처럼 호스트 디렉토리
+  격리 + 경로 가드 + ENV 화이트리스트를 유지하고, 컨테이너 격리는 **실 서버 배포 시 운영자 담당**
+  이라는 기존 결정(README §6 · TRD §6.3)을 그대로 둔다. 이 PoC 는 "그때 무엇을 쓰면 되는지"를
+  **실측으로 증명해 두는 참고 자료**다.
+- **검증 항목(각각 PASS/FAIL 로 기계 판정)**:
+  1. `--network none` — 아웃바운드 차단(현재 PoC 는 무제한: `limits.ts` 가 플래그만 기록)
+  2. 바인드 마운트 범위 — 컨테이너가 샌드박스 디렉토리 **밖** 호스트 파일을 볼 수 없음
+  3. `--read-only` + `--tmpfs` — 루트 파일시스템 쓰기 거부, 작업 디렉토리만 쓰기 가능
+  4. `--memory` — 상한 초과 시 OOM kill(현재 PoC 는 메모리 제한 없음)
+  5. `--pids-limit` — fork bomb 차단(현재는 best-effort 카운터뿐)
+  6. `--cpus` — CPU 쿼터 적용
+  7. 벽시계 타임아웃 + 컨테이너 강제 종료·정리
+  8. **대조군**: 같은 공격을 호스트 실행 경로(현행 `toolExec`)로 돌렸을 때의 결과 —
+     무엇이 실제로 뚫리는지 나란히 보여준다(과장 없이 격차를 수치화).
+- **판정 원칙**: Docker 미설치·데몬 미가동이면 **SKIP 으로 명확히 표시**하고 실패로 위장하지 않는다.
+- **실측 결과: PASS 7 · FAIL 0 · MEASURED 1** (Docker 29.5.3 linux · `node:20-alpine` · Windows 10 호스트).
+  상세 표는 `docs/EXPERIMENTS.md` 부록 B, 원자료는 `backend/bench/out/docker-isolation.json`.
+  - **컨테이너가 막고 현행 호스트 실행이 못 막는 항목 3건**:
+    ① 아웃바운드 네트워크 ② **`SHELL` 명령의 `../` 상대경로 탈출** ③ 메모리 상한.
+  - CPU 쿼터(`--cpus 0.5`): 2초 벽시계에 컨테이너 CPU 1.09초 vs 호스트 2.08초 — 쿼터 작동 확인.
+  - 과잉 차단이 아님도 함께 확인 — 작업 디렉토리 쓰기는 여전히 성공(검사 #4).
+- **중요 부수 발견 → TRD 정정**: `pathGuard` 는 **`FILE_*` 도구의 `relPath` 인자만** 검사하므로
+  `cat ../package.json` 한 줄로 샌드박스 밖 리포 파일을 읽을 수 있다(실측). TRD §6.2의
+  "경계는 경로 탈출뿐" 서술이 셸 경로에서는 성립하지 않는다는 뜻이라 **§6.3-(a)에 한계를 명시**했다.
+  셸 인자 파싱으로 막는 것은 파이프·변수전개·서브셸 때문에 신뢰할 수 없으므로 정공법은 마운트 범위다.
+- **하네스 자체 버그 2건을 수정**(정직히 기록 — 처음 실행에서 FAIL 2건이 났고, 둘 다 Docker 의
+  격리 실패가 아니라 **내 검사 명령의 결함**이었다):
+  ① `host-fs-scope`: `node -e "…"` 안에 `JSON.stringify` 경로를 넣어 따옴표가 깨져
+     컨테이너·호스트 **양쪽 다 SyntaxError** 로 죽었다 → 따옴표 중첩 없는 `cat ../package.json` 으로 교체.
+  ② `pids-limit`: `2>/dev/null` 로 fork 실패 메시지를 버려 판정 근거를 스스로 삭제했다.
+     실제로는 `sh: can't fork: Resource temporarily unavailable`(exit 2)로 **정상 차단**되고 있었다
+     → 판정식이 fork 실패 메시지와 프로세스 수 둘 중 하나를 증거로 받도록 수정.
+- 변경 파일: `backend/bench/docker-isolation-poc.mjs`(신규), `backend/bench/out/docker-isolation.json`,
+  `backend/package.json`, `.gitignore`, `docs/EXPERIMENTS.md`(부록 B 신설),
+  `docs/TRD.md`(§6.3-(a) 한계 명시), `README.md`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-07-28 · [fix] · 완료 · 턴 진행 중 게시글 삭제 시 **백엔드 프로세스 크래시**(P2025 unhandled) 차단
 - **발견 경위**: E2 하네스(위 항목) 실측 중 180런 가운데 **39런 실패**. 원인 추적 결과 드라이버의
   `fetch failed` 는 증상이고, 실제로는 **서버 프로세스가 죽어** 이후 모든 런이 연쇄 실패한 것이었다.

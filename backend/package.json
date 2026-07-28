@@ -16,6 +16,7 @@
     "bench:mock-llm": "node bench/mockLlm.mjs",
     "bench:e2": "node bench/e2-hol.mjs",
     "bench:e2:render": "node bench/render-cdf.mjs",
+    "bench:docker-poc": "node bench/docker-isolation-poc.mjs",
     "backfill:comment-count": "tsx scripts/backfill-comment-count.ts"
   },
   "dependencies": {

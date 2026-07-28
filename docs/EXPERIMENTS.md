@@ -342,6 +342,66 @@ npm run bench:e2 && npm run bench:e2:render
 
 ---
 
+## 부록 B. 컨테이너 격리 PoC 실측 (2026-07-28) — 검증 전용·실코드 미반영
+
+> 하네스: `backend/bench/docker-isolation-poc.mjs` · 실행 `npm run bench:docker-poc`
+> 결과 원본: `backend/bench/out/docker-isolation.json`
+> **성격**: `backend/src/**` 를 수정하지 않는다. 제품 실행 경로는 그대로 호스트 디렉토리 격리 +
+> 경로 가드 + ENV 화이트리스트를 쓰고, 컨테이너 격리는 **실 서버 배포 시 운영자 담당**이라는
+> 기존 결정(README §6 · TRD §6.3)을 유지한다. 이 PoC 는 "그때 무엇을 쓰면 실제로 막히는가"를
+> 미리 측정해 둔 참고 자료다.
+
+환경: Docker 29.5.3(linux 컨테이너) · 이미지 `node:20-alpine` · Windows 10 호스트.
+각 항목을 **컨테이너 실행(제안)** 과 **호스트 실행(현행 제품 경로와 동등)** 으로 나란히 돌렸다.
+
+| # | 검사 | 컨테이너 | 호스트(현행) | 근거 플래그 |
+|---|---|---|---|---|
+| 1 | 아웃바운드 네트워크 차단 | **차단** | **뚫림** | `--network none` |
+| 2 | 샌드박스 밖 파일 접근(`cat ../package.json`) | **차단** | **뚫림** | 바인드 마운트 범위 |
+| 3 | 루트 파일시스템 쓰기 | **차단** | (대조 생략) | `--read-only --tmpfs /tmp` |
+| 4 | 작업 디렉토리 쓰기 — *허용되어야 정상* | **허용** | 허용 | 바인드 마운트 rw |
+| 5 | 메모리 상한(256m에 1.5GB 요구) | **OOM 차단** | **뚫림** | `--memory --memory-swap` |
+| 6 | PID 상한(300 fork 시도) | **차단**(`sh: can't fork`) | (대조 생략) | `--pids-limit 32` |
+| 7 | 벽시계 타임아웃 후 컨테이너 정리 | **정리됨** | (기존 테스트로 검증) | `--rm` + SIGKILL |
+| 8 | CPU 쿼터 | 2초 벽시계에 **CPU 1.09초** | CPU 2.08초 | `--cpus 0.5` |
+
+**PASS 7 · FAIL 0 · MEASURED 1.** 호스트 대조가 생략된 3·6·7은 각각 플랫폼 차이(Windows에
+`/usr/local` 없음)·개발 머신 위험(300 프로세스 fork)·기존 테스트 중복(`toolTimeout.test.ts`) 때문이며,
+"막혔다"고 주장하지 않고 SKIP 으로 표시했다.
+
+### 실측이 드러낸 것 — 현행 격리의 실제 구멍 3개
+
+1. **네트워크 무제한.** `limits.ts` 가 정직히 적어둔 대로 `networkPolicy` 는 meta 에 기록만 되고
+   강제되지 않는다. 샌드박스에서 임의 코드가 도는 제품에서 이건 데이터 유출·SSRF·채굴의 1차 통로다.
+2. **셸의 `../` 상대경로 탈출.** `pathGuard.resolveInsideRoot` 는 **FILE_\* 도구의 `relPath` 인자만**
+   검사한다. `SHELL` 명령 **문자열 안의** `../` 는 검사 대상이 아니므로, 에이전트가
+   `cat ../package.json` 한 줄로 리포 파일을 읽을 수 있다(실측 확인).
+   TRD §6.2가 "샌드박스 내부는 모든 permission 허용, 경계는 경로 탈출뿐"이라고 선언하는데,
+   셸 경로에서는 그 경계가 실제로 서 있지 않다. **컨테이너는 이걸 마운트 범위로 자동 해결한다** —
+   호스트 파일이 애초에 파일시스템에 존재하지 않으므로 경로 검사 자체가 불필요해진다.
+3. **메모리 상한 없음.** 한 세션이 호스트 메모리를 삼키면 모든 게시글의 SSE 연결이 함께 죽는다.
+
+> 위 3개는 **알려진 한계의 수치화**이지 새로 생긴 결함이 아니다(TRD §6.3이 컨테이너 강화를
+> Out of Scope 로 명시). 다만 2번은 TRD §6.2의 서술과 실제 동작이 어긋나므로 §6.3에 정정 반영했다.
+
+### 실 서버 적용 시 그대로 옮길 플래그
+
+```
+docker run --rm \
+  --network none \
+  -v <sandboxDir>:/work -w /work \
+  --read-only --tmpfs /tmp:rw,size=16m \
+  --memory 256m --memory-swap 256m \
+  --pids-limit 64 --cpus 1 \
+  --security-opt no-new-privileges --cap-drop ALL \
+  node:20-alpine sh -c '<command>'
+```
+
+미검증 항목(정직히): 이미지 빌드 파이프라인, 컨테이너 재사용 vs 매 호출 생성의 지연 비용,
+패키지 설치(`PACKAGE` 도구)에 필요한 네트워크 예외 설계, seccomp/AppArmor 프로파일.
+
+---
+
 ## 실행 우선순위·비용 추정
 
 | 순서 | 실험 | 신규 구현물 | 예상 비용(구현+실행) |

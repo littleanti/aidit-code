@@ -1,0 +1,166 @@
+{
+  "image": "node:20-alpine",
+  "platform": "win32",
+  "note": "검증 전용 PoC — backend/src 는 수정하지 않는다. 컨테이너 격리는 실 서버 배포 담당.",
+  "docker": {
+    "ok": true,
+    "version": "29.5.3"
+  },
+  "checks": [
+    {
+      "id": "network-none",
+      "title": "아웃바운드 네트워크 차단",
+      "why": "샌드박스에서 임의 코드가 돈다 — 데이터 유출·SSRF·암호화폐 채굴의 1차 통로",
+      "container": {
+        "exitCode": 9,
+        "killed": false,
+        "output": "BLOCKED ECONNREFUSED",
+        "ms": 530
+      },
+      "host": {
+        "exitCode": 0,
+        "output": "RESOLVED 104.20.23.154",
+        "ms": 115
+      },
+      "containerBlocked": true,
+      "hostBlocked": false,
+      "status": "PASS"
+    },
+    {
+      "id": "host-fs-scope",
+      "title": "샌드박스 밖 호스트 파일 접근 차단 (상대경로 탈출)",
+      "why": "pathGuard 는 FILE_* 도구의 relPath 인자만 검사한다. SHELL 명령 문자열 안의 `../` 는 검사 대상이 아니므로, 현행 호스트 실행에서는 셸 한 줄로 리포 파일을 읽을 수 있다",
+      "container": {
+        "exitCode": 1,
+        "killed": false,
+        "output": "cat: can't open '../package.json': No such file or directory",
+        "ms": 469
+      },
+      "host": {
+        "exitCode": 0,
+        "output": "{\n  \"name\": \"aidit-code-backend\",\n  \"version\": \"0.1.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"description\": \"Aidit-Code backend — Node 20 + Fastify + TypeScript + Prisma\",\n  \"scripts\": {\n    \"dev\": \"tsx watch src/app.ts\",\n    \"start\": \"tsx src/app.ts\",\n    \"build\": \"tsc\",\n    \"typecheck\": \"tsc -",
+        "ms": 73
+      },
+      "containerBlocked": true,
+      "hostBlocked": false,
+      "status": "PASS"
+    },
+    {
+      "id": "readonly-rootfs",
+      "title": "루트 파일시스템 쓰기 차단",
+      "why": "런타임 바이너리·설정 변조로 다음 세션을 오염시키는 경로를 끊는다",
+      "container": {
+        "exitCode": 0,
+        "killed": false,
+        "output": "BLOCKED EROFS",
+        "ms": 586
+      },
+      "host": {
+        "skipped": "Windows 호스트엔 /usr/local 이 없어 대조 의미 없음"
+      },
+      "containerBlocked": true,
+      "hostBlocked": null,
+      "status": "PASS"
+    },
+    {
+      "id": "workdir-writable",
+      "title": "작업 디렉토리는 여전히 쓰기 가능 (과잉 차단 아님)",
+      "why": "격리가 제품 기능(파일 생성)을 깨면 쓸 수 없다 — 반드시 함께 확인",
+      "container": {
+        "exitCode": 0,
+        "killed": false,
+        "output": "WROTE ok",
+        "ms": 530
+      },
+      "host": {
+        "exitCode": 0,
+        "output": "WROTE ok",
+        "ms": 104
+      },
+      "status": "PASS"
+    },
+    {
+      "id": "memory-cap",
+      "title": "메모리 상한 강제 (OOM kill)",
+      "why": "한 세션이 호스트 메모리를 삼키면 모든 게시글의 SSE 가 함께 죽는다",
+      "container": {
+        "exitCode": 137,
+        "killed": false,
+        "output": "",
+        "ms": 855
+      },
+      "host": {
+        "exitCode": 0,
+        "output": "ALLOCATED",
+        "ms": 605
+      },
+      "containerBlocked": true,
+      "hostBlocked": false,
+      "status": "PASS"
+    },
+    {
+      "id": "pids-limit",
+      "title": "PID 상한 강제 (fork bomb 차단)",
+      "why": "best-effort 카운터는 도구 호출 단위만 세고, 셸이 스스로 fork 하는 것은 못 막는다",
+      "container": {
+        "exitCode": 2,
+        "killed": false,
+        "output": "sh: can't fork: Resource temporarily unavailable",
+        "ms": 468
+      },
+      "host": {
+        "skipped": "호스트에서 300 프로세스 fork 는 개발 머신에 위험 — 의도적으로 미실행"
+      },
+      "containerBlocked": true,
+      "hostBlocked": null,
+      "status": "PASS"
+    },
+    {
+      "id": "cpu-quota",
+      "title": "CPU 쿼터 적용",
+      "why": "무한 루프 한 개가 코어를 독점하면 다른 세션의 응답이 굶는다",
+      "container": {
+        "exitCode": 0,
+        "killed": false,
+        "output": "CPU_US 1087376",
+        "ms": 2577
+      },
+      "host": {
+        "exitCode": 0,
+        "output": "CPU_US 2077000",
+        "ms": 2099
+      },
+      "status": "MEASURED",
+      "containerCpuUs": 1087376,
+      "hostCpuUs": 2077000
+    },
+    {
+      "id": "timeout-kill",
+      "title": "벽시계 타임아웃 시 컨테이너 강제 종료·정리",
+      "why": "--rm 과 kill 이 함께 동작해야 좀비 컨테이너가 쌓이지 않는다",
+      "container": {
+        "exitCode": null,
+        "killed": true,
+        "output": "",
+        "ms": 3020
+      },
+      "host": {
+        "skipped": "호스트 타임아웃은 이미 limits.ts + toolTimeout.test.ts 로 검증됨"
+      },
+      "containerBlocked": true,
+      "hostBlocked": null,
+      "status": "PASS"
+    }
+  ],
+  "summary": {
+    "pass": 7,
+    "fail": 0,
+    "measured": 1,
+    "gapCount": 3,
+    "gaps": [
+      "network-none",
+      "host-fs-scope",
+      "memory-cap"
+    ]
+  }
+}
