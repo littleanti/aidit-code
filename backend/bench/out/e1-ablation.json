@@ -1,0 +1,51 @@
+{
+  "results": [
+    {
+      "lock": "on",
+      "writers": 4,
+      "writesPerWriter": 12,
+      "payloadKiB": 4096,
+      "snapshotsClassified": 158,
+      "counts": {
+        "intact": 0,
+        "mixed": 0,
+        "broken": 0,
+        "partial": 158
+      },
+      "violations": 0,
+      "violationRate": 0,
+      "finalClass": "intact,intact,intact",
+      "wallMs": 5733,
+      "repeats": 3,
+      "finalClasses": [
+        "intact",
+        "intact",
+        "intact"
+      ]
+    },
+    {
+      "lock": "off",
+      "writers": 4,
+      "writesPerWriter": 12,
+      "payloadKiB": 4096,
+      "snapshotsClassified": 50,
+      "counts": {
+        "intact": 0,
+        "mixed": 37,
+        "broken": 0,
+        "partial": 13
+      },
+      "violations": 37,
+      "violationRate": 0.74,
+      "finalClass": "mixed,mixed,mixed",
+      "wallMs": 4019,
+      "repeats": 3,
+      "finalClasses": [
+        "mixed",
+        "mixed",
+        "mixed"
+      ]
+    }
+  ],
+  "verdict": "CONFIRMED — 락이 있으면 0, 빼면 깨진다(락은 장식이 아니다)"
+}

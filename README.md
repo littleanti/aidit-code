@@ -43,6 +43,11 @@ A가 길이 L의 작업을 시작하고 **1초 뒤** B가 한 줄 질문을 던�
 
 ![B TTFT CDF (L=15s)](./docs/assets/e2-hol-cdf.svg)
 
+**20초 대비 클립**: [`docs/assets/hol-clip.mp4`](./docs/assets/hol-clip.mp4) — 왼쪽(직렬)에서 바다의
+대기 카운터가 실시간으로 14.93초까지 올라가는 동안, 오른쪽(병렬)은 0.23초에 응답을 시작한다.
+수치는 위 실측 상수에서 결정적으로 생성되므로 표·그림과 절대 어긋나지 않는다
+(재생성: `cd frontend && npm run clip:hol`).
+
 핵심은 배수(L=15s에서 63.5배)가 아니라 **기울기 0**입니다 — 남의 작업이 얼마나 길든 내 대기는 늘지 않습니다.
 재현: `cd backend && npm run bench:e2` (모의 LLM 사용 — 실 LLM 키·네트워크 불필요).
 
@@ -295,6 +300,19 @@ npm test              # vitest run
 npm run typecheck     # tsc --noEmit
 npm run build         # tsc -b && vite build (프로덕션 빌드 검증)
 ```
+
+### E2E 단언 테스트 · 발표용 클립
+
+```bash
+cd frontend
+npm run e2e:concurrent          # 실제 브라우저 2개로 v2 계약 검증(실패 시 exit 1)
+E2E_CONCURRENT=0 npm run e2e:concurrent   # 음성 대조군 — 직렬 계약이면 겹침 단언이 실패해야 정상
+npm run clip:hol                # docs/assets/hol-clip.mp4 재생성(20초 HOL 대비)
+```
+
+`e2e:concurrent`는 **단언형**이다(기존 `demo-scenario.mjs`는 녹화 전용으로 단언이 없다).
+핵심 분별자는 "두 AGENT_REPLY가 시간상 겹쳐 자라는가" — 직렬 계약에서는 겹침이 음수가 되어 실패한다.
+브라우저는 `npx playwright install chromium`으로 1회 준비한다.
 
 ### 성능 실험 (E2 — HOL 지연 분포)
 

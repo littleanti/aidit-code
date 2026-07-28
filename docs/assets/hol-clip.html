@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>HOL 대비 — 직렬 vs 병렬</title>
+<style>
+  /* 부모 Aidit 그린 인광 CRT 팔레트 계승(term-* 톤). 신규 색 도입 없음. */
+  :root {
+    --bg: #050a06;
+    --panel: #0a1410;
+    --grid: #14251a;
+    --green: #35e07f;
+    --green-dim: #1c7a45;
+    --amber: #ffb454;
+    --red: #ff6b6b;
+    --dim: #6f8a78;
+    --text: #d7f5e3;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1280px; height: 720px; overflow: hidden; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace;
+    display: flex; flex-direction: column;
+    /* CRT 스캔라인 */
+    background-image: repeating-linear-gradient(
+      to bottom, rgba(53,224,127,0.035) 0 1px, transparent 1px 3px
+    );
+  }
+
+  header { padding: 18px 28px 10px; }
+  h1 { font-size: 22px; letter-spacing: .04em; color: var(--green); font-weight: 600; }
+  .sub { color: var(--dim); font-size: 13px; margin-top: 4px; }
+
+  .split { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 8px 20px 0; }
+  .pane {
+    background: var(--panel); border: 1px solid var(--grid); border-radius: 4px;
+    padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; position: relative;
+  }
+  .pane.serial { border-color: #3a1f1f; }
+  .pane.parallel { border-color: #17452c; }
+  .pane h2 { font-size: 15px; letter-spacing: .06em; }
+  .serial h2 { color: var(--red); }
+  .parallel h2 { color: var(--green); }
+  .pane .contract { color: var(--dim); font-size: 12px; margin-top: -8px; }
+
+  .row { display: flex; flex-direction: column; gap: 5px; }
+  .who { font-size: 12px; color: var(--dim); display: flex; justify-content: space-between; }
+  .who b { color: var(--text); font-weight: 500; }
+  .track {
+    height: 22px; background: #071009; border: 1px solid var(--grid);
+    border-radius: 2px; position: relative; overflow: hidden;
+  }
+  .fill { position: absolute; inset: 0 auto 0 0; width: 0; }
+  .fill.work { background: linear-gradient(90deg, var(--green-dim), var(--green)); }
+  .fill.wait { background: repeating-linear-gradient(45deg, #2a1414 0 6px, #3a1c1c 6px 12px); }
+  .fill.tokens { background: linear-gradient(90deg, #1c7a45, var(--green)); }
+  .label {
+    position: absolute; inset: 0; display: flex; align-items: center;
+    padding: 0 8px; font-size: 11px; letter-spacing: .04em; z-index: 2;
+    text-shadow: 0 0 6px #000;
+  }
+  .wait .label, .waitlabel { color: var(--red); }
+
+  /* 가운데 라이브 카운터 — 이 클립의 감정적 핵심("바다는 얼마나 기다리고 있나"). */
+  .waitbig {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 6px;
+  }
+  .waitbig .cap2 { font-size: 12px; color: var(--dim); letter-spacing: .06em; }
+  .waitbig .big {
+    font-size: 72px; font-weight: 700; line-height: 1; letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .serial .waitbig .big { color: var(--red); }
+  .parallel .waitbig .big { color: var(--green); }
+  .waitbig .state { font-size: 12px; }
+  .serial .waitbig .state { color: var(--red); }
+  .parallel .waitbig .state { color: var(--green); }
+
+  .verdict {
+    border-top: 1px solid var(--grid); padding-top: 10px;
+    display: flex; align-items: baseline; gap: 10px;
+  }
+  .verdict .n { font-size: 30px; font-weight: 700; letter-spacing: -.01em; }
+  .serial .verdict .n { color: var(--red); }
+  .parallel .verdict .n { color: var(--green); }
+  .verdict .cap { font-size: 12px; color: var(--dim); }
+
+  footer {
+    padding: 10px 28px 16px; display: flex; justify-content: space-between; align-items: center;
+    color: var(--dim); font-size: 12px;
+  }
+  .clock { color: var(--amber); font-size: 15px; letter-spacing: .06em; }
+  .headline { color: var(--text); }
+  .headline b { color: var(--green); }
+
+  /* 첫 토큰 도착 순간 플래시 */
+  @keyframes flash { 0%,100% { box-shadow: none } 50% { box-shadow: 0 0 0 2px var(--green) } }
+  .flash { animation: flash .45s ease-in-out 2; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>내 질문이 남의 작업 뒤에 줄 서는가?</h1>
+    <div class="sub">
+      A(아라)가 15초짜리 작업을 시작한 뒤 <b>1초 후</b> B(바다)가 한 줄 질문을 던진다 ·
+      측정: n=20/셀 · 모의 LLM 결정적 지연 · docs/EXPERIMENTS.md §E2
+    </div>
+  </header>
+
+  <div class="split">
+    <section class="pane serial" id="serial">
+      <h2>직렬 — 단일 활성 턴 + FIFO 큐</h2>
+      <div class="contract">v0.1 · 통상 구현 · 경쟁 제품 다수</div>
+      <div class="row">
+        <div class="who"><b>아라</b><span>긴 작업 (L=15s)</span></div>
+        <div class="track"><div class="fill work" id="sA"></div><div class="label" id="sAL"></div></div>
+      </div>
+      <div class="row">
+        <div class="who"><b>바다</b><span id="sBS">한 줄 질문</span></div>
+        <div class="track"><div class="fill wait" id="sB"></div><div class="label" id="sBL"></div></div>
+      </div>
+      <div class="waitbig"><div class="cap2">바다가 기다린 시간</div><div class="big" id="sW">0.00s</div><div class="state" id="sSt">전송 전</div></div>
+      <div class="verdict"><span class="n" id="sN">대기 중…</span><span class="cap">바다의 첫 토큰까지(p50, n=20)</span></div>
+    </section>
+
+    <section class="pane parallel" id="parallel">
+      <h2>병렬 — 병렬 추론 + 직렬 부수효과</h2>
+      <div class="contract">Aidit-Code v2 · 독립 turnId 멀티플렉싱</div>
+      <div class="row">
+        <div class="who"><b>아라</b><span>긴 작업 (L=15s)</span></div>
+        <div class="track"><div class="fill work" id="pA"></div><div class="label" id="pAL"></div></div>
+      </div>
+      <div class="row">
+        <div class="who"><b>바다</b><span id="pBS">한 줄 질문</span></div>
+        <div class="track"><div class="fill tokens" id="pB"></div><div class="label" id="pBL"></div></div>
+      </div>
+      <div class="waitbig"><div class="cap2">바다가 기다린 시간</div><div class="big" id="pW">0.00s</div><div class="state" id="pSt">전송 전</div></div>
+      <div class="verdict"><span class="n" id="pN">대기 중…</span><span class="cap">바다의 첫 토큰까지(p50, n=20)</span></div>
+    </section>
+  </div>
+
+  <footer>
+    <div class="clock" id="clock">t = 0.0s</div>
+    <div class="headline" id="head">기울기(TTFT ~ L): 직렬 <b style="color:var(--red)">1.000</b> · 병렬 <b>0.000</b></div>
+  </footer>
+
+<script>
+  // 실측값(docs/EXPERIMENTS.md §E2, L=15s, n=20). 이 상수 외에 임의 연출은 없다.
+  const L = 15000;          // A 의 작업 길이
+  const B_SEND = 1000;      // B 발사 시점(A 발사 후 +1s)
+  const SERIAL_TTFT = 14930; // 직렬에서 B 의 첫 토큰(p50)
+  const PAR_TTFT = 235;      // 병렬에서 B 의 첫 토큰(p50)
+  const B_STREAM = 1400;     // B 의 토큰 스트림 길이(표시용 고정)
+  const TOTAL = 19000;       // 클립 길이
+
+  const $ = (id) => document.getElementById(id);
+  const pct = (v) => `${Math.max(0, Math.min(100, v * 100)).toFixed(2)}%`;
+  const secs = (ms) => `${(ms / 1000).toFixed(2)}s`;
+
+  let flashed = { s: false, p: false };
+  const t0 = performance.now();
+
+  function frame() {
+    const t = performance.now() - t0;
+    $('clock').textContent = `t = ${(t / 1000).toFixed(1)}s`;
+
+    // ── A: 양쪽 동일하게 L 동안 작업 ──
+    const aProg = Math.min(1, t / L);
+    for (const id of ['sA', 'pA']) $(id).style.width = pct(aProg);
+    const aTxt = aProg >= 1 ? '작업 완료' : `작업 중… ${secs(t)} / ${secs(L)}`;
+    $('sAL').textContent = aTxt;
+    $('pAL').textContent = aTxt;
+
+    // ── 직렬: B 는 A 가 끝날 때까지 큐에서 대기 ──
+    const sSince = t - B_SEND;
+    if (sSince >= 0) {
+      const waited = Math.min(sSince, SERIAL_TTFT);
+      $('sB').style.width = pct(waited / (SERIAL_TTFT + B_STREAM));
+      if (sSince < SERIAL_TTFT) {
+        $('sBL').textContent = `큐에서 대기… ${secs(waited)}`;
+        $('sBS').textContent = '한 줄 질문 — 대기 중';
+        // 대기 카운터가 실시간으로 올라간다 — 이 클립의 핵심 장면.
+        $('sW').textContent = secs(waited);
+        $('sSt').textContent = '앞 작업이 끝나기를 기다린다';
+      } else {
+        const streamed = Math.min(1, (sSince - SERIAL_TTFT) / B_STREAM);
+        $('sB').className = 'fill tokens';
+        $('sB').style.width = pct((SERIAL_TTFT + streamed * B_STREAM) / (SERIAL_TTFT + B_STREAM));
+        $('sBL').textContent = `응답 스트리밍…`;
+        $('sBS').textContent = '한 줄 질문 — 응답 중';
+        $('sN').textContent = secs(SERIAL_TTFT);
+        $('sW').textContent = secs(SERIAL_TTFT);
+        $('sSt').textContent = '응답 시작 — 14.93초 만에';
+        if (!flashed.s) { flashed.s = true; $('serial').classList.add('flash'); }
+      }
+    }
+
+    // ── 병렬: B 는 즉시 응답 시작 ──
+    if (sSince >= 0) {
+      if (sSince < PAR_TTFT) {
+        $('pBL').textContent = '추론 시작…';
+        $('pW').textContent = secs(sSince);
+        $('pSt').textContent = '즉시 추론 시작';
+      } else {
+        const streamed = Math.min(1, (sSince - PAR_TTFT) / B_STREAM);
+        $('pB').style.width = pct((PAR_TTFT + streamed * B_STREAM) / (SERIAL_TTFT + B_STREAM));
+        $('pBL').textContent = streamed >= 1 ? '응답 완료' : '응답 스트리밍…';
+        $('pBS').textContent = streamed >= 1 ? '한 줄 질문 — 완료' : '한 줄 질문 — 응답 중';
+        $('pN').textContent = secs(PAR_TTFT);
+        $('pW').textContent = secs(PAR_TTFT);
+        $('pSt').textContent = '기다리지 않았다';
+        if (!flashed.p) { flashed.p = true; $('parallel').classList.add('flash'); }
+      }
+    }
+
+    // 마지막 2초: 결론 문구로 교체.
+    if (t > TOTAL - 2600) {
+      $('head').innerHTML =
+        '남의 작업이 얼마나 길든 <b>내 대기는 늘지 않는다</b> — L=15s에서 <b>63.5×</b>';
+    }
+
+    if (t < TOTAL) requestAnimationFrame(frame);
+    else document.body.setAttribute('data-done', '1');
+  }
+  requestAnimationFrame(frame);
+</script>
+</body>
+</html>

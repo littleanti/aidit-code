@@ -51,6 +51,9 @@ docs/paper-acm/
 # --- Demo recording (large, not committed) ---
 # 녹화본은 리포에 넣지 않는다(수백 MB). 릴리스 에셋/외부 링크로 배포.
 *.mp4
+# 예외: HOL 대비 클립은 데이터에서 결정적으로 생성되는 작은 산출물(<1MB)이라 커밋한다
+# (심사/README 용 핵심 시각물 — `npm run clip:hol` 로 재생성 가능).
+!docs/assets/hol-clip.mp4
 
 # --- Bench (EXPERIMENTS.md E2) ---
 # 실행 중 생성되는 임시물은 무시하되, **측정 결과는 증거이므로 커밋한다**
@@ -63,3 +66,4 @@ backend/.poc-sandbox/
 backend/bench/out/*.smoke.*
 backend/bench/out/e2-hol.*.jsonl
 backend/bench/out/e2-summary.*.json
+backend/.e2e-sandboxes/
