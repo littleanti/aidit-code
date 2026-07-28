@@ -28,7 +28,14 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.resolve(__dirname, '..');
 const OUT_DIR = path.join(__dirname, 'out');
-const OUT_JSONL = path.join(OUT_DIR, 'e2-hol.jsonl');
+/**
+ * 출력 태그. 기본(무태그) 실행은 커밋된 정식 측정 결과(`e2-hol.jsonl`, 180행)를 **덮어쓴다** —
+ * 스모크/디버깅 실행은 반드시 태그를 붙여 증거 파일을 보호할 것.
+ *   예) OUT_TAG=smoke REPS=1 LEVELS=2000 node bench/e2-hol.mjs  → e2-hol.smoke.jsonl
+ * (실제로 REPS=1 스모크가 180행 원자료를 3행으로 덮어써 git 복원이 필요했던 사고가 있었다.)
+ */
+const OUT_TAG = process.env.OUT_TAG ? `.${process.env.OUT_TAG}` : '';
+const OUT_JSONL = path.join(OUT_DIR, `e2-hol${OUT_TAG}.jsonl`);
 
 const MOCK_PORT = Number(process.env.MOCK_LLM_PORT) || 8099;
 const SRV_PORT = Number(process.env.BENCH_SRV_PORT) || 3099;
@@ -431,7 +438,7 @@ async function main() {
   const failed = rows.filter((r) => !r.ok).length;
   console.log(`\nruns: ${rows.length}  failed: ${failed}`);
   await writeFile(
-    path.join(OUT_DIR, 'e2-summary.json'),
+    path.join(OUT_DIR, `e2-summary${OUT_TAG}.json`),
     JSON.stringify({ levels: LEVELS, reps: REPS, summary, slope, failed, total: rows.length }, null, 2),
   );
   console.log(`\nwrote ${OUT_JSONL}`);

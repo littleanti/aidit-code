@@ -11,6 +11,51 @@
 
 ## Changelog
 
+### 2026-07-28 · [test] · 완료 · 기존 동작 회귀 방어 2건 — 턴 실패 경로 · 실제 파이썬 워크로드
+- **요청(사용자)**: "기존 동작도 정상이야? 코드 많이 수정되어서 불안해".
+- **동기(정당한 불안)**: 이번 작업에서 **동작이 바뀐 제품 파일은 5개**다 —
+  `toolExec.ts`(ENV 화이트리스트) · `turn.ts`(최상위 catch) · `config.ts`(가산) ·
+  `messages.ts`(기본 OFF 게이트) · `sanitize.ts`(URL 훅). 이 중 **테스트가 안 덮는 위험 2곳**을
+  점검한 결과 실제 공백을 찾았다:
+  1. **턴 실패 경로에 기존 테스트가 없었다.** `grep` 확인 결과 `AGENT_REPLY=FAILED` +
+     SYSTEM 버블(TRD §11)을 단언하는 테스트가 리포에 **하나도 없다**. 그런데 이번에 넣은
+     최상위 catch 가 정확히 그 경로를 지나간다 — 잘못 흡수하면 사용자에게 오류가 안 보이는
+     **조용한 실패**가 되는데, 아무 테스트도 그걸 잡지 못하는 상태였다.
+  2. **ENV 화이트리스트를 실제 데모 워크로드로 검증하지 않았다.** `sandboxEnv.test.ts` 는
+     `node` 로만 확인했으나, 데모 시나리오는 **python + pytest** 를 돌린다. `APPDATA`/`TEMP`/
+     `SystemRoot` 중 하나만 빠져도 pytest 가 죽는데 그 조합은 미검증이었다.
+- **추가할 테스트**:
+  - `test/turnFailurePath.test.ts` — `piRuntime.send` 를 reject 시켜 ① `runAgentTurn` 이
+    throw 하지 않음 ② AGENT_REPLY 가 **FAILED** 로 확정됨 ③ **SYSTEM 버블이 실제로 생성됨**
+    ④ 세션이 IDLE 로 복귀 ⑤ 실패는 `commentCount` 를 올리지 않음 을 단언.
+    최상위 catch 가 오류 표면화를 삼키지 않는다는 계약을 못박는다.
+  - `test/sandboxPythonWorkload.test.ts` — ENV 화이트리스트 아래에서 **실제 pytest** 를 돌려
+    데모 워크로드(파일 생성 → `python -m pytest` → green)가 그대로 동작함을 단언.
+    python 미설치 환경에서는 명확히 skip 한다(거짓 통과 금지).
+- **검증 결과(전부 통과 — 기존 동작 이상 없음)**:
+  - `turnFailurePath.test.ts` 2건 — 실패 턴이 **FAILED + SYSTEM 버블 + IDLE 복귀**로 정상 표면화되고,
+    `commentCount` 는 올라가지 않으며, 런타임 오류 원문(`ECONNREFUSED`)·키 센티넬이 버블로 새지 않음.
+    성공 턴 대조군도 함께 고정(COMPLETE + SYSTEM 버블 미생성) — "항상 FAILED" 퇴화도 잡힌다.
+    → 최상위 catch 가 오류 표면화를 삼키지 않는다는 것이 실증됨.
+  - `sandboxPythonWorkload.test.ts` 6건 — Python 3.10.11 + pytest 9.1.1 환경에서
+    ENV 화이트리스트 아래 **`python -m pytest` → `2 passed` green**, 한글 출력 인코딩 정상,
+    실패 테스트는 실패로 보고(거짓 green 아님), 동시에 python 이 `API_KEY` 를 못 읽음(`<unset>`).
+    → 데모 워크로드가 화이트리스트로 깨지지 않음이 실증됨.
+- **추가 점검(테스트 외 실증)**:
+  - `config.bench.busyGate` 기본값 `false`, `isolation` 값 불변, `redactConfig().llm.apiKey='[REDACTED]'` 확인.
+  - **스택 전체 E2E 스모크 3/3** — 서버 부팅 → 게스트 인증 → 글 작성 → 샌드박스 프로비저닝 →
+    세션 시작 → AI 턴 → 툴 실행 → SSE 스트리밍 → 게시글 삭제 전 구간 정상.
+  - keygate 스캔 수 218→180 변동은 커버리지 축소가 아니라 `.bench-sandboxes/` 의
+    `.sandbox-meta.json` 잔여물 유무 차이였다(고정 대상 소스 140개는 전부 스캔됨).
+- **부수 수정(실제 사고 예방)**: 위 E2E 스모크(`REPS=1`)가 커밋된 **180행 측정 원자료를 3행으로
+  덮어써** git 복원이 필요했다. `bench/e2-hol.mjs` 에 `OUT_TAG` 환경변수를 추가해 스모크 실행이
+  정식 증거 파일을 건드리지 않게 했고(`OUT_TAG=smoke` → `e2-hol.smoke.jsonl`),
+  태그 붙은 산출물은 `.gitignore` 에서 제외했다.
+- **최종 회귀 상태**: 백엔드 **35 파일 / 139 테스트**, 프론트 **9 파일 / 127 테스트**,
+  양쪽 typecheck, 프론트 프로덕션 빌드, keygate 전부 통과.
+- 변경 파일: `backend/test/turnFailurePath.test.ts`, `backend/test/sandboxPythonWorkload.test.ts`,
+  `backend/bench/e2-hol.mjs`(OUT_TAG), `.gitignore`.
+
 ### 2026-07-28 · [test] · 완료 · 프론트엔드 테스트 확충 — 보안 초크포인트·스토어·REST 클라이언트
 - **요청(사용자)**: "프론트 테스트도 확충해줘".
 - **현황(착수 전)**: 프론트 테스트는 `src/lib/threadSelectors.test.ts` **1개 파일 / 19건**뿐.

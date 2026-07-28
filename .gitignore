@@ -59,3 +59,7 @@ backend/.bench-sandboxes/
 backend/.poc-sandbox/
 !backend/bench/out/
 !backend/bench/out/**
+# 태그 붙은 스모크/디버깅 벤치 산출물은 커밋하지 않는다(정식 결과만 커밋).
+backend/bench/out/*.smoke.*
+backend/bench/out/e2-hol.*.jsonl
+backend/bench/out/e2-summary.*.json
