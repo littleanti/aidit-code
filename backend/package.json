@@ -13,6 +13,9 @@
     "db:push": "prisma db push",
     "test": "vitest run",
     "keygate": "node scripts/key-grep-gate.mjs",
+    "bench:mock-llm": "node bench/mockLlm.mjs",
+    "bench:e2": "node bench/e2-hol.mjs",
+    "bench:e2:render": "node bench/render-cdf.mjs",
     "backfill:comment-count": "tsx scripts/backfill-comment-count.ts"
   },
   "dependencies": {

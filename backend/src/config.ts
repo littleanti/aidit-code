@@ -51,6 +51,18 @@ export interface IsolationConfig {
   networkPolicy: 'restricted' | 'open';
 }
 
+/**
+ * 실험(벤치) 전용 스위치. EXPERIMENTS.md E2 의 대조군 재현에만 쓰이며 **기본 전부 OFF** —
+ * 제품 동작·API 계약에 포함되지 않는다. 운영 배포에서는 절대 켜지 않는다.
+ */
+export interface BenchConfig {
+  /**
+   * C-REJECT 대조군: 활성 턴이 있을 때 POST /messages 를 409 로 거절한다(busy-gate).
+   * 선행기술(OpenTag/LangGraph 계열) 비교용. OFF 면 기존 경로와 완전히 동일.
+   */
+  busyGate: boolean;
+}
+
 export interface AppConfig {
   port: number;
   /** 바인드 호스트. 기본 `0.0.0.0`(모든 인터페이스). 내부 전용 실행 시 `127.0.0.1`. */
@@ -74,6 +86,8 @@ export interface AppConfig {
   rateLimit: RateLimitConfig;
   /** 샌드박스 격리 하드닝(M7 XC-ISO). */
   isolation: IsolationConfig;
+  /** 실험 전용 스위치(기본 OFF) — EXPERIMENTS.md E2 대조군. */
+  bench: BenchConfig;
   /** LLM 설정 — 읽되 절대 로그/응답/SSE 에 노출 금지. */
   llm: LlmConfig;
 }
@@ -103,6 +117,10 @@ export const config: AppConfig = {
     maxProcsPerSandbox: Number(process.env.SANDBOX_MAX_PROCS) || 16,
     networkPolicy: process.env.NETWORK_POLICY === 'open' ? 'open' : 'restricted',
   },
+  bench: {
+    // 실험 전용 — 기본 OFF. 운영 배포에서 켜지 말 것.
+    busyGate: process.env.BENCH_BUSY_GATE === '1',
+  },
   llm: {
     apiKey: process.env.API_KEY || '',
     baseURL: process.env.BASE_URL || 'https://models.github.ai/inference',
@@ -126,6 +144,7 @@ export function redactConfig(cfg: AppConfig = config): Record<string, unknown> {
     maxConcurrentTurns: cfg.maxConcurrentTurns,
     rateLimit: cfg.rateLimit,
     isolation: cfg.isolation,
+    bench: cfg.bench,
     llm: {
       apiKey: cfg.llm.apiKey ? '[REDACTED]' : '[EMPTY]',
       baseURL: cfg.llm.baseURL,

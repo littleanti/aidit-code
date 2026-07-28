@@ -11,6 +11,141 @@
 
 ## Changelog
 
+### 2026-07-28 · [fix] · 완료 · 턴 진행 중 게시글 삭제 시 **백엔드 프로세스 크래시**(P2025 unhandled) 차단
+- **발견 경위**: E2 하네스(위 항목) 실측 중 180런 가운데 **39런 실패**. 원인 추적 결과 드라이버의
+  `fetch failed` 는 증상이고, 실제로는 **서버 프로세스가 죽어** 이후 모든 런이 연쇄 실패한 것이었다.
+  하네스 버그가 아니라 **제품 결함**이다(이번 작업에서 `turn.ts` 는 건드리지 않았으므로 기존 결함).
+- **재현**: `CONDS=C-PAR REPS=3 LEVELS=6000 BENCH_VERBOSE=1 node bench/e2-hol.mjs`
+  → 드라이버가 측정 후 `DELETE /posts/:id` 를 호출하는데, A 의 턴(6s 도구 sleep)이 **아직 진행 중**이다.
+  게시글 삭제로 AGENT_REPLY 행이 사라진 뒤 턴이 마무리를 시도 →
+  ```
+  PrismaClientKnownRequestError (P2025) at src/agent/turn.ts:234
+  prisma.message.update() — No record was found for an update.
+  Node.js v24.14.1   ← 프로세스 종료
+  ```
+- **근본 원인**: `runAgentTurn` 의 4)·5) 단계(최종 body/status 영속화, commentCount 증가,
+  SYSTEM 버블, 세션 IDLE 복귀)가 **try/catch 밖**에 있다. `messages.ts:226` 은
+  `void runAgentTurn({...})` 로 fire-and-forget 호출하므로 여기서 던진 예외는 **아무도 받지 않는
+  unhandled rejection** 이 되고, Node 20+ 기본 정책(`--unhandled-rejections=throw`)에서
+  **프로세스가 즉시 종료**된다. `messages.ts` 주석의 "예외는 turn.ts 내부에서 흡수"는 3)단계에만 참이었다.
+- **영향(실서비스)**: 어떤 사용자든 **자기 글을 턴 진행 중에 삭제하면 백엔드 전체가 내려간다**
+  (모든 게시글의 SSE 연결·세션 동반 사망). 인증만 있으면 되는 원격 DoS. 삭제뿐 아니라 턴 도중
+  세션/샌드박스 행이 사라지는 모든 경로(정리 작업·수동 DB 조작)가 같은 결과를 낸다.
+- **수정 방침(2중 방어)**:
+  - ① `runAgentTurn` 을 `runAgentTurnInner` 로 감싸고 **최상위 catch** 를 둔다 — 어떤 예외도
+    프로세스를 죽이지 못하게 하고, 대신 경고 로그 1줄로 남긴다. `messages.ts` 주석의 계약을 실제로 참으로 만든다.
+  - ② 4)·5) 단계에서 **P2025(레코드 없음)** 를 "턴 대상이 사라짐 = 정상적 조기 종료"로 해석해
+    남은 영속화·SYSTEM 버블·IDLE 전이를 **조용히 건너뛴다**(삭제된 게시글에 버블을 남기려다
+    외래키 오류로 다시 던지는 2차 실패 방지). P2025 가 아닌 예외는 ①이 받아 로그로 남긴다.
+- **검증(실측 완료)**:
+  - 신규 `test/turnPostDeleted.test.ts` 2건 통과 — 턴 진행 중 게시글을 삭제해도
+    `runAgentTurn` 이 **reject 하지 않고** resolve 하며, 이후 Prisma 쿼리가 정상 동작함을 단언.
+    (in-process 테스트는 "프로세스가 죽는다"를 직접 재현할 수 없으므로 — 죽으면 러너도 죽는다 —
+    그 직전 조건인 "reject 하지 않음"을 단언한다. fire-and-forget 호출부에서 reject == 프로세스 종료.)
+  - **테스트가 실제로 결함을 잡는지 무력화 실험으로 확인**: `isMissingRecord` 를 항상 false 로,
+    최상위 catch 를 rethrow 로 바꾼 상태에서 테스트를 돌려 P2025 로 **실패**하는 것을 확인한 뒤 원복.
+    (위양성 테스트가 아님을 증명 — 통과만으로는 방어가 동작한다는 증거가 되지 않는다.)
+  - **E2 하네스 재실행: 180/180 성공, 실패 0**(1차 39건 실패 → 0건). 종단 실증.
+  - 전체 스위트 33 파일 / 131 테스트 통과, `tsc --noEmit` 통과.
+- 변경 파일: `backend/src/agent/turn.ts`, `backend/test/turnPostDeleted.test.ts`,
+  `docs/EXPERIMENTS.md`(부수 발견 절), `docs/IMPLEMENTATION_NOTES.md`.
+
+### 2026-07-28 · [fix] · 완료 · 샌드박스 셸 ENV 화이트리스트 — 운영자 LLM 키 유출 차단(XC-ENV)
+- **요청(사용자)**: 심사 기준 평가에서 발견된 결함 우선 수정.
+- **결함**: `toolExec.ts` 의 `runShell` 이 `spawn(command, { cwd: root, shell: true })` 로 자식을 띄우면서
+  `env` 를 명시하지 않아 **`process.env` 를 통째로 상속**한다. `config.ts:11` 의 `loadDotenv()` 가
+  `.env` 의 `API_KEY`/`BASE_URL`/`JWT_SECRET`/`DATABASE_URL` 을 `process.env` 에 실어두므로,
+  에이전트가 `echo $API_KEY`(또는 `env`)를 실행하면 그 출력이 TOOL_RESULT 버블로
+  **스레드에 attach 한 전원에게 SSE 스트리밍**된다. CLAUDE.md L1·TRD §8("키는 서버 `.env` 에만,
+  클라이언트·로그·응답에 절대 노출 금지")을 코드가 위반하는 상태.
+  - 기존 `test/security/redaction.test.ts` 는 **응답·로그·DB·SSE payload 표면**만 스캔하고
+    "샌드박스 안에서 셸이 키를 읽을 수 있는가"는 검사하지 않아 이 구멍을 놓쳤다.
+  - `scripts/key-grep-gate.mjs` 도 정적 소스 스캔이라 런타임 ENV 상속은 잡지 못한다.
+- **수정 방침(기본 거부 화이트리스트)**:
+  - `toolExec.ts` 에 `sandboxChildEnv()` 신설 — `process.env` 상속을 끊고 **허용 목록만** 자식에 전달한다.
+    기본 허용: `PATH`, `HOME`, `LANG`, `LC_ALL`, `TZ`, `TERM`, `USER`, `LOGNAME`, `SHELL`(POSIX) /
+    `SystemRoot`, `windir`, `COMSPEC`, `PATHEXT`, `TEMP`, `TMP`, `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`,
+    `APPDATA`, `LOCALAPPDATA`, `NUMBER_OF_PROCESSORS`, `PROCESSOR_ARCHITECTURE`, `OS`(Windows).
+    파이썬 워크로드(데모 pytest) 출력 깨짐 방지로 `PYTHONIOENCODING=utf-8`, `PYTHONUTF8=1` 을 **주입**한다.
+  - 운영자 확장 훅: `SANDBOX_ENV_PASSTHROUGH`(콤마 구분)로 허용 항목 추가 가능.
+    단 **비밀 이름은 통과 불가** — `API_KEY`/`BASE_URL`/`OPENAI_API_KEY`/`PI_API_KEY`/`JWT_SECRET`/
+    `DATABASE_URL` 및 `*_KEY`/`*_TOKEN`/`*_SECRET`/`*_PASSWORD` 패턴은 denylist 로 무조건 제거한다
+    (화이트리스트보다 denylist 가 우선 — 설정 실수로도 키가 새지 않게).
+  - 적용 범위는 **SHELL/PACKAGE 자식만**. 워커(`pi.ts` → `piWorker.mjs`)는 LLM 호출 주체이므로
+    키 주입을 유지한다(자식 셸을 띄우지 않음 — 도구 실행은 부모의 toolExec 가 담당).
+- **검증(실측 완료)**:
+  - 신규 `test/security/sandboxEnv.test.ts` **5건 통과** — 샌드박스에서 실제 셸을 돌려 자식 ENV 를
+    덤프시켜 ① SENTINEL 값 부재 ② 비밀 변수 **이름** 부재 ③ `echo $API_KEY`(원 공격 경로)가 빈 출력
+    ④ `SANDBOX_ENV_PASSTHROUGH` 로도 비밀 밀반입 불가 ⑤ `PATH`·`SystemRoot`·`COMSPEC` 생존 +
+    파일 생성 워크로드 정상(과잉 차단 아님) 을 단언.
+  - **취약점이 실재했음을 재현으로 증명**: 옛 경로(`spawn` 에 `env` 미지정)로 스폰하면
+    `sk-PROOF-SENTINEL-999` 가 자식 stdout 에 그대로 찍히고, 화이트리스트 env 를 주면 `undefined` 가 된다.
+    (수정 전후 대조 — 테스트가 위양성이 아님을 확인.)
+  - 기존 `test/security/redaction.test.ts` 회귀 없음, 전체 33 파일 / 131 테스트 통과,
+    `tsc --noEmit` 통과, `npm run keygate` 통과(208 파일).
+- 변경 파일: `backend/src/agent/toolExec.ts`, `backend/test/security/sandboxEnv.test.ts`,
+  `docs/TRD.md`(§6.3-(d) 신설), `README.md`, `docs/IMPLEMENTATION_NOTES.md`.
+
+### 2026-07-28 · [test] · 완료 · E2(HOL 지연 분포) 측정 하네스 구현 + 실측 — 모의 LLM 기반 3계약 비교
+- **요청(사용자)**: `EXPERIMENTS.md` 의 E2 를 설계에서 **실제 측정**으로 격상.
+- **배경**: 현재 "동시에 물어도 안 기다린다"를 받치는 근거는 `scripts/bench-concurrency.mjs` **단일 런(n=1)**
+  뿐이다. 실 LLM 의존이라 지연이 비결정적이고 반복도 불가능해 분포·신뢰구간을 낼 수 없다.
+- **구현 범위(EXPERIMENTS.md §H0·E2 설계 준수)**:
+  - `backend/bench/mockLlm.mjs` — OpenAI 호환 `/chat/completions` SSE 로컬 서버.
+    프롬프트에 실린 `[[bench ttft=..ms tok=..ms n=..  work=..ms]]` 지시자를 파싱해
+    **결정적 지연 주입**(첫 토큰 지연·토큰 간격·토큰 수·도구 sleep 길이). 시드 고정, 네트워크 무관.
+  - `backend/bench/e2-hol.mjs` — 드라이버. 3계약 × 선행 작업 길이 L × 반복:
+    `C-FIFO`(concurrent=false) / `C-REJECT`(`BENCH_BUSY_GATE=1`, 409 후 1s 재시도) / `C-PAR`(concurrent=true).
+    A 가 길이 L 턴 발사 → **+1s** 뒤 B 가 짧은 질문 → B 의 **TTFT**(첫 `agent.token` 도착)를 측정.
+    C-REJECT 는 최초 시도 시각 기준 **유효 TTFT**(재시도 횟수 포함) 기록. 결과 JSONL.
+  - `backend/bench/render-cdf.mjs` — JSONL → **B TTFT CDF SVG**(3조건 겹쳐 그리기) + 요약 표(중앙값·p95).
+    외부 차트 라이브러리 없이 순수 SVG 생성.
+  - `backend/src/routes/messages.ts` — `C-REJECT` 재현용 실험 게이트: `BENCH_BUSY_GATE=1` 일 때
+    활성 턴이 있으면 **409 `{error:'busy'}`**. 기본 OFF(미설정 시 기존 동작과 바이트 동일).
+- **규모(실측 가능하도록 축소 — 정직히 기재)**: 설계 원안은 L ∈ {5,15,45}s × 50런(450런)이나,
+  단일 개발 PC 에서 수 시간이 걸린다. 이번 실측은 **L ∈ {2,6,15}s × 조건 3 × 20런 = 180런**으로
+  축소 실행하고, 축소 사실과 그로 인한 CI 폭 확대를 결과 절에 명시한다.
+- **판정 기준**: B TTFT ~ L 회귀 기울기가 `C-FIFO ≈ 1`, `C-PAR ≈ 0`. C-PAR 에서 A 의 완료 시간이
+  C-FIFO 대비 유의하게 나빠지지 않을 것(간섭 비용 확인).
+- **실측 결과(2026-07-28, 180/180 성공 · 실패 0)** — 원자료 `backend/bench/out/e2-hol.jsonl`:
+
+  | 조건 | L=2s p50 | L=6s p50 | L=15s p50 | **기울기** |
+  |---|---|---|---|---|
+  | C-FIFO | 1925ms | 5925ms | 14930ms | **1.000** |
+  | C-REJECT | 2258ms | 6301ms | 15390ms | **1.010** |
+  | **C-PAR** | **238ms** | **235ms** | **235ms** | **0.000** |
+
+  - 판정 기준 **충족**. L=15s에서 C-FIFO 대비 **63.5배**(14930 → 235ms).
+  - C-PAR 은 L 을 7.5배 늘려도 TTFT 불변(238→235ms) — 선행 작업 길이와 완전 독립.
+  - 비자명한 부수 결과: **C-REJECT 가 C-FIFO 보다 나쁘다**. 거절+폴링은 대기를 없애지 못하고
+    재시도 granularity(1s)만큼 지연을 얹는다.
+  - 간섭 비용: 이 시나리오에서 B 는 도구를 쓰지 않아 샌드박스 락을 다투지 않는다 → "행복 경로"
+    측정임을 EXPERIMENTS.md 에 한계로 명시(두 턴 모두 도구를 쓸 때의 락 경합은 E1/E3 대상).
+- **부수 발견**: 1차 측정의 39런 연쇄 실패를 추적해 **턴 진행 중 게시글 삭제 → 백엔드 프로세스 종료**
+  라는 별개 결함을 발견·수정했다(위 항목 참조). 하네스의 부수 가치 사례.
+- **미실시(정직한 기재)**: 실 LLM 스팟 대조(설계 모드 c, C-FIFO vs C-PAR × L=15s × 10런)는 후속 과제.
+  모의 LLM 분포와 실 LLM 분포의 형상 일치는 아직 확인되지 않았다.
+- 변경 파일: `backend/bench/mockLlm.mjs`, `backend/bench/e2-hol.mjs`, `backend/bench/render-cdf.mjs`,
+  `backend/bench/out/{e2-hol.jsonl,e2-summary.json}`, `backend/src/routes/messages.ts`,
+  `backend/src/config.ts`, `backend/package.json`, `.gitignore`,
+  `docs/EXPERIMENTS.md`(실측 결과 절 신설), `docs/assets/e2-hol-cdf{,-L6,-L2}.svg`,
+  `README.md`, `docs/IMPLEMENTATION_NOTES.md`.
+
+### 2026-07-28 · [docs] · 완료 · 운영 범위 명시 — CI·컨테이너 격리는 실 서버 담당(리포 범위 밖)
+- **요청(사용자)**: "CI 구축은 내가 실 서버에서 구축할 것이라서 빼거나 문서에 명시해줘. github 이제 안 쓴다."
+  및 Docker 격리도 실 서버에서 구축 예정.
+- **조치**: GitHub Actions 워크플로를 **추가하지 않는다**(`.github/` 미생성). 대신 문서에
+  "테스트·게이트를 어떤 명령으로 돌리는가"를 명시해 실 서버 CI 가 그대로 호출할 수 있게 한다.
+  컨테이너 격리(`--network none` 등)도 **리포 범위 밖 · 실 서버 배포 시 구축**으로 못박는다
+  (`limits.ts` 가 이미 "네트워크 강제는 PoC 범위 밖"이라 적어둔 것과 정합).
+- **결과**: `README.md` §6에 "운영 범위 — 이 리포가 하지 **않는** 것" 표를 신설(CI·컨테이너 격리 2행,
+  각각 실 서버에서 할 일을 명시). `docs/TRD.md` §6.3 말미에 **책임 경계** 문단 추가.
+  GitHub Actions 워크플로는 **추가하지 않았다**(`.github/` 미생성).
+  실 서버 CI 가 호출할 게이트 3종을 README 에 그대로 노출: `npm test` · `npm run typecheck` · `npm run keygate`.
+- 부수 정리: `.gitignore` 에 `*.mp4` 추가(루트에 519MB 녹화본 3개가 미추적 상태로 방치돼 있어
+  실수 커밋 위험이 있었다 — **파일은 지우지 않고** 무시 규칙만 추가). bench 산출물 규칙도 함께 정리.
+- 변경 파일: `README.md`, `docs/TRD.md`, `.gitignore`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-07-27 · [chore] · 완료 · 데모 시나리오에 "동시에 같은 파일 수정" 구간 추가(XC-SERIAL 실증)
 - **요청(사용자)**: 데모 시나리오에 **두 사용자가 동시에 하나의 파일을 수정하는** 시나리오를 추가.
 - **배경**: 기존 동시 협업 구간(turn 6·7)은 의도적으로 **부수효과 충돌이 없는** 조합(6=파일 생성, 7=리뷰만)이라

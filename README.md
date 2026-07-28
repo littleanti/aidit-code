@@ -31,6 +31,22 @@ $ post --new "게시글 하나 = 살아있는 코드 에이전트 세션"
 - v2는 **opt-in(기본 OFF)**: 게시글 생성 시 체크박스로 켜며, 글 단위 1회 확정·변경 불가.
 - 이 논지는 특허 문서(PATENT.html)와 논문(PAPER.html)의 중심 주제이기도 합니다.
 
+#### 측정된 효과 (n=180, 2026-07-28)
+
+A가 길이 L의 작업을 시작하고 **1초 뒤** B가 한 줄 질문을 던졌을 때, B의 첫 토큰까지 걸린 시간:
+
+| 동시성 계약 | L=2s | L=6s | L=15s | TTFT ~ L 기울기 |
+|---|---|---|---|---|
+| 직렬 (v0.1 FIFO) | 1.93s | 5.93s | 14.93s | **1.000** — 완전 종속 |
+| 거절 + 재시도 | 2.26s | 6.30s | 15.39s | **1.010** — 더 나쁨 |
+| **병렬 (v2)** | **0.24s** | **0.24s** | **0.24s** | **0.000** — 완전 독립 |
+
+![B TTFT CDF (L=15s)](./docs/assets/e2-hol-cdf.svg)
+
+핵심은 배수(L=15s에서 63.5배)가 아니라 **기울기 0**입니다 — 남의 작업이 얼마나 길든 내 대기는 늘지 않습니다.
+재현: `cd backend && npm run bench:e2` (모의 LLM 사용 — 실 LLM 키·네트워크 불필요).
+상세·한계는 [docs/EXPERIMENTS.md §E2](./docs/EXPERIMENTS.md) 참조.
+
 ## 2. 주요 기능
 
 - **인증**: username+password 회원 또는 **게스트 진입**(닉네임만, 서버가 `#hex4` 부여 — 예: `철수#a3f9`). JWT 슬라이딩 갱신(7일). API 키 입력 화면 없음.
@@ -274,6 +290,33 @@ npm test              # vitest run
 npm run typecheck     # tsc --noEmit
 npm run build         # tsc -b && vite build (프로덕션 빌드 검증)
 ```
+
+### 성능 실험 (E2 — HOL 지연 분포)
+
+`docs/EXPERIMENTS.md` E2의 측정 하네스. 모의 LLM으로 지연을 주입해 **결정적·반복 가능**하게 돌린다.
+실 LLM 키·네트워크·쿼터가 필요 없고, 전용 DB(`prisma/bench.db`)와 전용 샌드박스 루트를 써서
+개발 DB(`dev.db`)·`.sandboxes`를 건드리지 않는다.
+
+```bash
+cd backend
+DATABASE_URL="file:./bench.db" npx prisma db push --skip-generate   # 최초 1회
+npm run bench:e2                       # 3계약 × L 3종 × 20런 (약 40분)
+REPS=3 LEVELS=2000 npm run bench:e2    # 빠른 스모크
+npm run bench:e2:render                # → docs/assets/e2-hol-cdf.svg
+```
+
+### 운영 범위 — 이 리포가 하지 **않는** 것
+
+아래 둘은 **의도적으로 리포 범위 밖**이며 실 서버 배포 시 운영자가 구축한다.
+코드로 흉내내지 않는다(가짜 제한 금지 원칙 — `backend/src/sandbox/limits.ts` 주석 참조).
+
+| 항목 | 이 리포의 상태 | 실 서버에서 할 일 |
+|---|---|---|
+| **CI 파이프라인** | 워크플로 파일 없음(GitHub 미사용) | 위 "테스트/검증" 명령을 그대로 호출하면 됨 — 게이트는 `npm test`·`npm run typecheck`·`npm run keygate` 3종 |
+| **컨테이너 격리** | 호스트 디렉토리 격리 + 경로 가드 + ENV 화이트리스트 + 프로세스/타임아웃 상한까지만 | `--network none`, read-only 마운트, 메모리/CPU 쿼터(cgroup v2). TRD §6.3 참조 |
+
+> 참고: 샌드박스 셸은 **부모 `process.env`를 상속하지 않는다**(TRD §6.3-(d) XC-ENV).
+> 운영자 LLM 키는 화이트리스트에서 제외되며, `backend/test/security/sandboxEnv.test.ts`가 회귀를 감시한다.
 
 ## 7. 프로젝트 문서
 

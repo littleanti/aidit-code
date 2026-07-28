@@ -13,6 +13,8 @@ import { makeMessageCreatedEvent } from '../realtime/events.js';
 import { runAgentTurn, postSystemBubble } from '../agent/turn.js';
 import { startOrAttach } from '../agent/sessionStart.js';
 import { isOwnUploadUrl, resolveImageRef } from '../domain/imageRef.js';
+import { config } from '../config.js';
+import { piRuntime } from '../agent/pi.js';
 
 /** 유효한 per-message reasoning_effort 값(Feature B). */
 const REASONING_EFFORTS = new Set(['low', 'medium', 'high']);
@@ -134,6 +136,17 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     });
     if (!post) {
       return reply.code(404).send({ error: 'post not found' });
+    }
+
+    // ── (실험 전용) C-REJECT busy-gate — EXPERIMENTS.md E2 ──
+    //   BENCH_BUSY_GATE=1 일 때만 활성화되는 **선행기술 재현용** 게이트다. 활성 턴이 있으면
+    //   버블을 만들지 않고 409 를 돌려준다(OpenTag/LangGraph 계열의 "바쁘면 거절" 계약).
+    //   기본 OFF — 미설정 시 아래 코드는 평가조차 되지 않아 기존 동작과 바이트 동일하다.
+    //   제품 경로가 아니라 **비교 대조군**이므로 UI/문서화된 API 계약에 포함되지 않는다.
+    if (config.bench.busyGate && aiMode && post.sandbox) {
+      if (piRuntime.isBusy({ sandboxId: post.sandbox.id })) {
+        return reply.code(409).send({ error: 'busy' });
+      }
     }
 
     // ── clientId 멱등: 동일 키면 기존 버블을 그대로 반환(중복 생성 금지). ──
