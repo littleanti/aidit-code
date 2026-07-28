@@ -83,6 +83,95 @@ export type ToolChunkSink = (chunk: string) => void;
  */
 const liveChildren = new Set<ChildProcess>();
 
+// ─────────────────────────────────────────────────────────────────────────────
+// XC-ENV — 샌드박스 셸 ENV 화이트리스트 (CLAUDE.md L1 / TRD §8)
+//
+//   과거 결함: spawn 에 env 를 주지 않으면 자식이 process.env 를 통째로 상속한다.
+//   config.ts 의 loadDotenv() 가 .env(API_KEY/BASE_URL/JWT_SECRET/DATABASE_URL)를
+//   process.env 에 싣기 때문에, 에이전트가 `echo $API_KEY` 를 실행하면 그 출력이
+//   TOOL_RESULT 버블로 스레드 참가자 전원에게 SSE 스트리밍됐다.
+//
+//   방침: **기본 거부(deny-by-default)**. 아래 화이트리스트에 있는 변수만 자식에 전달한다.
+//   워커(pi.ts→piWorker.mjs)는 LLM 호출 주체라 키 주입을 유지하지만, 워커는 셸을 띄우지
+//   않는다(도구 실행은 전부 이 모듈이 담당) — 그래서 경계가 여기 하나로 모인다.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 플랫폼 공통 허용 변수(셸·툴체인 동작에 필요한 비민감 항목만). */
+const ENV_ALLOW_COMMON = [
+  'PATH',
+  'HOME',
+  'LANG',
+  'LC_ALL',
+  'TZ',
+  'TERM',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+] as const;
+
+/** Windows 셸(cmd)·툴체인이 없으면 아예 못 도는 항목들. */
+const ENV_ALLOW_WIN = [
+  'SystemRoot',
+  'SystemDrive',
+  'windir',
+  'COMSPEC',
+  'PATHEXT',
+  'TEMP',
+  'TMP',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'NUMBER_OF_PROCESSORS',
+  'PROCESSOR_ARCHITECTURE',
+  'OS',
+] as const;
+
+/**
+ * 이름만으로 비밀로 간주해 **무조건 제거**하는 패턴. 화이트리스트·운영자 passthrough 보다
+ * 우선한다(설정 실수로도 키가 새지 않도록 하는 최후 방어선).
+ */
+const ENV_DENY_PATTERN = /(^|_)(API_KEY|BASE_URL|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL)S?$|^(API_KEY|BASE_URL|DATABASE_URL|JWT_SECRET|OPENAI_API_KEY|PI_API_KEY)$/i;
+
+/** 운영자 확장 훅: SANDBOX_ENV_PASSTHROUGH="FOO,BAR" 로 허용 항목 추가(denylist 는 못 뚫는다). */
+function passthroughNames(): string[] {
+  return (process.env.SANDBOX_ENV_PASSTHROUGH || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * 샌드박스 셸 자식에게 넘길 ENV 를 만든다(화이트리스트 + 명시 주입).
+ * export 하는 이유: 보안 테스트가 spawn 없이도 결과를 직접 단언할 수 있게 하기 위함.
+ */
+export function sandboxChildEnv(
+  source: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const allow = new Set<string>([
+    ...ENV_ALLOW_COMMON,
+    ...(process.platform === 'win32' ? ENV_ALLOW_WIN : []),
+    ...passthroughNames(),
+  ]);
+
+  const out: NodeJS.ProcessEnv = {};
+  for (const name of allow) {
+    // denylist 가 화이트리스트를 이긴다(passthrough 오설정 방어).
+    if (ENV_DENY_PATTERN.test(name)) continue;
+    const v = source[name];
+    if (typeof v === 'string' && v.length > 0) out[name] = v;
+  }
+
+  // 명시 주입(상속 아님): 파이썬 워크로드 출력 인코딩 고정 — 데모 pytest 한글 출력 깨짐 방지.
+  out.PYTHONIOENCODING = 'utf-8';
+  out.PYTHONUTF8 = '1';
+  // 샌드박스임을 자식이 인지할 수 있게(디버깅·워크로드 분기용 비민감 마커).
+  out.AIDIT_SANDBOX = '1';
+
+  return out;
+}
+
 /** 추적 중인 모든 자식에게 SIGTERM. 멱등. 테스트/종료 훅에서 사용. */
 export function killAllToolChildren(): void {
   for (const child of [...liveChildren]) {
@@ -254,10 +343,12 @@ function runShell(
     // 플랫폼별 셸: Windows=cmd /c, POSIX=sh -c. cwd 격리(루트 밖 접근은 OS 권한/경로 가드 밖이나
     // PoC §6.2 는 샌드박스 내부 모든 permission 허용 — 경계는 경로 가드가 담당하는 FILE_* 뿐).
     const isWin = process.platform === 'win32';
+    // XC-ENV: process.env 통째 상속 금지 — 화이트리스트 ENV 만 넘긴다(운영자 LLM 키 유출 차단).
+    const env = sandboxChildEnv();
     // windowsHide: 콘솔 창 미할당(부모 콘솔/스테이션 의존도↓, 0xC0000142 내성). 비Windows 무시.
     const child = isWin
-      ? spawn(command, { cwd: root, shell: true, windowsHide: true })
-      : spawn('sh', ['-c', command], { cwd: root, windowsHide: true });
+      ? spawn(command, { cwd: root, shell: true, windowsHide: true, env })
+      : spawn('sh', ['-c', command], { cwd: root, windowsHide: true, env });
 
     liveChildren.add(child);
 

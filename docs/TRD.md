@@ -560,7 +560,25 @@ v0.1 코드는 워커·부모 모두 **전역 단일 상태**를 전제한다. v
 - **(a) 경로 탈출 차단**: 파일 트리/내용 API(`GET /posts/:id/files`, `.../content`)와 **도구 실행** 모두 `Sandbox.path`를 루트로 한 **상대 경로를 강제**한다. `..` 상위 탈출·심볼릭 링크·절대경로 주입을 정규화(realpath) 후 루트 prefix 검사로 차단. 위반 시 파일 API는 **400**, 도구 실행은 거부.
 - **(b) 리소스 제한**: 프로세스/메모리/CPU 상한(PoC는 cgroup-lite). 동시 활성 샌드박스/세션 수 상한.
 - **(c) 네트워크 정책**: 아웃바운드 제한(필요 도메인 화이트리스트 등). PoC 수준 정책.
+- **(d) ENV 화이트리스트(XC-ENV, 2026-07-28 추가)**: 도구 셸 자식은 **부모 `process.env` 를 상속하지 않는다**.
+  `toolExec.sandboxChildEnv()` 가 만든 **허용 목록만** 전달한다(기본 거부).
+  - 허용: `PATH`·`HOME`·`LANG`·`LC_ALL`·`TZ`·`TERM`·`USER`·`LOGNAME`·`SHELL`(공통),
+    `SystemRoot`·`SystemDrive`·`windir`·`COMSPEC`·`PATHEXT`·`TEMP`·`TMP`·`USERPROFILE`·`HOMEDRIVE`·
+    `HOMEPATH`·`APPDATA`·`LOCALAPPDATA`·`NUMBER_OF_PROCESSORS`·`PROCESSOR_ARCHITECTURE`·`OS`(Windows).
+  - 주입(상속 아님): `PYTHONIOENCODING=utf-8`·`PYTHONUTF8=1`·`AIDIT_SANDBOX=1`.
+  - 운영자 확장: `SANDBOX_ENV_PASSTHROUGH="FOO,BAR"`. 단 `API_KEY`/`BASE_URL`/`DATABASE_URL`/`JWT_SECRET`/
+    `OPENAI_API_KEY`/`PI_API_KEY` 및 `*_KEY`/`*_TOKEN`/`*_SECRET`/`*_PASSWORD` 패턴은 **denylist 가
+    화이트리스트를 이겨** 절대 통과하지 못한다.
+  - **왜 필요한가**: `config.ts` 의 `loadDotenv()` 가 `.env` 를 `process.env` 에 싣기 때문에, 상속을 끊지
+    않으면 에이전트가 `echo $API_KEY` 를 실행해 운영자 키를 TOOL_RESULT 버블로 **스레드 참가자 전원에게**
+    스트리밍할 수 있었다(§8 위반). 워커(`piWorker.mjs`)는 LLM 호출 주체라 키 주입을 유지하지만 셸을
+    띄우지 않으므로, 신뢰 경계는 이 한 지점으로 모인다.
+  - 회귀 감시: `backend/test/security/sandboxEnv.test.ts` 가 **실제 셸을 돌려** 자식 ENV 를 덤프하고
+    키 값·키 이름 부재와 `PATH` 생존(과잉 차단 방지)을 동시에 단언한다.
 - **컨테이너(Firecracker/gVisor/Docker) 강화는 Out of Scope(후속)** — PoC는 호스트 디렉토리 격리 + 프로세스/cgroup-lite로 시작.
+  **책임 경계(2026-07-28 확정)**: 컨테이너 격리(`--network none`·read-only 마운트·메모리/CPU 쿼터)와
+  CI 파이프라인은 **리포 범위 밖이며 실 서버 배포 시 운영자가 구축**한다. 이 리포는 격리를 흉내내지 않고
+  (가짜 제한 금지 — `limits.ts` 주석과 동일 원칙) 위 (a)·(b)·(d)만 보장한다.
 
 ### 6.4 Δ v2 — 부수효과 직렬 lock & 동시성 상한
 
