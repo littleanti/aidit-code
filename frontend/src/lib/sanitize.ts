@@ -20,9 +20,52 @@ marked.setOptions({
   breaks: true,
 });
 
+/**
+ * 허용 URL 스킴. ALLOWED_URI_REGEXP 와 동일한 기준을 훅에서 **재강제**하는 데 쓴다.
+ *
+ * 왜 훅이 필요한가(2026-07-28): DOMPurify 는 ALLOWED_URI_REGEXP 검사에 실패해도
+ * `(src|href|xlink:href)` + `data:` + 태그가 DATA_URI_TAGS 에 속하면 별도 분기로 허용한다.
+ * DEFAULT_DATA_URI_TAGS 에 **img 가 포함**돼 있어 `<img src="data:...">` 가 통과했고,
+ * `ADD_DATA_URI_TAGS` 는 기본 집합에 더하기만 가능해 설정으로 뺄 수 없다.
+ * → 이 모듈이 선언한 "http(s)/mailto 만" 계약이 실제로는 거짓이었다.
+ *
+ * (심각도: `<img>` 는 HTML/스크립트를 실행하지 않으므로 직접적 XSS 는 아니다. 다만 선언된
+ *  계약을 참으로 만들고, CSP img-src 우회·임의 바이트 임베드를 막는다.)
+ */
+const SAFE_URL_SCHEME = /^(?:https?:|mailto:)/i;
+
+/**
+ * DOMPurify 의 ATTR_WHITESPACE 와 동일한 집합. 스킴 판정 전에 걷어내 `java\nscript:` 나
+ * 유니코드 공백을 끼워 넣는 우회를 막는다.
+ */
+const ATTR_WHITESPACE =
+  /[\u0000-\u0020\u00A0\u1680\u180E\u2000-\u2029\u205F\u3000]/g;
+
+/** URL 을 담을 수 있어 allowlist 재검사가 필요한 속성들. */
+const URL_ATTRS = ['href', 'src', 'xlink:href'] as const;
+
+// 훅 설치는 모듈 로드 시 1회(멱등). DOMPurify 기본 인스턴스는 이 모듈만 사용한다.
+let urlHookInstalled = false;
+function installUrlAllowlistHook(): void {
+  if (urlHookInstalled) return;
+  urlHookInstalled = true;
+  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    const el = node as Element;
+    if (typeof el.getAttribute !== 'function') return;
+    for (const attr of URL_ATTRS) {
+      if (!el.hasAttribute(attr)) continue;
+      // DOMPurify 와 동일하게 제어문자/공백을 걷어낸 뒤 판정(`java\nscript:` 우회 차단).
+      const raw = el.getAttribute(attr) ?? '';
+      const normalized = raw.replace(ATTR_WHITESPACE, '');
+      if (!SAFE_URL_SCHEME.test(normalized)) el.removeAttribute(attr);
+    }
+  });
+}
+installUrlAllowlistHook();
+
 // 엄격 allowlist — 서식 + 링크 + 코드 + GFM 표 + 이미지. 의도적으로 제외:
 // script/style/iframe/object/embed/form/input, on* 이벤트 핸들러, `style` 속성.
-// 이미지/링크 URL 은 ALLOWED_URI_REGEXP 로 http(s)/mailto 만 통과(javascript:/data: 차단).
+// 이미지/링크 URL 은 http(s)/mailto 만 통과 — ALLOWED_URI_REGEXP + 위 훅의 이중 강제.
 const PURIFY_CONFIG: Config = {
   ALLOWED_TAGS: [
     'p', 'br', 'hr',
