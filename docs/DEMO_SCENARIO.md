@@ -71,6 +71,11 @@ const page = await context.newPage();
 1. 백엔드: `cd backend && npm install && cp .env.example .env && npm run prisma:generate && npm run db:push && npm run dev` (포트 3001).
    - Windows에서 Vite `localhost`→`::1` 불일치를 피하려면 `.env`에 `HOST=::` 권장.
 2. 프론트: `cd frontend && npm install && npm run dev` (포트 5173). 접속은 `http://localhost:5173`.
+   - **브라우저 바이너리(필수, 1회)**: `cd frontend && npx playwright install chromium`.
+     `npm install` 은 `@playwright/test` 패키지만 가져오고 **브라우저는 따로 내려받아야** 한다 —
+     이 단계를 건너뛰면 오케스트레이션 스크립트가 실행 즉시 실패한다.
+     (2026-07-28: `@playwright/test` 가 어느 `package.json` 에도 선언돼 있지 않아 클린 체크아웃에서
+     `ERR_MODULE_NOT_FOUND` 로 죽던 문제를 devDependency 선언으로 수정했다.)
 3. **LLM 키 (서버 측)**: `.env`의 `API_KEY`에 실키를 넣으면 실제 에이전트가 동작한다.
    비워두면 **결정적 에코 스텁**이 타이핑 효과로 스트리밍되므로 키 없이도 녹화 리허설이 가능하다
    (`AGENT_TOKEN_DELAY_MS`로 속도 조절). **본 녹화는 실키 권장** — 툴콜/파일 생성이 진짜로 일어나야

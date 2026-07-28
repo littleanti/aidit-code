@@ -11,6 +11,57 @@
 
 ## Changelog
 
+### 2026-07-28 · [docs] · 완료 · 잔여 문서 전수 점검 — 체크리스트·`.env.example`·WIREFRAME·데모 절차
+- **요청(사용자)**: "다른 문서는 업데이트 할 것 없어 확인해줘."
+- **점검 대상(이번 세션에서 손대지 않은 문서 전부)**: `docs/checklists/key-blind.md`,
+  `backend/.env.example`, `docs/WIREFRAME.md`, `docs/DEMO_SCENARIO.md`, `AGENTS.md`, `LICENSE`.
+- **결론: "업데이트 할 것 없음"이 아니었다 — 4건 발견.** 그중 1건은 보안 문서가 취약점을 승인한 것이다.
+
+#### ① 🔴 `docs/checklists/key-blind.md` §5 가 **수정 전 취약점을 `[x]` 안전으로 승인**하고 있었다
+- 문제 문장: *"도구 자식(SHELL/PACKAGE)은 `process.env` 를 물려받되 출력 청크에 키를 주입하지 않는다."*
+- 이 문장은 **XC-ENV 로 고친 그 결함을 정확히 서술하면서 체크 표시**를 달고 있었다. `process.env` 상속이
+  곧 유출 경로였다("출력에 주입하지 않음"은 무관 — 에이전트가 스스로 `echo $API_KEY` 로 읽어 뱉었다).
+  즉 **키-블라인드 체크리스트가 키 유출을 보증하던 상태**다. 체크리스트의 신뢰성 자체가 걸린 항목이라
+  단순 수정이 아니라 **왜 놓쳤는지**(표면 스캔만 봤고 "샌드박스가 읽어서 뱉는" 역방향을 안 봤다)까지 기재한다.
+- §7 자동 강제 절에도 신규 회귀 테스트(`security/sandboxEnv.test.ts`)를 추가한다.
+
+#### ② `backend/.env.example` 에 운영자용 변수 5개 누락
+- 이번 세션에 추가된 것: `LOCK_SCOPE`(XC-SCOPE 롤백 스위치), `SANDBOX_ENV_PASSTHROUGH`(ENV
+  화이트리스트 확장 훅), `BENCH_BUSY_GATE`(실험 전용 — **운영에서 절대 켜지 말 것**).
+- **기존부터 누락돼 있던 것**(이번에 함께 발견): `MAX_CONCURRENT_TURNS`(v2 핵심 비용 제어 노브!),
+  `UPLOAD_DIR`. `.env.example` 이 "단일 출처: src/config.ts" 를 자칭하는데 실제로 불완전했다.
+
+#### ③ `docs/WIREFRAME.md` 4곳이 락을 "샌드박스 단위"로 서술
+- PRD 와 같은 staleness(XC-SCOPE 미반영). 단 사용자 노출 경고 문구("같은 파일 동시 수정 시
+  last-wins")는 **여전히 정확**하므로 UI 텍스트는 건드리지 않고, 동작 서술 절에만 정정 주석을 단다.
+
+#### ④ `docs/DEMO_SCENARIO.md` 사전 준비에 브라우저 설치 단계 누락
+- `npm install` 은 이제 `@playwright/test` 를 가져오지만(이번 세션에 devDependency 선언),
+  **브라우저 바이너리**는 `npx playwright install chromium` 이 따로 필요하다. 클린 환경에서 데모가
+  이 단계 없이는 실패한다.
+
+#### 이상 없음으로 확인된 것
+- `AGENTS.md` ↔ `CLAUDE.md`: 제목/서두 2줄만 의도적으로 다르고 **Ground Rules 본문은 완전 동일** ✓
+- `LICENSE`: MIT, 변경 사유 없음 ✓
+- `PATENT.html`/`PAPER.html`: 정합 미처리로 **이미 PLAN 후속 절에 기록됨**(의도된 보류) ✓
+#### 조치 내역
+- `key-blind.md` — §5 항목을 실제 동작(화이트리스트 기본 거부)으로 고치고, **취약점을 승인했던 이력과
+  왜 놓쳤는지**를 인용 블록으로 남겼다(표면 스캔만 했고 내향 방향 항목이 없었다). **§8 "내향 표면" 신설** —
+  "샌드박스 안에서 키가 읽히는가"를 명시 점검 항목으로 고정하고, 아직 열린 2건(셸 `../` 탈출 · egress)을
+  **`[ ]` deferred 로 정직히 표기**했다. §7 에 신규 회귀 테스트 2건 추가.
+- `.env.example` — 누락 5개 추가(`MAX_CONCURRENT_TURNS`·`UPLOAD_DIR`·`LOCK_SCOPE`·
+  `SANDBOX_ENV_PASSTHROUGH`·`BENCH_BUSY_GATE`). `MAX_CONCURRENT_TURNS` 에는 "N× 토큰 비용의 핵심
+  노브"임을, `SANDBOX_ENV_PASSTHROUGH` 에는 "여기 적어도 비밀은 denylist 로 차단됨"을,
+  `BENCH_BUSY_GATE` 에는 "운영에서 절대 켜지 말 것"을 명시했다.
+- `WIREFRAME.md` — §Δ v2 경계 절에 XC-SCOPE 정정 주석. **사용자 노출 경고 문구는 건드리지 않았다**
+  (`last-wins` 는 여전히 정확 — 락은 쓰기 원자성만 보장).
+- `DEMO_SCENARIO.md` — 사전 준비에 `npx playwright install chromium` 단계 추가.
+- **검증**: `config.ts` 가 읽는 21개 변수 전부 문서화됨(스크립트 대조) · `.env.example` 값을 그대로
+  주입해도 현재 동작과 동일함 실측(`lockScope=file`·`busyGate=false`·`maxTurns=4`) ·
+  keygate 통과(실키 미유출) · 백엔드 36파일/152건 · 프론트 9파일/127건 · typecheck · 빌드 통과.
+- 변경 파일: `docs/checklists/key-blind.md`, `backend/.env.example`, `docs/WIREFRAME.md`,
+  `docs/DEMO_SCENARIO.md`, `docs/IMPLEMENTATION_NOTES.md`.
+
 ### 2026-07-28 · [docs] · 완료 · 세션 최종 마무리 — 상위 문서 정합화(PRD·PLAN) + 잔여 점검
 - **요청(사용자)**: "현재까지 진행한 전체 내용을 다시 한번 확인하고 문제가 없는지 최종 마무리 +
   문서 최신화". (논문 실험 W2·E3·E4 는 사용자 판단으로 **후속 시행**.)
