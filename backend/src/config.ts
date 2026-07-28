@@ -49,6 +49,15 @@ export interface IsolationConfig {
   maxProcsPerSandbox: number;
   /** 네트워크 정책 플래그. 'restricted' | 'open'. 메타에 기록(실제 강제는 범위 외 — 정직히 문서화). */
   networkPolicy: 'restricted' | 'open';
+  /**
+   * XC-SCOPE(2026-07-28) 부수효과 직렬 lock 의 입도.
+   *   'file'(기본)  — 충돌 단위로 직렬화. 서로 **다른 파일**을 만지는 FILE_WRITE/READ 는 병렬.
+   *                   SHELL/PACKAGE/FILE_DELETE 는 여전히 샌드박스 전체 배타(어떤 파일을 만질지
+   *                   알 수 없거나 디렉토리를 지울 수 있으므로).
+   *   'sandbox'     — v2 최초 동작(샌드박스 단위 단일 mutex). 롤백 스위치 겸 실험 대조군.
+   * 안전 보장(동시 쓰기 진입 0)은 두 값에서 동일하고 입도만 다르다. EXPERIMENTS §E2-B 참조.
+   */
+  lockScope: 'file' | 'sandbox';
 }
 
 /**
@@ -116,6 +125,8 @@ export const config: AppConfig = {
     toolTimeoutMs: Number(process.env.TOOL_TIMEOUT_MS) || 30_000,
     maxProcsPerSandbox: Number(process.env.SANDBOX_MAX_PROCS) || 16,
     networkPolicy: process.env.NETWORK_POLICY === 'open' ? 'open' : 'restricted',
+    // XC-SCOPE: 기본 'file'(충돌 단위). LOCK_SCOPE=sandbox 로 v2 최초 동작으로 즉시 롤백 가능.
+    lockScope: process.env.LOCK_SCOPE === 'sandbox' ? 'sandbox' : 'file',
   },
   bench: {
     // 실험 전용 — 기본 OFF. 운영 배포에서 켜지 말 것.

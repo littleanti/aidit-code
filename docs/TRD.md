@@ -594,6 +594,14 @@ v2에서 **추론은 병렬, 부수효과는 직렬**이다. 직렬 경계를 �
 
 - **샌드박스 단위 직렬 lock**: 모든 도구 실행(`toolBridge.runToolIntent` → `toolExec.executeTool`, cwd=`sandboxRoot` 단일)을 **턴 간에도** 단일 직렬 큐로 통과시킨다. v0.1은 `turn.ts`의 `toolChain`(턴 **내** 직렬, turn.ts:160-184)만 있어 서로 다른 턴의 도구가 동시 진입할 수 있다 — v2는 이 lock을 **샌드박스 단위**로 끌어올려 턴 간 동시 파일 쓰기 진입을 0으로 만든다. `executeTool`은 이미 `sandboxId`(=`sandboxRoot`) 키로 per-sandbox proc cap을 받으므로(toolBridge.ts:106-109), 같은 키에 직렬 게이트를 추가하는 형태.
 - **충돌·머지 불필요**: 두 턴이 같은 파일을 써도 lock으로 순차 적용된다(파일을 머지하지 않고 쓰기를 직렬화). 논리적 결과는 **last-wins**(아래 한계 참조).
+- **(XC-SCOPE, 2026-07-28) 직렬 경계를 "샌드박스"에서 "충돌 단위"로 세분화**: `config.isolation.lockScope`(env `LOCK_SCOPE`, 기본 `file`).
+  - `FILE_WRITE`/`FILE_READ` → **경로 단위 배타**(서로 다른 파일은 병렬).
+  - `SHELL`/`PACKAGE` → **샌드박스 전체 배타**. 명령 문자열이 어떤 파일을 만질지 알 수 없다(파이프·변수전개·서브셸).
+  - `FILE_DELETE` → **샌드박스 전체 배타**. 디렉토리를 지울 수 있어 경로 키가 다른 `rm -r src/` 와 `write src/x.py` 가 병렬 진입하면 ENOENT 레이스가 새로 생긴다.
+  - `OTHER`/미지 kind → 배타(fail-safe). 공정성은 샌드박스별 **엄격 FIFO**(추월 금지)로 확보해 SHELL 이 파일 작업 스트림에 굶지 않는다.
+  - 안전 보장(동시 쓰기 진입 0)은 `sandbox`/`file` 두 값에서 동일하며 입도만 다르다. `LOCK_SCOPE=sandbox` 로 v2 최초 동작 즉시 롤백.
+  - **실측: 오늘의 워크로드에서 성능 이득은 0이다**(EXPERIMENTS 부록 XC-SCOPE). 락 보유 시간이 도구 호출 사이클의 극히 일부라 파일 쓰기 경합이 애초에 미미했고, 긴 보유의 원인인 SHELL 은 배타로 남아야 한다. 이 변경은 **컨테이너-per-도구호출**(호출당 200~500ms)을 도입할 때 실질 이득이 나는 선행 조건으로서 유지한다.
+- **(정합 메모)** `PATENT.html`/`PAPER.html` 은 "부수효과를 **샌드박스 단위** 단일 직렬 실행기로 적용"이라 서술한다. XC-SCOPE 는 이를 "**충돌하는** 부수효과를 직렬화"로 일반화한 것이다(보장 동일, 입도만 세분화). 청구항 문구 조정은 별도 판단이 필요해 미처리로 남긴다.
 - **동시성 상한**: `MAX_CONCURRENT_TURNS`(샌드박스당 동시 inflight 턴 수 상한). LLM 비용/부하 제어용. 초과분은 **라운드로빈 공정 큐**로 대기(pi.ts의 `queue`(pi.ts:111)를 이 용도로 재정의). 단일 활성 세션·단일 샌드박스는 유지.
 - **세션 상태**: 단일 IDLE/RUNNING 개념을 **활성 턴 수(count)**로 일반화한다. RUNNING = 활성 턴 ≥1, IDLE 전이 = 활성 턴 0(turn.ts:240의 `isBusy` 가드가 count 기반으로 동작). `session.status` SSE는 동일 enum을 그대로 쓴다(§7).
 - **(v2) opt-in 게이트**: 위 병렬 경로(직렬 lock·턴 멀티플렉싱·동시성 상한 포함)는 `Sandbox.meta.concurrentTurns === true`일 때만 활성화된다. `false`(기본)면 런타임이 v0.1 단일 활성 턴 + FIFO 직렬 경로를 그대로 탄다. 플래그는 `POST /posts`의 `concurrent`로 글 생성 시 1회 설정되며 이후 변경 불가 — 따라서 같은 샌드박스 안에서 직렬/병렬이 섞이지 않는다.

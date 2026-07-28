@@ -66,6 +66,15 @@ const BOTH_TOOLS = process.env.BOTH_TOOLS === '1';
 /** BOTH_TOOLS 일 때 B 의 도구 작업 길이(ms). A 의 L 보다 짧게 둬 락 대기를 관측한다. */
 const B_WORK_MS = Number(process.env.B_WORK_MS) || 2000;
 
+/**
+ * XC-SCOPE 측정 시나리오(`FWRITES=N`): A·B 가 **각자 다른 파일**에 N회씩 write_file 을 한다.
+ * SHELL 은 어느 설정에서도 배타이므로 락 입도 효과가 보이지 않는다 — 파일 쓰기 경합만이
+ * `LOCK_SCOPE=file` vs `sandbox` 를 가르는 시나리오다. SAME_FILE=1 이면 둘이 같은 파일을 써
+ * "충돌하면 여전히 직렬"임을 대조 확인한다.
+ */
+const FWRITES = Number(process.env.FWRITES) || 0;
+const SAME_FILE = process.env.SAME_FILE === '1';
+
 const ALL_CONDITIONS = [
   { key: 'C-FIFO', concurrent: false, busyGate: false },
   { key: 'C-REJECT', concurrent: false, busyGate: true },
@@ -322,6 +331,11 @@ function sleepCmd(ms) {
  * real 모드는 **실행할 명령을 명시**한다(모델은 지연 길이를 통제할 수 없으므로 명령으로 지시).
  */
 function prompt(role, { workMs, tag }) {
+  // XC-SCOPE 시나리오가 켜져 있으면 sleep 대신 파일 쓰기 루프를 지시한다(mock 전용).
+  if (FWRITES > 0 && LLM_MODE === 'mock') {
+    const fpath = SAME_FILE ? 'shared.txt' : `${role}-file.txt`;
+    return `[[bench ttft=100 tok=5 n=6 fwrite=${FWRITES} fpath=${fpath} id=${role}-${tag}]] 파일 작업`;
+  }
   if (LLM_MODE === 'real') {
     if (workMs > 0) {
       return (
@@ -504,7 +518,10 @@ async function main() {
         TOOL_TIMEOUT_MS: '120000', // L=15s sleep 도구가 기본 30s 타임아웃에 걸리지 않도록.
         MAX_CONCURRENT_TURNS: '4',
         // real 모드는 모델이 여러 스텝을 돌 수 있으므로 상한을 넉넉히(데모와 동일 값).
-        AGENT_MAX_STEPS: process.env.AGENT_MAX_STEPS || '14',
+        // FWRITES 시나리오는 write_file 을 N회 돌므로 상한이 N 보다 커야 한다.
+        AGENT_MAX_STEPS: process.env.AGENT_MAX_STEPS || String(Math.max(14, FWRITES + 4)),
+        // XC-SCOPE 조작 변인 — 'file'(기본) vs 'sandbox'(v2 최초 동작).
+        ...(process.env.LOCK_SCOPE ? { LOCK_SCOPE: process.env.LOCK_SCOPE } : {}),
       });
       await waitForPort(`${BASE}/runtime`);
 

@@ -28,7 +28,7 @@ import http from 'node:http';
 const PORT = Number(process.env.MOCK_LLM_PORT) || 8099;
 
 /** 기본값 — 지시자가 없는 호출(자동 인트로 턴 등)도 빠르게 끝나도록 짧게 잡는다. */
-const DEFAULTS = { ttft: 100, tok: 5, n: 12, work: 0, id: 'none' };
+const DEFAULTS = { ttft: 100, tok: 5, n: 12, work: 0, id: 'none', fwrite: 0, fpath: '' };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -47,8 +47,8 @@ function parseDirective(messages) {
     const hit = /\[\[bench([^\]]*)\]\]/.exec(text);
     if (!hit) continue;
     const out = { ...DEFAULTS };
-    for (const [, k, v] of hit[1].matchAll(/(\w+)=([\w.-]+)/g)) {
-      if (k === 'id') out.id = v;
+    for (const [, k, v] of hit[1].matchAll(/(\w+)=([\w./-]+)/g)) {
+      if (k === 'id' || k === 'fpath') out[k] = v;
       else if (k in out) out[k] = Number(v);
     }
     return out;
@@ -64,6 +64,19 @@ function isAfterTool(messages) {
     if (r === 'user') return false;
   }
   return false;
+}
+
+/**
+ * 마지막 user 메시지 이후 되먹여진 tool 결과 개수 — `fwrite=N` 루프의 진행도를 센다.
+ * 모의 서버는 상태를 갖지 않으므로, convo 히스토리를 세어 몇 번째 쓰기인지 판단한다(결정적).
+ */
+function toolResultsSinceUser(messages) {
+  let count = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') break;
+    if (messages[i].role === 'tool') count += 1;
+  }
+  return count;
 }
 
 /** 샌드박스에서 ms 만큼 대기시키는 명령(플랫폼 무관 — node 는 실행 전제). */
@@ -115,6 +128,42 @@ const server = http.createServer(async (req, res) => {
   req.on('close', () => {
     aborted = true;
   });
+
+  // ── 1단계-b: fwrite=N 이면 같은 경로에 write_file 을 N회 연속 방출한다 ──
+  //   XC-SCOPE 측정용: 파일 쓰기는 개별로는 ms 급이지만 도구 호출 1회당 DB row + 버블 + SSE
+  //   왕복이 붙어 수십 ms 를 잡는다. N회 반복하면 **파일 락을 유의미한 시간 동안 보유**하므로,
+  //   서로 다른 경로를 쓰는 두 턴이 병렬화되는지(=락 입도 효과)를 관측할 수 있다.
+  //   SHELL 과 달리 write_file 은 경로 단위 락 대상이라는 점이 이 시나리오의 핵심이다.
+  if (p.fwrite > 0 && p.fpath) {
+    const doneWrites = toolResultsSinceUser(messages);
+    if (doneWrites < p.fwrite) {
+      if (doneWrites === 0) await sleep(p.ttft);
+      if (aborted) return res.end();
+      sseWrite(
+        res,
+        chunk({
+          tool_calls: [
+            {
+              index: 0,
+              id: `call_${p.id}_${doneWrites}`,
+              type: 'function',
+              function: {
+                name: 'write_file',
+                arguments: JSON.stringify({
+                  path: p.fpath,
+                  content: `${p.id} write #${doneWrites}\n${'x'.repeat(256)}\n`,
+                }),
+              },
+            },
+          ],
+        }),
+      );
+      sseWrite(res, chunk({}, 'tool_calls'));
+      res.write('data: [DONE]\n\n');
+      return res.end();
+    }
+    // N회 완료 → 아래 텍스트 단계로 내려간다.
+  }
 
   // ── 1단계: work>0 이고 아직 도구를 안 돌렸으면 bash 도구 호출을 방출 ──
   if (p.work > 0 && !afterTool) {

@@ -19,7 +19,8 @@ import { prisma } from '../db.js';
 import { nextSeq } from '../domain/seq.js';
 import { getAgentRuntime } from './runtime.js';
 import { runToolIntent } from './toolBridge.js';
-import { withSandboxLock } from './sandboxLock.js';
+import { withScopedSandboxLock, normalizeLockPath, type LockScope } from './sandboxLock.js';
+import { config } from '../config.js';
 import { resolveSandboxDir, getSandboxConcurrent } from '../sandbox/service.js';
 import { publishToPost } from '../realtime/publish.js';
 import {
@@ -90,6 +91,29 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
       err instanceof Error ? err.message : String(err),
     );
   }
+}
+
+/**
+ * XC-SCOPE: 도구 의도 → 락 범위 매핑. **안전 우선(모호하면 배타)**.
+ *
+ *   FILE_WRITE / FILE_READ  → 그 경로만 배타(다른 경로와 병렬) ← 이번 이득
+ *   SHELL / PACKAGE         → 샌드박스 전체 배타. 명령이 어떤 파일을 만질지 알 수 없다
+ *                             (파이프·변수전개·서브셸) — 파일 단위로 좁힐 근거가 없다.
+ *   FILE_DELETE             → 샌드박스 전체 배타. 디렉토리를 지울 수 있어, 경로 키가 다른
+ *                             `rm -r src/` 와 `write src/x.py` 가 병렬 진입하면 ENOENT 레이스가
+ *                             **새로** 생긴다. 삭제는 드물어 배타 비용이 거의 없다.
+ *   OTHER / 미지 kind        → 배타(fail-safe).
+ *
+ * `config.isolation.lockScope === 'sandbox'` 면 전부 배타로 되돌린다(v2 최초 동작 = 롤백 스위치).
+ */
+function lockScopeFor(intent: { kind: string; relPath?: string }): LockScope {
+  if (config.isolation.lockScope === 'sandbox') return { mode: 'exclusive' };
+  if (intent.kind === 'FILE_WRITE' || intent.kind === 'FILE_READ') {
+    const rel = intent.relPath ?? '';
+    // 빈 경로는 toolExec 가 invalid path 로 거절하지만, 락 키로도 신뢰할 수 없으니 배타로 둔다.
+    if (rel.trim()) return { mode: 'path', path: normalizeLockPath(rel) };
+  }
+  return { mode: 'exclusive' };
 }
 
 async function runAgentTurnInner(args: RunAgentTurnArgs): Promise<void> {
@@ -223,10 +247,10 @@ async function runAgentTurnInner(args: RunAgentTurnArgs): Promise<void> {
       };
       try {
         if (sandboxRoot) {
-          // XC-SERIAL(M8): 부수효과(파일 쓰기/쉘/도구 실행)를 샌드박스 단위 직렬 lock으로 감싼다.
-          //   턴 내 직렬(toolChain) 위에 '턴 간' 직렬을 격상 — AR-PAR 동시 턴에서도 동시 파일 쓰기 진입 0.
-          //   현재(단일 활성 턴)에는 경합이 없어 동작 불변(no-op).
-          const outcome = await withSandboxLock(session.sandboxId, () =>
+          // XC-SERIAL(M8) + XC-SCOPE: 부수효과를 **충돌 단위**로 직렬화한다.
+          //   턴 내 직렬(toolChain) 위에 '턴 간' 직렬을 격상 — 동시 턴에서도 동시 파일 쓰기 진입 0.
+          //   서로 다른 파일을 만지는 FILE_WRITE/READ 는 병렬 진행한다(E2-B 개선).
+          const outcome = await withScopedSandboxLock(session.sandboxId, lockScopeFor(intent), () =>
             runToolIntent({ postId: post.id, sessionId: session.id, sandboxRoot }, intent),
           );
           ack = { ok: outcome.ok, output: outcome.output, callId: intent.callId };
