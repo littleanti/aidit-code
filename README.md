@@ -51,6 +51,10 @@ A가 길이 L의 작업을 시작하고 **1초 뒤** B가 한 줄 질문을 던�
 핵심은 배수(L=15s에서 63.5배)가 아니라 **기울기 0**입니다 — 남의 작업이 얼마나 길든 내 대기는 늘지 않습니다.
 재현: `cd backend && npm run bench:e2` (모의 LLM 사용 — 실 LLM 키·네트워크 불필요).
 
+**부수효과 안전성도 실측했습니다(E1 ablation)** — 직렬 실행기를 우회하면 같은 파일 동시 쓰기에서
+위반률 **74%**(두 writer 마커가 한 파일에 공존, 3회 모두 최종 파일 오염), 락 적용 시 **0%**입니다.
+즉 이 락은 장식이 아니라 **결과물이 망가지는 것을 막고 있습니다**. 재현: `cd backend && npm run bench:e1`.
+
 > **적용 범위(실측된 한계)**: 위 수치는 동시 질문이 **추론 중심**일 때입니다(설명·리뷰·질의응답 등
 > 샌드박스를 건드리지 않는 작업). 동시 질문이 **모두 파일을 수정**하면 직렬 실행기가 병목이 되어
 > 이점이 **1.07×(결정적)~1.35×(실 LLM)** 로 줄어듭니다 — 부수효과를 직렬화하기로 *선택*한 계약의
@@ -102,6 +106,13 @@ Aidit-Code/
 │   ├── prisma/schema.prisma      # 데이터 모델 SoT (SQLite PoC)
 │   ├── .env.example              # 환경변수 견본
 │   ├── scripts/                  # key-grep-gate(키 유출 게이트), backfill
+│   ├── bench/                    # 측정 하네스 (EXPERIMENTS.md) — 제품 코드 아님
+│   │   ├── mockLlm.mjs           # OpenAI 호환 모의 LLM(결정적 지연 주입)
+│   │   ├── e2-hol.mjs            # E2/E2-B: HOL 지연 분포, 3계약 비교
+│   │   ├── e1-ablation.mjs       # E1: 직렬 실행기 ablation(락 on/off 대조)
+│   │   ├── docker-isolation-poc.mjs # 부록 B: 컨테이너 격리 PoC(실코드 미반영)
+│   │   ├── render-cdf.mjs        # JSONL → CDF SVG
+│   │   └── out/                  # 측정 원자료(커밋됨 — 증거)
 │   └── src/
 │       ├── app.ts                # 앱 팩토리 buildApp() + listen
 │       ├── config.ts             # 환경설정 단일 출처 (redactConfig 키 마스킹)
@@ -119,6 +130,10 @@ Aidit-Code/
 │       │   └── toolExec.ts       # 도구 실행기 + 경로 가드
 │       └── sandbox/              # 프로비저닝, pathGuard, limiter, limits
 ├── frontend/                     # React SPA (독립 npm 패키지)
+│   ├── e2e/                      # 브라우저 자동화 — 제품 코드 아님
+│   │   ├── concurrent-turns.assert.mjs # 단언형 E2E(v2 계약 검증, 실패 시 exit 1)
+│   │   ├── demo-scenario.mjs     # 데모 녹화 오케스트레이션(단언 없음)
+│   │   └── render-hol-clip.mjs   # HOL 대비 클립 렌더링
 │   └── src/
 │       ├── api/                  # fetch 클라이언트(Bearer 인터셉터) + 타입
 │       ├── stream/               # useThreadStream — SSE(EventSource) 구독
@@ -248,6 +263,13 @@ cp .env.example .env    # Windows PowerShell: Copy-Item .env.example .env
 | `SANDBOX_ROOT` / `SANDBOX_MAX_CONCURRENT` / `SANDBOX_MAX_PROCS` | 샌드박스 루트(기본 리포 루트 `.sandboxes/`) / 동시 프로비저닝 / 프로세스 상한 | — / `4` / `16` |
 | `RATE_LIMIT_*` | 쓰기 라우트 레이트리밋 | 윈도우 `60000`ms 등 |
 | `TOOL_TIMEOUT_MS` / `NETWORK_POLICY` | 도구 실행 타임아웃 / 네트워크 정책 플래그 | `30000` / `restricted` |
+| `LOCK_SCOPE` | 부수효과 직렬 lock 입도(XC-SCOPE). `file`=충돌 단위(다른 파일은 병렬) / `sandbox`=v2 최초 동작. 안전 보장은 동일하고 입도만 다름 | `file` |
+| `SANDBOX_ENV_PASSTHROUGH` | 샌드박스 셸에 추가 전달할 ENV 화이트리스트(콤마 구분). **`API_KEY` 등 비밀 이름은 denylist가 이겨 여기 적어도 전달되지 않음** | (미설정) |
+| `BENCH_BUSY_GATE` | **실험 전용** — `1`이면 활성 턴 존재 시 메시지 전송을 409로 거절(EXPERIMENTS §E2 C-REJECT 대조군). **운영에서 절대 켜지 말 것** | `0` |
+
+> 샌드박스 셸 자식은 **부모 `process.env`를 상속하지 않습니다**(TRD §6.3-(d) XC-ENV) — 위
+> `API_KEY`/`JWT_SECRET`/`DATABASE_URL`은 도구 실행 환경에 전달되지 않습니다.
+> 전체 변수 목록과 주석은 [`backend/.env.example`](./backend/.env.example)이 단일 출처입니다.
 
 > **보안 규칙 (TRD §2·§8)**: LLM 키(`API_KEY`/`BASE_URL`/`MODEL`)는 서버 `.env`에만 둡니다. 클라이언트·로그·응답에 절대 노출되지 않으며, `redactConfig()` 마스킹과 `npm run keygate`(키 유출 grep 게이트)로 검증합니다. 프론트엔드에는 `.env`가 없습니다.
 
@@ -323,10 +345,18 @@ npm run clip:hol                # docs/assets/hol-clip.mp4 재생성(20초 HOL �
 ```bash
 cd backend
 DATABASE_URL="file:./bench.db" npx prisma db push --skip-generate   # 최초 1회
-npm run bench:e2                       # 3계약 × L 3종 × 20런 (약 40분)
-REPS=3 LEVELS=2000 npm run bench:e2    # 빠른 스모크
+npm run bench:e2                       # E2: 3계약 × L 3종 × 20런 (약 40분)
+OUT_TAG=smoke REPS=3 LEVELS=2000 npm run bench:e2   # 빠른 스모크(정본 결과 보호)
 npm run bench:e2:render                # → docs/assets/e2-hol-cdf.svg
+
+# E1: 직렬 실행기 ablation — 락을 빼면 파일이 깨지는지 대조
+SIZE_KIB=4096 K=12 WRITERS=4 REPEAT=3 npm run bench:e1
+npm run bench:docker-poc               # 부록 B: 컨테이너 격리 PoC(Docker 필요, 없으면 SKIP)
 ```
+
+`bench:e2`는 `BOTH_TOOLS=1`(두 턴 모두 도구 사용 = E2-B), `LLM=real`(실 LLM 대조),
+`LOCK_SCOPE=sandbox|file`(락 입도 대조) 등을 환경변수로 받습니다. **스모크 실행에는 `OUT_TAG`를
+붙이세요** — 무태그 실행은 커밋된 정본 결과(180행)를 덮어씁니다.
 
 ### 운영 범위 — 이 리포가 하지 **않는** 것
 
