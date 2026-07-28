@@ -53,7 +53,46 @@ export interface RunAgentTurnArgs {
  * 한 에이전트 턴을 실행한다(스트리밍). HTTP 응답을 막지 않도록 호출부에서 await 없이 띄운다.
  * 예외는 내부에서 흡수해 AGENT_REPLY=FAILED + SYSTEM 버블로 표면화한다(throw 하지 않음).
  */
+/**
+ * Prisma "레코드 없음"(P2025) 판정.
+ * 턴이 도는 도중 게시글/메시지/세션 행이 사라진 경우(예: 사용자가 진행 중 게시글 삭제)를
+ * **정상적 조기 종료**로 해석하기 위한 좁은 게이트다. 다른 오류는 절대 삼키지 않는다.
+ */
+function isMissingRecord(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: unknown }).code === 'P2025'
+  );
+}
+
+/**
+ * 턴 오케스트레이션 진입점.
+ *
+ * ★ 최상위 안전망(2026-07-28): 호출부는 `void runAgentTurn(...)`(messages.ts:226) 로
+ *   fire-and-forget 하므로, 여기서 예외가 새어 나가면 **아무도 받지 않는 unhandled rejection**
+ *   이 되어 Node 20+ 기본 정책상 **백엔드 프로세스가 즉시 종료**된다. 실제로 "턴 진행 중
+ *   게시글 삭제" → `turn.ts` 4)단계 `message.update` P2025 → 서버 전체 다운이 재현됐다
+ *   (E2 하네스 180런 중 39런 연쇄 실패로 발견).
+ *
+ *   따라서 이 래퍼는 **어떤 예외도 프로세스를 죽이지 못하게** 흡수한다. 턴 하나의 실패는
+ *   턴 하나의 실패로 끝나야 한다 — messages.ts 주석이 약속한 계약을 실제로 참으로 만든다.
+ */
 export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
+  try {
+    await runAgentTurnInner(args);
+  } catch (err) {
+    // 대상 행이 사라진 경우는 예상된 조기 종료 — 조용히 끝낸다(로그 소음 방지).
+    if (isMissingRecord(err)) return;
+    // 그 외는 삼키되 반드시 흔적을 남긴다(원문에 키가 실릴 수 없는 위치지만 메시지만 기록).
+    console.warn(
+      `[turn] unhandled error in agent turn (post=${args.post.id}, session=${args.session.id}):`,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
+async function runAgentTurnInner(args: RunAgentTurnArgs): Promise<void> {
   // v2 AR-MUX(구현 완료): 샌드박스 meta 의 concurrentTurns(getSandboxConcurrent)가 true 면 send 에
   //   concurrent=true 를 넘겨 turnId 멀티플렉싱 병렬 경로(같은 샌드박스 N개 동시 inflight, 토큰 인터리브)로
   //   분기한다. false/미지정이면 오늘과 100% 동일한 FIFO 단일 활성 턴 직렬 경로. 부수효과(도구)는 두 경로
@@ -231,10 +270,19 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
   }
 
   // ── 4) 최종 본문/상태 영속화 + message.updated ──
-  const finalized = await prisma.message.update({
-    where: { id: reply.id },
-    data: { body: accumulated, status: finalStatus },
-  });
+  //   턴이 도는 사이 게시글이 삭제되면 이 행은 이미 없다(P2025). 그 경우는 실패가 아니라
+  //   "턴 대상이 사라짐" — 남은 영속화(commentCount·SYSTEM 버블·IDLE 전이)를 전부 건너뛰고
+  //   조용히 끝낸다. 삭제된 게시글에 버블을 남기려다 외래키 오류로 2차 실패하는 것도 막는다.
+  let finalized: Message;
+  try {
+    finalized = await prisma.message.update({
+      where: { id: reply.id },
+      data: { body: accumulated, status: finalStatus },
+    });
+  } catch (err) {
+    if (isMissingRecord(err)) return;
+    throw err;
+  }
   publishToPost(
     post.id,
     makeMessageUpdatedEvent({
@@ -266,10 +314,16 @@ export async function runAgentTurn(args: RunAgentTurnArgs): Promise<void> {
   //   IDLE 깜빡임 방지. isBusy 미구현 런타임은 false 로 보아 기존처럼 항상 IDLE 로 복귀.
   const stillBusy = runtime.isBusy?.({ sandboxId: session.sandboxId }) ?? false;
   if (!stillBusy) {
-    await prisma.agentSession.update({
-      where: { id: session.id },
-      data: { status: 'IDLE' },
-    });
+    // 세션 행도 게시글과 함께 사라질 수 있다 — 없으면 전이할 대상이 없으니 조용히 종료.
+    try {
+      await prisma.agentSession.update({
+        where: { id: session.id },
+        data: { status: 'IDLE' },
+      });
+    } catch (err) {
+      if (isMissingRecord(err)) return;
+      throw err;
+    }
     publishToPost(
       post.id,
       makeSessionStatusEvent({
